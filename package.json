@@ -1,5 +1,5 @@
 {
-  "name": "nats-browser",
+  "name": "nats-explorer",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -20,7 +20,6 @@
   },
   "devDependencies": {
     "concurrently": "^9.0.0",
-    "esbuild": "^0.24.0",
-    "@yao-pkg/pkg": "^6.0.0"
+    "esbuild": "^0.24.0"
   }
 }
