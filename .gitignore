@@ -4,4 +4,3 @@ dist/
 *.log
 .vite/
 release/
-pnpm-lock.yaml
