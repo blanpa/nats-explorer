@@ -1,0 +1,16 @@
+title: NATS Explorer
+description: A web-based NATS management tool and message explorer
+remote_theme: just-the-docs/just-the-docs
+url: https://blanpa.github.io
+baseurl: /nats-explorer
+
+color_scheme: dark
+
+aux_links:
+  GitHub: https://github.com/blanpa/nats-explorer
+  Releases: https://github.com/blanpa/nats-explorer/releases
+
+nav_enabled: true
+search_enabled: true
+
+footer_content: "Copyright &copy; 2026 blanpa. MIT License."
