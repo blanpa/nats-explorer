@@ -1,0 +1,15 @@
+services:
+  nats:
+    image: nats:latest
+    ports:
+      - "4230:4222"
+      - "8230:8222"
+    command:
+      - "--jetstream"
+      - "--http_port=8222"
+      - "--store_dir=/data"
+    volumes:
+      - nats-dev-data:/data
+
+volumes:
+  nats-dev-data:

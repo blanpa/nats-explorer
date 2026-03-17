@@ -1,0 +1,9 @@
+services:
+  nats-explorer:
+    build:
+      context: .
+      dockerfile: go-server/Dockerfile
+    ports:
+      - "3002:3002"
+    environment:
+      - PORT=3002
