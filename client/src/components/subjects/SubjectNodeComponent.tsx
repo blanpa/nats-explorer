@@ -78,8 +78,14 @@ export default memo(function SubjectNodeComponent({ node, depth, isExpanded, onT
           {valuePreview.text}
         </span>
       )}
-      {node.rate > 0.5 && (
-        <span className="tree-node-rate">{node.rate.toFixed(1)}/s</span>
+      {node.rate > 0 && (
+        <span className="tree-node-activity" title={`${node.rate.toFixed(1)} msg/s`}>
+          <span
+            className="tree-node-activity-bar"
+            style={{ width: Math.min(node.rate * 4, 40) + 'px', opacity: Math.min(0.3 + node.rate * 0.15, 1) }}
+          />
+          {node.rate > 0.5 && <span className="tree-node-rate">{node.rate.toFixed(1)}/s</span>}
+        </span>
       )}
     </div>
   );

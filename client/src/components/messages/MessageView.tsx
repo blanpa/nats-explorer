@@ -1,12 +1,38 @@
-import { useState } from 'react';
-import { useStore } from '../../store';
+import { useState, useMemo } from 'react';
+import { useStore, NatsMessage } from '../../store';
 import PayloadViewer from './PayloadViewer';
 import ValueChart from './ValueChart';
 import { formatBytes } from '../../lib/utils';
 
+function computeDiff(prev: string, curr: string): { type: 'same' | 'added' | 'removed'; line: string }[] {
+  const prevLines = prev.split('\n');
+  const currLines = curr.split('\n');
+  const result: { type: 'same' | 'added' | 'removed'; line: string }[] = [];
+  const maxLen = Math.max(prevLines.length, currLines.length);
+  for (let i = 0; i < maxLen; i++) {
+    const p = prevLines[i];
+    const c = currLines[i];
+    if (p === c) {
+      result.push({ type: 'same', line: c ?? '' });
+    } else {
+      if (p !== undefined) result.push({ type: 'removed', line: p });
+      if (c !== undefined) result.push({ type: 'added', line: c });
+    }
+  }
+  return result;
+}
+
+function formatPayloadForDiff(msg: NatsMessage): string {
+  if (msg.payloadType === 'json') {
+    try { return JSON.stringify(JSON.parse(msg.payload), null, 2); } catch {}
+  }
+  return msg.payload;
+}
+
 export default function MessageView() {
   const { selectedSubject, messages, selectedMessage, setSelectedMessage } = useStore();
   const [showHistory, setShowHistory] = useState(false);
+  const [showDiff, setShowDiff] = useState(false);
   const [chartField, setChartField] = useState<string | null>(null);
 
   if (!selectedSubject) {
@@ -73,6 +99,14 @@ export default function MessageView() {
               >
                 History ({subjectMessages.length})
               </button>
+              {subjectMessages.length >= 2 && (
+                <button
+                  onClick={() => setShowDiff(!showDiff)}
+                  className={`detail-action-btn ${showDiff ? 'detail-action-btn-active' : ''}`}
+                >
+                  Diff
+                </button>
+              )}
               <button
                 onClick={() => navigator.clipboard.writeText(displayMessage.payload)}
                 className="detail-action-btn"
@@ -87,6 +121,33 @@ export default function MessageView() {
             onFieldSelect={handleFieldSelect}
             selectedField={chartField}
           />
+
+          {/* Diff View */}
+          {showDiff && subjectMessages.length >= 2 && (() => {
+            const currentIdx = selectedMessage ? subjectMessages.indexOf(selectedMessage) : subjectMessages.length - 1;
+            const prevIdx = currentIdx > 0 ? currentIdx - 1 : 0;
+            const prevMsg = subjectMessages[prevIdx];
+            const currMsg = subjectMessages[currentIdx];
+            if (prevMsg === currMsg) return null;
+            const diff = computeDiff(formatPayloadForDiff(prevMsg), formatPayloadForDiff(currMsg));
+            return (
+              <div className="detail-diff">
+                <div className="detail-section-header">
+                  <span>Diff (previous → current)</span>
+                </div>
+                <div className="payload-content" style={{ maxHeight: 300 }}>
+                  <pre className="payload-raw" style={{ margin: 0 }}>
+                    {diff.map((d, i) => (
+                      <div key={i} className={`diff-line diff-${d.type}`}>
+                        <span className="diff-marker">{d.type === 'added' ? '+' : d.type === 'removed' ? '-' : ' '}</span>
+                        {d.line}
+                      </div>
+                    ))}
+                  </pre>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Headers */}
           {displayMessage.headers && Object.keys(displayMessage.headers).length > 0 && (

@@ -143,12 +143,14 @@ export const useStore = create<AppState>((set, get) => ({
 
   // UI
   activeTab: 'subjects',
-  theme: 'dark',
+  theme: (localStorage.getItem('theme') as Theme) || 'dark',
   publishPanelOpen: true,
   setActiveTab: (tab) => set({ activeTab: tab }),
   toggleTheme: () => {
     const newTheme = get().theme === 'dark' ? 'light' : 'dark';
     document.documentElement.classList.toggle('dark', newTheme === 'dark');
+    document.documentElement.classList.toggle('light', newTheme === 'light');
+    localStorage.setItem('theme', newTheme);
     set({ theme: newTheme });
   },
   setPublishPanelOpen: (open) => set({ publishPanelOpen: open }),
