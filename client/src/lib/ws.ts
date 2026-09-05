@@ -1,53 +1,121 @@
-type EventCallback = (data: any, connId?: string) => void;
+import type { WsClientCommand, WsEventOf, WsEventType, WsServerEvent } from 'shared';
+import { useAuth, withToken } from './auth';
 
+type Listener<T extends WsEventType> = (event: WsEventOf<T>) => void;
+type StatusListener = (status: WsStatus) => void;
+
+export type WsStatus = 'connecting' | 'open' | 'closed';
+
+/**
+ * Thin auto-reconnecting websocket client. A manual disconnect suppresses the
+ * reconnect so React StrictMode's double effect does not leave two sockets
+ * behind. Commands sent while the socket is down are dropped; callers
+ * re-issue them on the next 'open' status (see lib/live.ts).
+ */
 class WsClient {
   private ws: WebSocket | null = null;
-  private listeners: Map<string, Set<EventCallback>> = new Map();
+  private listeners = new Map<WsEventType, Set<(event: WsServerEvent) => void>>();
+  private statusListeners = new Set<StatusListener>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelay = 1000;
-  private maxReconnectDelay = 30000;
+  private readonly maxReconnectDelay = 15000;
+  private manuallyClosed = false;
+  status: WsStatus = 'closed';
 
   connect(): void {
-    if (this.ws?.readyState === WebSocket.OPEN) return;
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${protocol}//${window.location.host}/ws`;
-    this.ws = new WebSocket(url);
+    this.manuallyClosed = false;
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) return;
 
-    this.ws.onopen = () => {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(withToken(`${protocol}//${window.location.host}/ws`));
+    this.ws = ws;
+    this.setStatus('connecting');
+
+    ws.onopen = () => {
+      if (this.ws !== ws) return;
       this.reconnectDelay = 1000;
-      this.emit('ws-open', {});
+      this.setStatus('open');
     };
-    this.ws.onmessage = (event) => {
+    ws.onmessage = event => {
+      if (this.ws !== ws) return;
+      let msg: WsServerEvent;
       try {
-        const msg = JSON.parse(event.data);
-        this.emit(msg.type, msg.data, msg.connId);
-      } catch {}
+        msg = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      this.listeners.get(msg.type)?.forEach(cb => cb(msg));
     };
-    this.ws.onclose = () => {
-      this.emit('ws-close', {});
-      this.scheduleReconnect();
+    ws.onclose = ev => {
+      if (this.ws !== ws) return;
+      this.ws = null;
+      this.setStatus('closed');
+      // 1008 = policy violation is what browsers report for a rejected upgrade (401).
+      if (ev.code === 1008 || ev.code === 1006) {
+        // Ask /api/auth whether a token is the reason before hammering reconnects.
+        fetch('/api/auth')
+          .then(r => r.json())
+          .then((info: { required: boolean }) => {
+            if (info.required && !useAuth.getState().token) useAuth.getState().setRequired(true);
+          })
+          .catch(() => undefined);
+      }
+      if (!this.manuallyClosed) this.scheduleReconnect();
     };
-    this.ws.onerror = () => { this.ws?.close(); };
+    ws.onerror = () => {
+      ws.close();
+    };
   }
 
   disconnect(): void {
-    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
-    this.ws?.close();
+    this.manuallyClosed = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    const ws = this.ws;
     this.ws = null;
+    if (ws) {
+      ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
+      ws.close();
+    }
+    this.setStatus('closed');
   }
 
-  send(event: any): void {
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(event));
+  /** Reconnect now (e.g. after a token was entered). */
+  reset(): void {
+    this.disconnect();
+    this.reconnectDelay = 1000;
+    this.connect();
   }
 
-  on(type: string, callback: EventCallback): () => void {
-    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
-    this.listeners.get(type)!.add(callback);
-    return () => this.listeners.get(type)?.delete(callback);
+  send(cmd: WsClientCommand): boolean {
+    if (this.ws?.readyState !== WebSocket.OPEN) return false;
+    this.ws.send(JSON.stringify(cmd));
+    return true;
   }
 
-  private emit(type: string, data: any, connId?: string): void {
-    this.listeners.get(type)?.forEach(cb => cb(data, connId));
+  on<T extends WsEventType>(type: T, callback: Listener<T>): () => void {
+    let set = this.listeners.get(type);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(type, set);
+    }
+    const cb = callback as unknown as (event: WsServerEvent) => void;
+    set.add(cb);
+    return () => set!.delete(cb);
+  }
+
+  onStatus(callback: StatusListener): () => void {
+    this.statusListeners.add(callback);
+    callback(this.status);
+    return () => this.statusListeners.delete(callback);
+  }
+
+  private setStatus(status: WsStatus) {
+    if (this.status === status) return;
+    this.status = status;
+    this.statusListeners.forEach(cb => cb(status));
   }
 
   private scheduleReconnect(): void {

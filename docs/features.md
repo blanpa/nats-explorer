@@ -73,7 +73,7 @@ Manage NATS JetStream Object Stores.
 
 - List object stores with size and chunk info
 - Browse objects within a store
-- Upload objects (base64 encoded)
+- Upload objects (drag & drop or file picker, streamed as raw body)
 - Download objects as files
 - Delete objects
 - Create new stores

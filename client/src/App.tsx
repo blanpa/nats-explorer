@@ -1,88 +1,82 @@
-import { useEffect, useRef, useState } from 'react';
-import { useStore } from './store';
+import { useEffect, useRef } from 'react';
+import { MODULES, useStore } from './store';
 import { wsClient } from './lib/ws';
 import Header from './components/layout/Header';
-import ConnectionPanel from './components/connection/ConnectionPanel';
-import Sidebar from './components/layout/Sidebar';
-import MainContent from './components/layout/MainContent';
+import Rail from './components/layout/Rail';
+import Explorer from './components/layout/Explorer';
+import Detail from './components/layout/Detail';
 import StatusBar from './components/layout/StatusBar';
+import ResizeHandle from './components/layout/ResizeHandle';
+import ConnectionDialog from './components/connection/ConnectionDialog';
+import TokenDialog from './components/connection/TokenDialog';
+import { api } from './lib/api';
+import { useAuth } from './lib/auth';
+import { ConfirmHost } from './components/ui/Dialog';
+import { Toaster } from './components/ui/Toast';
+import { TooltipProvider } from './components/ui/misc';
 
 export default function App() {
-  const { setConnections, setSubjectTree, addMessage } = useStore();
-  const rateRef = useRef({ count: 0, lastReset: Date.now() });
-  const [sidebarWidth, setSidebarWidth] = useState(340);
-  const isDragging = useRef(false);
+  const module = useStore(s => s.module);
+  const hasExplorer = MODULES.find(m => m.id === module)?.hasExplorer ?? true;
+  const counter = useRef(0);
 
   useEffect(() => {
-    wsClient.connect();
+    const { setConnections, setSubjectTree, addMessages, setSubscriptionStats, setWsOnline, setMessagesPerSecond } = useStore.getState();
 
     const unsubs = [
-      wsClient.on('connections', (conns) => {
-        setConnections(conns);
-      }),
-      wsClient.on('subject-tree', (tree, connId) => {
-        if (connId) setSubjectTree(connId, tree);
-      }),
-      wsClient.on('message-batch', (batch, connId) => {
-        if (!connId || !Array.isArray(batch)) return;
-        for (const msg of batch) {
-          addMessage(connId, msg);
-        }
-        rateRef.current.count += batch.length;
-      }),
-      wsClient.on('message', (msg, connId) => {
-        if (connId) addMessage(connId, msg);
-        rateRef.current.count++;
+      wsClient.onStatus(status => setWsOnline(status === 'open')),
+      wsClient.on('connections', e => setConnections(e.data)),
+      wsClient.on('subject-tree', e => setSubjectTree(e.connId, e.data)),
+      wsClient.on('message-batch', e => {
+        addMessages(e.connId, e.data);
+        counter.current += e.data.length;
+        if (e.stats) setSubscriptionStats(e.connId, e.stats);
       }),
     ];
+    api
+      .authInfo()
+      .then(info => {
+        if (info.required && !useAuth.getState().token) useAuth.getState().setRequired(true);
+      })
+      .catch(() => undefined);
+    wsClient.connect();
 
-    const rateInterval = setInterval(() => {
-      const now = Date.now();
-      const elapsed = (now - rateRef.current.lastReset) / 1000;
-      const rate = elapsed > 0 ? rateRef.current.count / elapsed : 0;
-      useStore.setState({ messagesPerSecond: Math.round(rate) });
-      rateRef.current = { count: 0, lastReset: now };
+    // Rate = messages over the last 3 seconds, so bursty publishers read steadily.
+    const samples: number[] = [];
+    const rateTimer = setInterval(() => {
+      samples.push(counter.current);
+      counter.current = 0;
+      if (samples.length > 3) samples.shift();
+      setMessagesPerSecond(Math.round(samples.reduce((a, b) => a + b, 0) / samples.length));
     }, 1000);
 
     return () => {
       unsubs.forEach(u => u());
-      clearInterval(rateInterval);
+      clearInterval(rateTimer);
       wsClient.disconnect();
     };
   }, []);
 
-  const handleMouseDown = () => { isDragging.current = true; };
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDragging.current) return;
-      // Offset by connection panel width (~220px)
-      const panelOffset = 220;
-      setSidebarWidth(Math.max(180, Math.min(500, e.clientX - panelOffset)));
-    };
-    const handleMouseUp = () => { isDragging.current = false; };
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, []);
-
   return (
-    <div className="app-root">
-      <Header />
-      <div className="app-body">
-        <ConnectionPanel />
-        <div className="sidebar" style={{ width: sidebarWidth }}>
-          <Sidebar />
+    <TooltipProvider>
+      <div className="h-full flex flex-col bg-canvas text-fg">
+        <Header />
+        <div className="flex-1 flex min-h-0">
+          <Rail />
+          {hasExplorer && (
+            <>
+              <Explorer />
+              <ResizeHandle />
+            </>
+          )}
+          <Detail />
         </div>
-        <div className="resize-handle" onMouseDown={handleMouseDown} />
-        <div className="main-content">
-          <MainContent />
-        </div>
+        <StatusBar />
       </div>
-      <StatusBar />
-    </div>
+      <ConnectionDialog />
+      <TokenDialog />
+      <ConfirmHost />
+      <Toaster />
+    </TooltipProvider>
   );
 }

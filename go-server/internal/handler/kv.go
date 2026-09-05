@@ -2,29 +2,45 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
+
 	"nats-explorer/internal/connection"
+	"nats-explorer/internal/subscription"
 )
 
 type KVHandler struct {
 	Store *connection.Store
 }
 
-func (h *KVHandler) getJS(r *http.Request) (jetstream.JetStream, error) {
-	connID := getConnID(r)
-	nc, err := h.Store.GetNC(connID)
-	if err != nil { return nil, err }
-	return jetstream.New(nc)
+const kvStreamPrefix = "KV_"
+
+func (h *KVHandler) bucket(w http.ResponseWriter, r *http.Request) (jetstream.KeyValue, context.Context, context.CancelFunc, bool) {
+	js, err := jetStreamFor(h.Store, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return nil, nil, nil, false
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	kv, err := js.KeyValue(ctx, urlParam(r, "bucket"))
+	if err != nil {
+		cancel()
+		writeError(w, http.StatusNotFound, err.Error())
+		return nil, nil, nil, false
+	}
+	return kv, ctx, cancel, true
 }
 
 func (h *KVHandler) ListBuckets(w http.ResponseWriter, r *http.Request) {
-	js, err := h.getJS(r)
-	if err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
+	js, err := jetStreamFor(h.Store, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
@@ -32,75 +48,98 @@ func (h *KVHandler) ListBuckets(w http.ResponseWriter, r *http.Request) {
 	buckets := make([]map[string]interface{}, 0)
 	sl := js.ListStreams(ctx)
 	for si := range sl.Info() {
-		if strings.HasPrefix(si.Config.Name, "KV_") {
-			bucketName := si.Config.Name[3:]
-			buckets = append(buckets, map[string]interface{}{
-				"bucket":            bucketName,
-				"description":       si.Config.Description,
-				"values":            si.State.Msgs,
-				"history":           si.Config.MaxMsgsPerSubject,
-				"ttl":               int64(si.Config.MaxAge),
-				"maxValueSize":      si.Config.MaxMsgSize,
-				"maxBytes":          si.Config.MaxBytes,
-				"storage":           si.Config.Storage.String(),
-				"replicas":          si.Config.Replicas,
-				"bytes":             si.State.Bytes,
-				"backingStreamName": si.Config.Name,
-			})
+		if !strings.HasPrefix(si.Config.Name, kvStreamPrefix) {
+			continue
 		}
+		buckets = append(buckets, map[string]interface{}{
+			"bucket":            strings.TrimPrefix(si.Config.Name, kvStreamPrefix),
+			"description":       si.Config.Description,
+			"values":            si.State.Msgs,
+			"history":           si.Config.MaxMsgsPerSubject,
+			"ttl":               int64(si.Config.MaxAge),
+			"maxValueSize":      si.Config.MaxMsgSize,
+			"maxBytes":          si.Config.MaxBytes,
+			"storage":           si.Config.Storage.String(),
+			"replicas":          si.Config.Replicas,
+			"bytes":             si.State.Bytes,
+			"backingStreamName": si.Config.Name,
+		})
+	}
+	if sl.Err() != nil && len(buckets) == 0 {
+		writeError(w, http.StatusBadGateway, sl.Err().Error())
+		return
 	}
 	writeJSON(w, buckets)
 }
 
 func (h *KVHandler) CreateBucket(w http.ResponseWriter, r *http.Request) {
-	js, err := h.getJS(r)
-	if err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
+	js, err := jetStreamFor(h.Store, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	var cfg struct {
-		Bucket      string `json:"bucket"`
-		Description string `json:"description,omitempty"`
-		History     int64  `json:"history,omitempty"`
-		TTL         int64  `json:"ttl,omitempty"`
+		Bucket       string `json:"bucket"`
+		Description  string `json:"description,omitempty"`
+		History      int64  `json:"history,omitempty"`
+		TTL          int64  `json:"ttl,omitempty"`
 		MaxValueSize int32  `json:"maxValueSize,omitempty"`
-		MaxBytes    int64  `json:"maxBytes,omitempty"`
-		Storage     string `json:"storage,omitempty"`
-		Replicas    int    `json:"replicas,omitempty"`
+		MaxBytes     int64  `json:"maxBytes,omitempty"`
+		Storage      string `json:"storage,omitempty"`
+		Replicas     int    `json:"replicas,omitempty"`
 	}
-	json.NewDecoder(r.Body).Decode(&cfg)
+	if err := decodeBody(r, &cfg); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if cfg.Bucket == "" {
+		writeError(w, http.StatusBadRequest, "bucket required")
+		return
+	}
 
-	kvcfg := jetstream.KeyValueConfig{
-		Bucket:      cfg.Bucket,
-		Description: cfg.Description,
+	kvcfg := jetstream.KeyValueConfig{Bucket: cfg.Bucket, Description: cfg.Description}
+	if cfg.History > 0 && cfg.History <= 64 {
+		kvcfg.History = uint8(cfg.History)
 	}
-	if cfg.History > 0 { kvcfg.History = uint8(cfg.History) }
-	if cfg.TTL > 0 { kvcfg.TTL = time.Duration(cfg.TTL) }
-	if cfg.MaxValueSize > 0 { kvcfg.MaxValueSize = cfg.MaxValueSize }
-	if cfg.MaxBytes > 0 { kvcfg.MaxBytes = cfg.MaxBytes }
-	if cfg.Replicas > 0 { kvcfg.Replicas = cfg.Replicas }
-	if cfg.Storage == "memory" { kvcfg.Storage = jetstream.MemoryStorage }
+	if cfg.TTL > 0 {
+		kvcfg.TTL = time.Duration(cfg.TTL)
+	}
+	if cfg.MaxValueSize > 0 {
+		kvcfg.MaxValueSize = cfg.MaxValueSize
+	}
+	if cfg.MaxBytes > 0 {
+		kvcfg.MaxBytes = cfg.MaxBytes
+	}
+	if cfg.Replicas > 0 {
+		kvcfg.Replicas = cfg.Replicas
+	}
+	if cfg.Storage == "memory" {
+		kvcfg.Storage = jetstream.MemoryStorage
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	_, err = js.CreateKeyValue(ctx, kvcfg)
-	if err != nil { writeError(w, http.StatusInternalServerError, err.Error()); return }
+	if _, err := js.CreateKeyValue(ctx, kvcfg); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
 	writeJSON(w, map[string]interface{}{"success": true, "bucket": cfg.Bucket})
 }
 
 func (h *KVHandler) BucketStatus(w http.ResponseWriter, r *http.Request) {
-	js, err := h.getJS(r)
-	if err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
-
-	bucket := chi_URLParam(r, "bucket")
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	kv, ctx, cancel, ok := h.bucket(w, r)
+	if !ok {
+		return
+	}
 	defer cancel()
 
-	kv, err := js.KeyValue(ctx, bucket)
-	if err != nil { writeError(w, http.StatusNotFound, err.Error()); return }
-
 	status, err := kv.Status(ctx)
-	if err != nil { writeError(w, http.StatusInternalServerError, err.Error()); return }
-
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
 	writeJSON(w, map[string]interface{}{
 		"bucket":  status.Bucket(),
 		"values":  status.Values(),
@@ -111,141 +150,135 @@ func (h *KVHandler) BucketStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *KVHandler) ListKeys(w http.ResponseWriter, r *http.Request) {
-	js, err := h.getJS(r)
-	if err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
-
-	bucket := chi_URLParam(r, "bucket")
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	kv, ctx, cancel, ok := h.bucket(w, r)
+	if !ok {
+		return
+	}
 	defer cancel()
-
-	kv, err := js.KeyValue(ctx, bucket)
-	if err != nil { writeError(w, http.StatusNotFound, err.Error()); return }
 
 	keys, err := kv.Keys(ctx)
 	if err != nil {
-		// Empty bucket
-		writeJSON(w, []string{})
+		if errors.Is(err, jetstream.ErrNoKeysFound) {
+			writeJSON(w, []string{})
+			return
+		}
+		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	writeJSON(w, keys)
 }
 
-func (h *KVHandler) GetEntry(w http.ResponseWriter, r *http.Request) {
-	js, err := h.getJS(r)
-	if err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
+func KvEntryToMap(bucket string, e jetstream.KeyValueEntry) map[string]interface{} {
+	op := "put"
+	switch e.Operation() {
+	case jetstream.KeyValueDelete:
+		op = "delete"
+	case jetstream.KeyValuePurge:
+		op = "purge"
+	}
+	payload, payloadType := subscription.EncodePayload(e.Value())
+	return map[string]interface{}{
+		"bucket":      bucket,
+		"key":         e.Key(),
+		"value":       payload,
+		"payloadType": payloadType,
+		"size":        len(e.Value()),
+		"revision":    e.Revision(),
+		"created":     e.Created().Format(time.RFC3339Nano),
+		"operation":   op,
+	}
+}
 
-	bucket := chi_URLParam(r, "bucket")
-	key := chi_URLParam(r, "key")
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+func (h *KVHandler) GetEntry(w http.ResponseWriter, r *http.Request) {
+	kv, ctx, cancel, ok := h.bucket(w, r)
+	if !ok {
+		return
+	}
 	defer cancel()
 
-	kv, err := js.KeyValue(ctx, bucket)
-	if err != nil { writeError(w, http.StatusNotFound, err.Error()); return }
+	bucket := urlParam(r, "bucket")
+	key := urlParam(r, "key")
 
 	entry, err := kv.Get(ctx, key)
-	if err != nil { writeError(w, http.StatusNotFound, err.Error()); return }
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
 
-	// Get history
 	history := make([]map[string]interface{}, 0)
-	entries, err := kv.History(ctx, key)
-	if err == nil {
+	if entries, err := kv.History(ctx, key); err == nil {
 		for _, e := range entries {
-			op := "put"
-			switch e.Operation() {
-			case jetstream.KeyValueDelete: op = "delete"
-			case jetstream.KeyValuePurge: op = "purge"
-			}
-			history = append(history, map[string]interface{}{
-				"bucket":   bucket,
-				"key":      e.Key(),
-				"value":    string(e.Value()),
-				"revision": e.Revision(),
-				"created":  e.Created().Format(time.RFC3339),
-				"operation": op,
-			})
+			history = append(history, KvEntryToMap(bucket, e))
 		}
 	}
 
-	writeJSON(w, map[string]interface{}{
-		"bucket":   bucket,
-		"key":      entry.Key(),
-		"value":    string(entry.Value()),
-		"revision": entry.Revision(),
-		"created":  entry.Created().Format(time.RFC3339),
-		"operation": "put",
-		"history":  history,
-	})
+	out := KvEntryToMap(bucket, entry)
+	out["history"] = history
+	writeJSON(w, out)
 }
 
 func (h *KVHandler) PutEntry(w http.ResponseWriter, r *http.Request) {
-	js, err := h.getJS(r)
-	if err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
-
-	bucket := chi_URLParam(r, "bucket")
-	key := chi_URLParam(r, "key")
-	var body struct { Value string `json:"value"` }
-	json.NewDecoder(r.Body).Decode(&body)
-
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	kv, ctx, cancel, ok := h.bucket(w, r)
+	if !ok {
+		return
+	}
 	defer cancel()
 
-	kv, err := js.KeyValue(ctx, bucket)
-	if err != nil { writeError(w, http.StatusNotFound, err.Error()); return }
+	var body struct {
+		Value string `json:"value"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
-	rev, err := kv.Put(ctx, key, []byte(body.Value))
-	if err != nil { writeError(w, http.StatusInternalServerError, err.Error()); return }
-
+	rev, err := kv.Put(ctx, urlParam(r, "key"), []byte(body.Value))
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
 	writeJSON(w, map[string]interface{}{"success": true, "revision": rev})
 }
 
 func (h *KVHandler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
-	js, err := h.getJS(r)
-	if err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
-
-	bucket := chi_URLParam(r, "bucket")
-	key := chi_URLParam(r, "key")
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	kv, ctx, cancel, ok := h.bucket(w, r)
+	if !ok {
+		return
+	}
 	defer cancel()
 
-	kv, err := js.KeyValue(ctx, bucket)
-	if err != nil { writeError(w, http.StatusNotFound, err.Error()); return }
-
-	if err := kv.Delete(ctx, key); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	if err := kv.Delete(ctx, urlParam(r, "key")); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	writeJSON(w, map[string]bool{"success": true})
 }
 
 func (h *KVHandler) PurgeKey(w http.ResponseWriter, r *http.Request) {
-	js, err := h.getJS(r)
-	if err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
-
-	bucket := chi_URLParam(r, "bucket")
-	key := chi_URLParam(r, "key")
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	kv, ctx, cancel, ok := h.bucket(w, r)
+	if !ok {
+		return
+	}
 	defer cancel()
 
-	kv, err := js.KeyValue(ctx, bucket)
-	if err != nil { writeError(w, http.StatusNotFound, err.Error()); return }
-
-	if err := kv.Purge(ctx, key); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	if err := kv.Purge(ctx, urlParam(r, "key")); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	writeJSON(w, map[string]bool{"success": true})
 }
 
 func (h *KVHandler) DeleteBucket(w http.ResponseWriter, r *http.Request) {
-	js, err := h.getJS(r)
-	if err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
-
-	bucket := chi_URLParam(r, "bucket")
+	js, err := jetStreamFor(h.Store, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	if err := js.DeleteKeyValue(ctx, bucket); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	if err := js.DeleteKeyValue(ctx, urlParam(r, "bucket")); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	writeJSON(w, map[string]bool{"success": true})

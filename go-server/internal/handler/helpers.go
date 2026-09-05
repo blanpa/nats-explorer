@@ -2,11 +2,14 @@ package handler
 
 import (
 	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/nats-io/nats.go/jetstream"
+
+	"nats-explorer/internal/connection"
 )
 
 func writeJSON(w http.ResponseWriter, data interface{}) {
@@ -22,20 +25,35 @@ func writeError(w http.ResponseWriter, status int, message string) {
 
 func generateID() string {
 	b := make([]byte, 16)
-	rand.Read(b)
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand unavailable: " + err.Error())
+	}
+	return hex.EncodeToString(b)
 }
 
-func chi_URLParam(r *http.Request, key string) string {
+func urlParam(r *http.Request, key string) string {
 	return chi.URLParam(r, key)
 }
 
-func getConnID(r *http.Request) string {
-	connID := r.URL.Query().Get("connId")
-	if connID != "" {
-		return connID
+// connIDFromRequest reads the connection id from the query string (all
+// resource routes) or a route parameter (monitoring/cluster routes).
+func connIDFromRequest(r *http.Request) string {
+	if id := r.URL.Query().Get("connId"); id != "" {
+		return id
 	}
-	// Try body for POST requests - but we can't re-read body
-	// So query param is the primary method
-	return ""
+	return chi.URLParam(r, "connId")
+}
+
+// jetStreamFor resolves the JetStream context for the request's connection.
+func jetStreamFor(store *connection.Store, r *http.Request) (jetstream.JetStream, error) {
+	nc, err := store.GetNC(connIDFromRequest(r))
+	if err != nil {
+		return nil, err
+	}
+	return jetstream.New(nc)
+}
+
+func decodeBody(r *http.Request, v interface{}) error {
+	dec := json.NewDecoder(r.Body)
+	return dec.Decode(v)
 }

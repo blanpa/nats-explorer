@@ -1,129 +1,165 @@
-import { useState, useEffect, useRef } from 'react';
-import { api } from '../../lib/api';
+import { useRef, useState } from 'react';
+import { Archive, Download, FileIcon, RefreshCw, Trash2, Upload } from 'lucide-react';
+import type { ObjInfo } from 'shared';
+import { api, errorMessage } from '../../lib/api';
+import { useAsync } from '../../lib/useAsync';
 import { useStore } from '../../store';
-import { formatBytes } from '../../lib/utils';
-import { Download, Trash2, RefreshCw, FileIcon, Upload } from 'lucide-react';
+import { cn, formatBytes, formatDateTime, formatNumber } from '../../lib/utils';
+import { Button, IconButton } from '../ui/Button';
+import { confirm } from '../ui/Dialog';
+import { EmptyState, ErrorState, LoadingState, PaneHeader } from '../ui/misc';
+import { toast } from '../ui/Toast';
 
 export default function ObjStoreView() {
-  const activeConnId = useStore(s => s.activeConnId);
-  const [storeName, setStoreName] = useState<string | null>(null);
-  const [objects, setObjects] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const connId = useStore(s => s.activeConnId);
+  const store = useStore(s => s.selectedObjStore);
+  const setStore = useStore(s => s.setSelectedObjStore);
+  const bump = useStore(s => s.bumpRefresh);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !storeName || !activeConnId) return;
+  const { data, error, loading, initial, reload } = useAsync<ObjInfo[]>(() => (connId && store ? api.listObjects(connId, store) : null), [connId, store]);
 
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const base64 = (reader.result as string).split(',')[1];
+  if (!store) return <EmptyState icon={Archive} title="Select an object store" description="Object stores hold files and blobs split into chunks. Pick one to upload, download or delete objects." />;
+  if (!connId) return null;
+
+  const upload = async (files: FileList | File[]) => {
+    for (const file of Array.from(files)) {
+      setUploading(file.name);
       try {
-        await api.putObject(activeConnId, storeName, file.name, base64);
-        loadObjects();
-      } catch (err: any) {
-        alert(`Upload failed: ${err.message}`);
+        const res = await api.putObject(connId, store, file);
+        toast.success(`Uploaded ${file.name}`, `${formatBytes(res.size)} in ${res.chunks} chunks`);
+      } catch (err) {
+        toast.error(`Upload of ${file.name} failed`, errorMessage(err));
       }
-    };
-    reader.readAsDataURL(file);
-    // Reset input so the same file can be re-selected
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+    setUploading(null);
+    reload();
+    bump();
   };
 
-  useEffect(() => {
-    const unsub = useStore.subscribe((state: any) => {
-      if (state._selectedObjStore !== storeName) {
-        setStoreName(state._selectedObjStore || null);
-      }
-    });
-    const initial = (useStore.getState() as any)._selectedObjStore;
-    if (initial) setStoreName(initial);
-    return unsub;
-  }, []);
+  // Streamed by the browser straight from the backend; nothing is buffered in memory.
+  const download = (name: string) => {
+    const a = document.createElement('a');
+    a.href = api.getObjectUrl(connId, store, name);
+    a.download = name;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
 
-  useEffect(() => {
-    if (storeName) loadObjects();
-  }, [storeName, activeConnId]);
-
-  const loadObjects = async () => {
-    if (!storeName || !activeConnId) return;
-    setLoading(true);
+  const del = async (name: string) => {
+    if (!(await confirm({ title: `Delete ${name}?`, message: 'The object is removed from the store.', confirmLabel: 'Delete', danger: true }))) return;
     try {
-      const data = await api.listObjects(activeConnId, storeName);
-      setObjects(data.filter((o: any) => !o.deleted));
+      await api.deleteObject(connId, store, name);
+      toast.success(`Deleted ${name}`);
+      reload();
+      bump();
     } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
+      toast.error('Delete failed', errorMessage(err));
     }
   };
 
-  const handleDownload = (name: string) => {
-    if (!storeName || !activeConnId) return;
-    window.open(api.getObjectUrl(activeConnId, storeName, name), '_blank');
-  };
-
-  const handleDelete = async (name: string) => {
-    if (!storeName || !activeConnId || !confirm(`Delete object ${name}?`)) return;
+  const deleteStore = async () => {
+    if (!(await confirm({ title: `Delete object store ${store}?`, message: 'All objects in this store are removed permanently.', confirmLabel: 'Delete store', danger: true }))) return;
     try {
-      await api.deleteObject(activeConnId, storeName, name);
-      loadObjects();
-    } catch (err: any) {
-      alert(err.message);
+      await api.deleteObjectStore(connId, store);
+      toast.success(`Deleted store ${store}`);
+      setStore(null);
+      bump();
+    } catch (err) {
+      toast.error('Delete failed', errorMessage(err));
     }
   };
 
-  if (!storeName) {
-    return (
-      <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-        Select an object store to browse objects
-      </div>
-    );
-  }
+  const objects = data ?? [];
+  const totalSize = objects.reduce((s, o) => s + o.size, 0);
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="px-4 py-2 border-b border-border bg-card/50 flex items-center justify-between">
-        <h2 className="font-medium text-sm">Object Store: {storeName}</h2>
-        <div className="flex items-center gap-1">
-          <button onClick={() => fileInputRef.current?.click()} className="p-1 hover:bg-accent rounded" title="Upload object">
-            <Upload size={14} />
-          </button>
-          <input ref={fileInputRef} type="file" onChange={handleUpload} style={{ display: 'none' }} />
-          <button onClick={loadObjects} className="p-1 hover:bg-accent rounded">
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          </button>
+    <div
+      className="flex flex-col h-full min-h-0 relative"
+      onDragOver={e => {
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={e => {
+        e.preventDefault();
+        setDragging(false);
+        if (e.dataTransfer.files.length) upload(e.dataTransfer.files);
+      }}
+    >
+      <PaneHeader
+        className="h-12"
+        actions={
+          <>
+            <IconButton label="Refresh" loading={loading && !initial} onClick={reload}>
+              <RefreshCw size={14} />
+            </IconButton>
+            <input ref={fileInput} type="file" multiple hidden onChange={e => e.target.files && upload(e.target.files)} />
+            <Button variant="primary" icon={<Upload size={13} />} loading={!!uploading} onClick={() => fileInput.current?.click()}>
+              {uploading ? `Uploading ${uploading}` : 'Upload'}
+            </Button>
+            <Button variant="danger" icon={<Trash2 size={13} />} onClick={deleteStore}>
+              Delete store
+            </Button>
+          </>
+        }
+      >
+        <Archive size={16} className="text-accent shrink-0" />
+        <div className="min-w-0">
+          <div className="text-md font-semibold truncate">{store}</div>
+          <div className="text-xs text-muted">
+            {objects.length.toLocaleString()} objects · {formatBytes(totalSize)}
+          </div>
         </div>
-      </div>
+      </PaneHeader>
 
-      <div className="flex-1 overflow-auto">
-        {objects.length === 0 && !loading ? (
-          <div className="p-4 text-center text-muted-foreground text-sm">No objects</div>
+      <div className="flex-1 min-h-0 overflow-auto">
+        {initial && loading ? (
+          <LoadingState />
+        ) : error ? (
+          <ErrorState title="Cannot list objects" message={error} />
+        ) : objects.length === 0 ? (
+          <EmptyState icon={FileIcon} title="No objects" description="Drop files here or use Upload to add objects to this store." />
         ) : (
-          <table className="w-full text-xs">
+          <table className="table">
             <thead>
-              <tr className="border-b border-border text-muted-foreground">
-                <th className="text-left px-4 py-2 font-medium">Name</th>
-                <th className="text-right px-4 py-2 font-medium">Size</th>
-                <th className="text-right px-4 py-2 font-medium">Chunks</th>
-                <th className="text-right px-4 py-2 font-medium">Modified</th>
-                <th className="text-right px-4 py-2 font-medium">Actions</th>
+              <tr>
+                <th>Name</th>
+                <th>Description</th>
+                <th className="num">Size</th>
+                <th className="num">Chunks</th>
+                <th>Modified</th>
+                <th>Digest</th>
+                <th className="w-20" />
               </tr>
             </thead>
             <tbody>
-              {objects.map(obj => (
-                <tr key={obj.name} className="border-b border-border hover:bg-accent">
-                  <td className="px-4 py-2 flex items-center gap-2">
-                    <FileIcon size={12} className="text-primary" />
-                    {obj.name}
+              {objects.map(o => (
+                <tr key={o.name}>
+                  <td className="font-mono">
+                    <span className="inline-flex items-center gap-2">
+                      <FileIcon size={13} className="text-muted" /> {o.name}
+                    </span>
                   </td>
-                  <td className="text-right px-4 py-2">{formatBytes(obj.size)}</td>
-                  <td className="text-right px-4 py-2">{obj.chunks}</td>
-                  <td className="text-right px-4 py-2">{obj.mtime ? new Date(obj.mtime).toLocaleString() : '-'}</td>
-                  <td className="text-right px-4 py-2">
-                    <div className="flex justify-end gap-1">
-                      <button onClick={() => handleDownload(obj.name)} className="p-1 hover:bg-accent rounded"><Download size={12} /></button>
-                      <button onClick={() => handleDelete(obj.name)} className="p-1 hover:bg-destructive/20 rounded text-destructive"><Trash2 size={12} /></button>
+                  <td className="text-muted max-w-[260px] truncate">{o.description || '–'}</td>
+                  <td className="num">{formatBytes(o.size)}</td>
+                  <td className="num text-muted">{formatNumber(o.chunks)}</td>
+                  <td className="font-mono text-muted">{o.mtime ? formatDateTime(o.mtime) : '–'}</td>
+                  <td className="font-mono text-faint text-xs max-w-[160px] truncate" title={o.digest}>
+                    {o.digest?.replace(/^SHA-256=/, '') || '–'}
+                  </td>
+                  <td>
+                    <div className="flex items-center justify-end gap-0.5">
+                      <IconButton label="Download" size="xs" onClick={() => download(o.name)}>
+                        <Download size={13} />
+                      </IconButton>
+                      <IconButton label="Delete" size="xs" onClick={() => del(o.name)}>
+                        <Trash2 size={13} className="text-danger" />
+                      </IconButton>
                     </div>
                   </td>
                 </tr>
@@ -131,6 +167,10 @@ export default function ObjStoreView() {
             </tbody>
           </table>
         )}
+      </div>
+
+      <div className={cn('absolute inset-2 rounded-lg border-2 border-dashed border-accent bg-accent/10 flex items-center justify-center text-md font-medium text-accent pointer-events-none transition-opacity', dragging ? 'opacity-100' : 'opacity-0')}>
+        Drop files to upload to {store}
       </div>
     </div>
   );

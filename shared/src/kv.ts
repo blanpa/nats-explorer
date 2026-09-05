@@ -1,3 +1,5 @@
+import type { PayloadType } from './messages.js';
+
 export interface KvBucketInfo {
   bucket: string;
   description?: string;
@@ -12,14 +14,18 @@ export interface KvBucketInfo {
   backingStreamName: string;
 }
 
+export type KvOperation = 'put' | 'delete' | 'purge';
+
 export interface KvEntry {
   bucket: string;
   key: string;
   value: string;
+  payloadType: PayloadType;
+  size: number;
   revision: number;
   created: string;
-  operation: 'put' | 'delete' | 'purge';
-  delta?: number;
+  operation: KvOperation;
+  history?: KvEntry[];
 }
 
 export interface KvBucketConfig {

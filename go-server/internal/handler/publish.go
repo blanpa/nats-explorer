@@ -1,51 +1,52 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
-	"unicode/utf8"
 
 	"github.com/nats-io/nats.go"
+
 	"nats-explorer/internal/connection"
+	"nats-explorer/internal/subscription"
 )
 
 type PublishHandler struct {
 	Store *connection.Store
 }
 
-func (h *PublishHandler) Publish(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		ConnID  string              `json:"connId"`
-		Subject string              `json:"subject"`
-		Payload string              `json:"payload"`
-		Headers map[string][]string `json:"headers,omitempty"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+type publishBody struct {
+	ConnID  string              `json:"connId"`
+	Subject string              `json:"subject"`
+	Payload string              `json:"payload"`
+	Headers map[string][]string `json:"headers,omitempty"`
+	Timeout int                 `json:"timeout,omitempty"` // ms, request only
+}
+
+func (h *PublishHandler) parse(w http.ResponseWriter, r *http.Request) (*nats.Conn, *nats.Msg, publishBody, bool) {
+	var body publishBody
+	if err := decodeBody(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
-		return
+		return nil, nil, body, false
 	}
-
-	connID := body.ConnID
-	if connID == "" {
-		connID = r.URL.Query().Get("connId")
+	if body.ConnID == "" {
+		body.ConnID = connIDFromRequest(r)
 	}
-	if connID == "" {
+	if body.ConnID == "" {
 		writeError(w, http.StatusBadRequest, "connId required")
-		return
+		return nil, nil, body, false
+	}
+	if body.Subject == "" {
+		writeError(w, http.StatusBadRequest, "subject required")
+		return nil, nil, body, false
 	}
 
-	nc, err := h.Store.GetNC(connID)
+	nc, err := h.Store.GetNC(body.ConnID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
-		return
+		return nil, nil, body, false
 	}
 
-	msg := &nats.Msg{
-		Subject: body.Subject,
-		Data:    []byte(body.Payload),
-	}
-
+	msg := &nats.Msg{Subject: body.Subject, Data: []byte(body.Payload)}
 	if len(body.Headers) > 0 {
 		msg.Header = make(nats.Header)
 		for k, vals := range body.Headers {
@@ -54,82 +55,63 @@ func (h *PublishHandler) Publish(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	return nc, msg, body, true
+}
 
-	if err := nc.PublishMsg(msg); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+func (h *PublishHandler) Publish(w http.ResponseWriter, r *http.Request) {
+	nc, msg, _, ok := h.parse(w, r)
+	if !ok {
 		return
 	}
-
+	if err := nc.PublishMsg(msg); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if err := nc.FlushTimeout(2 * time.Second); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
 	writeJSON(w, map[string]bool{"success": true})
 }
 
 func (h *PublishHandler) Request(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		ConnID  string              `json:"connId"`
-		Subject string              `json:"subject"`
-		Payload string              `json:"payload"`
-		Timeout int                 `json:"timeout"`
-		Headers map[string][]string `json:"headers,omitempty"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	connID := body.ConnID
-	if connID == "" {
-		connID = r.URL.Query().Get("connId")
-	}
-	if connID == "" {
-		writeError(w, http.StatusBadRequest, "connId required")
-		return
-	}
-
-	nc, err := h.Store.GetNC(connID)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	nc, msg, body, ok := h.parse(w, r)
+	if !ok {
 		return
 	}
 
 	timeout := time.Duration(body.Timeout) * time.Millisecond
-	if timeout == 0 {
+	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-
-	msg := &nats.Msg{
-		Subject: body.Subject,
-		Data:    []byte(body.Payload),
-	}
-	if len(body.Headers) > 0 {
-		msg.Header = make(nats.Header)
-		for k, vals := range body.Headers {
-			for _, v := range vals {
-				msg.Header.Add(k, v)
-			}
-		}
+	if timeout > 60*time.Second {
+		timeout = 60 * time.Second
 	}
 
+	started := time.Now()
 	resp, err := nc.RequestMsg(msg, timeout)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		status := http.StatusBadGateway
+		if err == nats.ErrTimeout {
+			status = http.StatusGatewayTimeout
+		} else if err == nats.ErrNoResponders {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, err.Error())
 		return
 	}
 
-	payload := string(resp.Data)
-	payloadType := "string"
-	if !utf8.Valid(resp.Data) {
-		payloadType = "binary"
-	} else if len(payload) > 0 && (payload[0] == '{' || payload[0] == '[') {
-		if json.Valid(resp.Data) {
-			payloadType = "json"
-		}
-	}
-
-	writeJSON(w, map[string]interface{}{
+	payload, payloadType := subscription.EncodePayload(resp.Data)
+	out := map[string]interface{}{
 		"subject":     resp.Subject,
 		"payload":     payload,
 		"payloadType": payloadType,
 		"reply":       resp.Reply,
 		"size":        len(resp.Data),
-	})
+		"durationMs":  float64(time.Since(started).Microseconds()) / 1000.0,
+	}
+	if len(resp.Header) > 0 {
+		out["headers"] = resp.Header
+	}
+	writeJSON(w, out)
 }

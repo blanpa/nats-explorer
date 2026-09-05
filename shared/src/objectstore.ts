@@ -24,7 +24,6 @@ export interface ObjInfo {
 export interface ObjStoreConfig {
   bucket: string;
   description?: string;
-  maxChunkSize?: number;
   maxBytes?: number;
   storage?: 'file' | 'memory';
   replicas?: number;

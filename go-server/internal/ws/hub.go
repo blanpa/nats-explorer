@@ -2,74 +2,131 @@ package ws
 
 import (
 	"encoding/json"
+	"log"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
 
-const maxBufferedAmount = 64 * 1024
+const (
+	writeWait      = 10 * time.Second
+	pongWait       = 60 * time.Second
+	pingPeriod     = (pongWait * 9) / 10
+	maxMessageSize = 64 * 1024
+	sendBuffer     = 512
+)
 
+// Client is one connected browser tab.
 type Client struct {
 	conn *websocket.Conn
 	send chan []byte
+	done chan struct{}
+	once sync.Once
 }
 
+func (c *Client) close() {
+	c.once.Do(func() { close(c.done) })
+}
+
+// Done is closed when the client goes away.
+func (c *Client) Done() <-chan struct{} { return c.done }
+
+// Hub fans events out to every connected client. Slow clients are skipped
+// rather than blocking the producers.
 type Hub struct {
 	mu      sync.RWMutex
-	clients map[*Client]bool
+	clients map[*Client]struct{}
 
-	OnConnect func(c *Client)
+	// OnMessage is called for every text frame a client sends.
+	OnMessage func(c *Client, data []byte)
+	// OnDisconnect is called once when a client is removed.
+	OnDisconnect func(c *Client)
 }
 
 func NewHub() *Hub {
-	return &Hub{
-		clients: make(map[*Client]bool),
-	}
+	return &Hub{clients: make(map[*Client]struct{})}
 }
 
+// AddClient registers a websocket connection and starts its reader and writer
+// goroutines. The send channel is never closed; the writer exits via done so a
+// concurrent Broadcast can never hit a closed channel.
 func (h *Hub) AddClient(conn *websocket.Conn) *Client {
 	client := &Client{
 		conn: conn,
-		send: make(chan []byte, 256),
+		send: make(chan []byte, sendBuffer),
+		done: make(chan struct{}),
 	}
 
 	h.mu.Lock()
-	h.clients[client] = true
+	h.clients[client] = struct{}{}
 	h.mu.Unlock()
 
-	// Writer goroutine
-	go func() {
-		defer func() {
-			conn.Close()
-			h.mu.Lock()
-			delete(h.clients, client)
-			h.mu.Unlock()
-		}()
-		for msg := range client.send {
-			if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-				return
-			}
-		}
-	}()
-
-	// Reader goroutine (just drain incoming messages)
-	go func() {
-		defer func() {
-			close(client.send)
-		}()
-		for {
-			_, _, err := conn.ReadMessage()
-			if err != nil {
-				return
-			}
-		}
-	}()
-
-	if h.OnConnect != nil {
-		h.OnConnect(client)
-	}
+	go h.writePump(client)
+	go h.readPump(client)
 
 	return client
+}
+
+func (h *Hub) remove(client *Client) {
+	h.mu.Lock()
+	_, present := h.clients[client]
+	delete(h.clients, client)
+	h.mu.Unlock()
+	client.close()
+	client.conn.Close()
+	if present && h.OnDisconnect != nil {
+		h.OnDisconnect(client)
+	}
+}
+
+func (h *Hub) writePump(client *Client) {
+	ticker := time.NewTicker(pingPeriod)
+	defer func() {
+		ticker.Stop()
+		h.remove(client)
+	}()
+
+	for {
+		select {
+		case <-client.done:
+			return
+		case msg := <-client.send:
+			client.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := client.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				return
+			}
+		case <-ticker.C:
+			client.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := client.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
+}
+
+func (h *Hub) readPump(client *Client) {
+	defer h.remove(client)
+
+	client.conn.SetReadLimit(maxMessageSize)
+	client.conn.SetReadDeadline(time.Now().Add(pongWait))
+	client.conn.SetPongHandler(func(string) error {
+		client.conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+
+	for {
+		mt, data, err := client.conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure, websocket.CloseNoStatusReceived) {
+				log.Printf("ws read error: %v", err)
+			}
+			return
+		}
+		if mt == websocket.TextMessage && h.OnMessage != nil {
+			h.OnMessage(client, data)
+		}
+	}
 }
 
 func (h *Hub) SendToClient(c *Client, event interface{}) {
@@ -79,8 +136,8 @@ func (h *Hub) SendToClient(c *Client, event interface{}) {
 	}
 	select {
 	case c.send <- data:
+	case <-c.done:
 	default:
-		// Buffer full, skip
 	}
 }
 
@@ -89,17 +146,7 @@ func (h *Hub) Broadcast(event interface{}) {
 	if err != nil {
 		return
 	}
-
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
-	for client := range h.clients {
-		select {
-		case client.send <- data:
-		default:
-			// Skip slow clients
-		}
-	}
+	h.BroadcastRaw(data)
 }
 
 func (h *Hub) BroadcastRaw(data []byte) {
@@ -108,7 +155,9 @@ func (h *Hub) BroadcastRaw(data []byte) {
 	for client := range h.clients {
 		select {
 		case client.send <- data:
+		case <-client.done:
 		default:
+			// Buffer full: drop for this client rather than stall everyone.
 		}
 	}
 }

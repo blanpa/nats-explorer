@@ -2,5 +2,6 @@ packages:
   - shared
   - client
   - dev
+  - e2e
 allowBuilds:
   esbuild: false

@@ -11,7 +11,7 @@ permissions:
   packages: write
 
 jobs:
-  build-client:
+  client:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,12 +22,17 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-      - run: pnpm install
-      - run: cd client && npx tsc --noEmit
+      - run: pnpm install --frozen-lockfile
       - run: pnpm --filter shared build
+      - run: pnpm --filter client typecheck
+      - run: pnpm --filter client test
       - run: pnpm --filter client build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist
 
-  build-go:
+  go:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,12 +40,60 @@ jobs:
         with:
           go-version: '1.24'
           cache-dependency-path: go-server/go.sum
-      - run: cd go-server && go build ./...
+      - run: cd go-server && test -z "$(gofmt -l .)"
       - run: cd go-server && go vet ./...
+      - run: cd go-server && go test -race -count=1 ./...
+      - run: cd go-server && CGO_ENABLED=0 go build -o ../dist/nats-explorer .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-binary
+          path: dist/nats-explorer
+
+  e2e:
+    needs: [client, go]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: server-binary
+          path: dist
+      - name: Start NATS with JetStream
+        run: docker run -d --name nats -p 4230:4222 -p 8230:8222 nats:latest --jetstream --http_port=8222
+      - name: Start NATS Explorer
+        run: |
+          chmod +x dist/nats-explorer
+          PORT=3002 PUBLIC_PATH=$PWD/client/dist nohup dist/nats-explorer > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:3002/api/auth && break; sleep 1; done
+      - run: pnpm --filter e2e exec playwright install --with-deps chromium
+      - run: pnpm --filter e2e test
+        env:
+          CI: 'true'
+          NE_URL: http://localhost:3002
+          NATS_URL: nats://localhost:4230
+      - if: failure()
+        run: cat server.log
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: e2e/playwright-report
 
   docker:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [build-client, build-go]
+    needs: [client, go, e2e]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

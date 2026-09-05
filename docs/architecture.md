@@ -99,10 +99,15 @@ The frontend maintains a WebSocket connection to the backend for real-time updat
 | Event Type          | Direction | Description                    |
 |:------------------- |:--------- |:------------------------------ |
 | `connections`       | Server    | Updated connection list        |
-| `connection-status` | Server    | Single connection status change|
-| `message-batch`     | Server    | Batch of new messages          |
+| `message-batch`     | Server    | Batch of new messages plus `stats` (received/dropped/subjects). Binary payloads are base64 with `payloadType: "binary"` |
 | `subject-tree`      | Server    | Updated subject tree           |
-| `error`             | Server    | Error notification             |
+| `kv-update`         | Server    | Entry changed in a watched bucket (`connId`, `bucket`, `entry`) |
+| `stream-msg`        | Server    | New message in a tailed stream (`connId`, `stream`, `message`) |
+| `live-error`        | Server    | A watch could not be started |
+| `kv-watch` / `kv-unwatch`       | Client | Start/stop a KV watch (`connId`, `bucket`) |
+| `stream-tail` / `stream-untail` | Client | Start/stop an ordered-consumer tail (`connId`, `stream`) |
+
+Watches are scoped to the websocket client that requested them and are cancelled when it disconnects.
 
 ### Component Organization
 
@@ -145,7 +150,7 @@ All API endpoints are under `/api` and accept `connId` via query parameter or re
 | POST   | `/api/disconnect-all`      | Disconnect all       |
 | GET    | `/api/connections`         | List connections     |
 | GET    | `/api/status`              | Connection status    |
-| GET    | `/api/cluster/{connId}`    | Cluster info         |
+| GET    | `/api/server/{connId}`     | Server info, JetStream probe, client stats (`/api/cluster/{connId}` is an alias) |
 
 ### Messaging
 
@@ -164,8 +169,9 @@ All API endpoints are under `/api` and accept `connId` via query parameter or re
 | PUT    | `/api/streams/{name}`             | Update stream       |
 | DELETE | `/api/streams/{name}`             | Delete stream       |
 | POST   | `/api/streams/{name}/purge`       | Purge stream        |
-| GET    | `/api/streams/{name}/messages`    | Browse messages     |
-| DELETE | `/api/streams/{name}/{seq}`       | Delete message      |
+| GET    | `/api/streams/{name}/messages`    | Page of messages (`startSeq`, `limit`; newest page when `startSeq` is omitted). Fetched with an ephemeral ordered consumer in one round trip, falling back to per-sequence gets. |
+| GET    | `/api/auth`                       | `{required: bool}`; the only route that never needs the token |
+| DELETE | `/api/streams/{name}/messages/{seq}` | Delete message   |
 
 ### Consumers
 
@@ -185,9 +191,9 @@ All API endpoints are under `/api` and accept `connId` via query parameter or re
 | GET    | `/api/kv/{bucket}`                | List keys         |
 | GET    | `/api/kv/{bucket}/status`         | Bucket status     |
 | GET    | `/api/kv/{bucket}/{key}`          | Get entry + history |
-| POST   | `/api/kv/{bucket}/{key}`          | Put entry         |
+| PUT/POST | `/api/kv/{bucket}/{key}`        | Put entry         |
 | DELETE | `/api/kv/{bucket}/{key}`          | Delete entry      |
-| DELETE | `/api/kv/{bucket}/{key}/purge`    | Purge key history |
+| POST   | `/api/kv/{bucket}/{key}/purge`    | Purge key history |
 | DELETE | `/api/kv/{bucket}`                | Delete bucket     |
 
 ### Object Store
@@ -198,7 +204,8 @@ All API endpoints are under `/api` and accept `connId` via query parameter or re
 | POST   | `/api/objectstore`                  | Create store      |
 | GET    | `/api/objectstore/{store}`          | List objects      |
 | GET    | `/api/objectstore/{store}/{name}`   | Download object   |
-| POST   | `/api/objectstore/{store}/{name}`   | Upload object     |
+| PUT/POST | `/api/objectstore/{store}/{name}` | Upload object (raw body, or JSON `{data: base64}`) |
+| DELETE | `/api/objectstore/{store}`          | Delete store      |
 | DELETE | `/api/objectstore/{store}/{name}`   | Delete object     |
 
 ### Monitoring

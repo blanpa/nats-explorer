@@ -1,220 +1,260 @@
-import { useState, useEffect, useRef } from 'react';
-import { useStore } from '../../store';
-import { api } from '../../lib/api';
-import { formatBytes, formatNumber } from '../../lib/utils';
-import { RefreshCw, Activity, Server, Database, Users, Zap } from 'lucide-react';
+import { useState } from 'react';
+import { Activity, RefreshCw, Settings2 } from 'lucide-react';
+import type { Connz, Healthz, Jsz, Routez, Subsz, Varz } from 'shared';
+import { api, errorMessage } from '../../lib/api';
+import { useAsync } from '../../lib/useAsync';
+import { useStore, useActiveConnection } from '../../store';
+import { cn, formatBytes, formatNumber } from '../../lib/utils';
+import { Button, IconButton } from '../ui/Button';
+import { Badge, EmptyState, ErrorState, LoadingState, PaneHeader, SectionTitle, Segmented, StatTile } from '../ui/misc';
+
+interface Snapshot {
+  varz: Varz | null;
+  jsz: Jsz | null;
+  connz: Connz | null;
+  subsz: Subsz | null;
+  healthz: Healthz | null;
+  routez: Routez | null;
+  errors: string[];
+}
+
+async function load(connId: string): Promise<Snapshot> {
+  const [varz, jsz, connz, subsz, healthz, routez] = await Promise.allSettled([
+    api.getMonitoring<Varz>(connId, 'varz'),
+    api.getMonitoring<Jsz>(connId, 'jsz'),
+    api.getMonitoring<Connz>(connId, 'connz', { limit: 200, sort: 'msgs_from' }),
+    api.getMonitoring<Subsz>(connId, 'subsz'),
+    api.getMonitoring<Healthz>(connId, 'healthz'),
+    api.getMonitoring<Routez>(connId, 'routez'),
+  ]);
+  const val = <T,>(r: PromiseSettledResult<T>) => (r.status === 'fulfilled' ? r.value : null);
+  const errors = [varz, jsz, connz, subsz, healthz, routez].filter(r => r.status === 'rejected').map(r => errorMessage((r as PromiseRejectedResult).reason));
+  if (varz.status === 'rejected') throw varz.reason;
+  return { varz: val(varz), jsz: val(jsz), connz: val(connz), subsz: val(subsz), healthz: val(healthz), routez: val(routez), errors };
+}
+
+function UsageBar({ used, max, label }: { used: number; max: number; label: string }) {
+  const pct = max > 0 ? Math.min(100, (used / max) * 100) : 0;
+  return (
+    <div>
+      <div className="flex items-baseline justify-between text-xs mb-1">
+        <span className="text-muted">{label}</span>
+        <span className="font-mono tabular-nums">
+          {formatBytes(used)} <span className="text-faint">/ {max > 0 ? formatBytes(max) : '∞'}</span>
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full bg-field overflow-hidden">
+        <div className={cn('h-full rounded-full', pct > 90 ? 'bg-danger' : pct > 70 ? 'bg-warn' : 'bg-accent')} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+type Interval = 0 | 5000 | 15000;
 
 export default function MonitoringDashboard() {
-  const activeConnId = useStore(s => s.activeConnId);
-  const [varz, setVarz] = useState<any>(null);
-  const [jsz, setJsz] = useState<any>(null);
-  const [connz, setConnz] = useState<any>(null);
-  const [subsz, setSubsz] = useState<any>(null);
-  const [healthz, setHealthz] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [autoRefresh, setAutoRefresh] = useState(true);
-  const intervalRef = useRef<any>(null);
+  const connId = useStore(s => s.activeConnId);
+  const conn = useActiveConnection();
+  const openConnections = useStore(s => s.openConnectionsDialog);
+  const [interval, setInterval_] = useState<Interval>(5000);
+  const { data, error, loading, initial, reload } = useAsync<Snapshot>(() => (connId ? load(connId) : null), [connId], { interval: interval || undefined });
 
-  const loadAll = async () => {
-    if (!activeConnId) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const results = await Promise.allSettled([
-        api.getMonitoring(activeConnId, 'varz'),
-        api.getMonitoring(activeConnId, 'jsz'),
-        api.getMonitoring(activeConnId, 'connz'),
-        api.getMonitoring(activeConnId, 'subsz'),
-        api.getMonitoring(activeConnId, 'healthz'),
-      ]);
-      if (results[0].status === 'fulfilled') setVarz(results[0].value);
-      if (results[1].status === 'fulfilled') setJsz(results[1].value);
-      if (results[2].status === 'fulfilled') setConnz(results[2].value);
-      if (results[3].status === 'fulfilled') setSubsz(results[3].value);
-      if (results[4].status === 'fulfilled') setHealthz(results[4].value);
-      // If all failed, show error
-      if (results.every(r => r.status === 'rejected')) {
-        setError((results[0] as any).reason?.message || 'Failed to fetch monitoring data');
+  if (!connId) return <EmptyState icon={Activity} title="No connection selected" />;
+
+  const header = (
+    <PaneHeader
+      title="Server monitoring"
+      actions={
+        <>
+          <Segmented
+            size="xs"
+            value={String(interval)}
+            onChange={v => setInterval_(Number(v) as Interval)}
+            options={[
+              { id: '0', label: 'Manual' },
+              { id: '5000', label: '5s' },
+              { id: '15000', label: '15s' },
+            ]}
+          />
+          <IconButton label="Refresh" loading={loading && !initial} onClick={reload}>
+            <RefreshCw size={14} />
+          </IconButton>
+        </>
       }
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+    >
+      {conn && <span className="text-sm text-muted truncate">{conn.name}</span>}
+    </PaneHeader>
+  );
 
-  useEffect(() => {
-    loadAll();
-  }, [activeConnId]);
-
-  useEffect(() => {
-    if (autoRefresh) {
-      intervalRef.current = setInterval(loadAll, 5000);
-    }
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [autoRefresh, activeConnId]);
-
-  if (!activeConnId) {
-    return <div className="mon-empty">Select a connection to view monitoring data</div>;
-  }
-
-  if (error && !varz) {
+  if (initial && loading) {
     return (
-      <div className="mon-empty">
-        <p>Cannot fetch monitoring data</p>
-        <p className="mon-error-detail">{error}</p>
-        <p className="mon-error-hint">Set the monitoring port in connection settings (usually 8222)</p>
-        <button onClick={loadAll} className="mon-retry-btn">Retry</button>
+      <div className="flex flex-col h-full">
+        {header}
+        <LoadingState />
       </div>
     );
   }
+  if (error && !data) {
+    return (
+      <div className="flex flex-col h-full">
+        {header}
+        <ErrorState
+          title="Monitoring endpoint not reachable"
+          message={error}
+          action={
+            <div className="flex flex-col items-center gap-2">
+              <p className="text-sm text-muted max-w-[420px]">
+                NATS exposes monitoring over HTTP when started with <code className="text-fg">--http_port 8222</code>. Set the monitoring URL in the connection settings if it runs on a different host or port.
+              </p>
+              <div className="flex gap-2">
+                <Button onClick={reload}>Retry</Button>
+                <Button variant="outline" icon={<Settings2 size={13} />} onClick={() => openConnections(connId)}>
+                  Connection settings
+                </Button>
+              </div>
+            </div>
+          }
+        />
+      </div>
+    );
+  }
+  if (!data?.varz) return null;
+
+  const { varz, jsz, connz, subsz, healthz, routez } = data;
+  const healthy = healthz?.status === 'ok';
 
   return (
-    <div className="mon-dashboard">
-      <div className="mon-toolbar">
-        <span className="mon-toolbar-title">Server Monitoring</span>
-        <label className="mon-auto-refresh">
-          <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} />
-          <span>Auto-refresh (5s)</span>
-        </label>
-        <button onClick={loadAll} className="mon-refresh-btn" disabled={loading}>
-          <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
-        </button>
-      </div>
+    <div className="flex flex-col h-full min-h-0">
+      {header}
+      <div className="flex-1 min-h-0 overflow-auto p-4 flex flex-col gap-5">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <Badge tone={healthz ? (healthy ? 'ok' : 'danger') : 'neutral'}>{healthz ? (healthy ? 'healthy' : healthz.error || healthz.status) : 'health unknown'}</Badge>
+          <span className="font-medium">{varz.server_name}</span>
+          <span className="text-muted font-mono">v{varz.version}</span>
+          <span className="text-muted font-mono">{varz.go}</span>
+          <span className="text-muted">up {varz.uptime}</span>
+          <span className="text-muted font-mono">
+            {varz.host}:{varz.port}
+          </span>
+          {data.errors.length > 0 && <span className="text-xs text-warn ml-auto">{data.errors.length} endpoint(s) failed</span>}
+        </div>
 
-      {/* Health + Server Info Row */}
-      <div className="mon-grid mon-grid-3">
-        {/* Health */}
-        <div className="mon-card">
-          <div className="mon-card-header"><Activity size={12} /> Health</div>
-          <div className={`mon-health-status ${healthz?.status === 'ok' ? 'mon-health-ok' : 'mon-health-err'}`}>
-            {healthz?.status === 'ok' ? 'HEALTHY' : 'UNKNOWN'}
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
+          <StatTile label="CPU" value={`${(varz.cpu ?? 0).toFixed(1)}%`} sub={`${varz.cores} cores`} tone={varz.cpu > 80 ? 'warn' : undefined} />
+          <StatTile label="Memory" value={formatBytes(varz.mem)} />
+          <StatTile label="Connections" value={formatNumber(varz.connections)} sub={`${formatNumber(varz.total_connections)} total`} />
+          <StatTile label="Subscriptions" value={formatNumber(varz.subscriptions)} />
+          <StatTile label="Slow consumers" value={formatNumber(varz.slow_consumers)} tone={varz.slow_consumers > 0 ? 'warn' : undefined} />
+          <StatTile label="Messages in / out" value={`${formatNumber(varz.in_msgs)} / ${formatNumber(varz.out_msgs)}`} className="[&>div:nth-child(2)]:text-md" />
+          <StatTile label="Bytes in / out" value={`${formatBytes(varz.in_bytes)} / ${formatBytes(varz.out_bytes)}`} className="[&>div:nth-child(2)]:text-md" />
+          <StatTile label="Routes / Leaf" value={`${varz.routes ?? 0} / ${varz.leafnodes ?? 0}`} />
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div className="card p-4 flex flex-col gap-3">
+            <SectionTitle className="mb-0">JetStream</SectionTitle>
+            {jsz ? (
+              <>
+                <UsageBar label="Memory" used={jsz.memory} max={jsz.config?.max_memory ?? 0} />
+                <UsageBar label="Storage" used={jsz.storage} max={jsz.config?.max_storage ?? 0} />
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-1">
+                  <StatTile label="Streams" value={formatNumber(jsz.streams)} className="bg-panel" />
+                  <StatTile label="Consumers" value={formatNumber(jsz.consumers)} className="bg-panel" />
+                  <StatTile label="Messages" value={formatNumber(jsz.messages)} sub={formatBytes(jsz.bytes)} className="bg-panel" />
+                  <StatTile label="API calls" value={formatNumber(jsz.api?.total ?? 0)} sub={`${formatNumber(jsz.api?.errors ?? 0)} errors`} tone={(jsz.api?.errors ?? 0) > 0 ? 'warn' : undefined} className="bg-panel" />
+                </div>
+              </>
+            ) : (
+              <div className="text-sm text-muted">JetStream is not enabled on this server.</div>
+            )}
           </div>
-          {varz && (
-            <div className="mon-card-stats">
-              <div className="mon-stat"><span className="mon-stat-label">Version</span><span className="mon-stat-value">{varz.version}</span></div>
-              <div className="mon-stat"><span className="mon-stat-label">Uptime</span><span className="mon-stat-value">{varz.uptime}</span></div>
-              <div className="mon-stat"><span className="mon-stat-label">Server</span><span className="mon-stat-value mon-stat-mono">{varz.server_name?.substring(0, 12)}...</span></div>
-            </div>
-          )}
-        </div>
 
-        {/* System Resources */}
-        <div className="mon-card">
-          <div className="mon-card-header"><Server size={12} /> System</div>
-          {varz && (
-            <div className="mon-card-stats">
-              <div className="mon-stat"><span className="mon-stat-label">CPU</span><span className="mon-stat-value">{(varz.cpu || 0).toFixed(1)}%</span></div>
-              <div className="mon-stat"><span className="mon-stat-label">Memory</span><span className="mon-stat-value">{formatBytes(varz.mem || 0)}</span></div>
-              <div className="mon-stat"><span className="mon-stat-label">Cores</span><span className="mon-stat-value">{varz.cores}</span></div>
-              <div className="mon-stat"><span className="mon-stat-label">Go</span><span className="mon-stat-value">{varz.go}</span></div>
-            </div>
-          )}
-        </div>
-
-        {/* Connections */}
-        <div className="mon-card">
-          <div className="mon-card-header"><Users size={12} /> Connections</div>
-          {varz && (
-            <div className="mon-card-stats">
-              <div className="mon-stat"><span className="mon-stat-label">Current</span><span className="mon-stat-value mon-stat-big">{varz.connections}</span></div>
-              <div className="mon-stat"><span className="mon-stat-label">Total</span><span className="mon-stat-value">{formatNumber(varz.total_connections)}</span></div>
-              <div className="mon-stat"><span className="mon-stat-label">Subscriptions</span><span className="mon-stat-value">{formatNumber(varz.subscriptions)}</span></div>
-              <div className="mon-stat"><span className="mon-stat-label">Slow Consumers</span><span className={`mon-stat-value ${varz.slow_consumers > 0 ? 'mon-stat-warn' : ''}`}>{varz.slow_consumers}</span></div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Traffic Row */}
-      <div className="mon-grid mon-grid-2">
-        <div className="mon-card">
-          <div className="mon-card-header"><Zap size={12} /> Messages</div>
-          {varz && (
-            <div className="mon-card-stats">
-              <div className="mon-stat"><span className="mon-stat-label">In</span><span className="mon-stat-value">{formatNumber(varz.in_msgs)}</span></div>
-              <div className="mon-stat"><span className="mon-stat-label">Out</span><span className="mon-stat-value">{formatNumber(varz.out_msgs)}</span></div>
-              <div className="mon-stat"><span className="mon-stat-label">In Bytes</span><span className="mon-stat-value">{formatBytes(varz.in_bytes)}</span></div>
-              <div className="mon-stat"><span className="mon-stat-label">Out Bytes</span><span className="mon-stat-value">{formatBytes(varz.out_bytes)}</span></div>
-            </div>
-          )}
-        </div>
-
-        {/* JetStream */}
-        <div className="mon-card">
-          <div className="mon-card-header"><Database size={12} /> JetStream</div>
-          {jsz ? (
-            <div className="mon-card-stats">
-              <div className="mon-stat"><span className="mon-stat-label">Memory</span><span className="mon-stat-value">{formatBytes(jsz.memory)} / {formatBytes(jsz.config?.max_memory || 0)}</span></div>
-              <div className="mon-stat"><span className="mon-stat-label">Storage</span><span className="mon-stat-value">{formatBytes(jsz.storage)} / {formatBytes(jsz.config?.max_storage || 0)}</span></div>
-              <div className="mon-stat"><span className="mon-stat-label">Streams</span><span className="mon-stat-value">{jsz.streams || 0}</span></div>
-              <div className="mon-stat"><span className="mon-stat-label">Consumers</span><span className="mon-stat-value">{jsz.consumers || 0}</span></div>
-              <div className="mon-stat"><span className="mon-stat-label">Messages</span><span className="mon-stat-value">{formatNumber(jsz.messages || 0)}</span></div>
-              <div className="mon-stat"><span className="mon-stat-label">API Calls</span><span className="mon-stat-value">{formatNumber(jsz.api?.total || 0)}</span></div>
-              <div className="mon-stat"><span className="mon-stat-label">API Errors</span><span className={`mon-stat-value ${(jsz.api?.errors || 0) > 0 ? 'mon-stat-warn' : ''}`}>{jsz.api?.errors || 0}</span></div>
-            </div>
-          ) : (
-            <div className="mon-card-empty">JetStream not available</div>
-          )}
-        </div>
-      </div>
-
-      {/* Subscriptions */}
-      {subsz && (
-        <div className="mon-card">
-          <div className="mon-card-header">Subscriptions</div>
-          <div className="mon-card-stats mon-stats-horizontal">
-            <div className="mon-stat"><span className="mon-stat-label">Total</span><span className="mon-stat-value">{formatNumber(subsz.num_subscriptions)}</span></div>
-            <div className="mon-stat"><span className="mon-stat-label">Cache Hit</span><span className="mon-stat-value">{((subsz.cache_hit_rate || 0) * 100).toFixed(1)}%</span></div>
-            <div className="mon-stat"><span className="mon-stat-label">Max Fanout</span><span className="mon-stat-value">{subsz.max_fanout || 0}</span></div>
-            <div className="mon-stat"><span className="mon-stat-label">Avg Fanout</span><span className="mon-stat-value">{(subsz.avg_fanout || 0).toFixed(1)}</span></div>
+          <div className="card p-4 flex flex-col gap-3">
+            <SectionTitle className="mb-0">Subscriptions</SectionTitle>
+            {subsz ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <StatTile label="Total" value={formatNumber(subsz.num_subscriptions)} className="bg-panel" />
+                <StatTile label="Cache hit rate" value={`${((subsz.cache_hit_rate ?? 0) * 100).toFixed(1)}%`} className="bg-panel" />
+                <StatTile label="Max fan-out" value={formatNumber(subsz.max_fanout)} className="bg-panel" />
+                <StatTile label="Avg fan-out" value={(subsz.avg_fanout ?? 0).toFixed(2)} className="bg-panel" />
+              </div>
+            ) : (
+              <div className="text-sm text-muted">Not available.</div>
+            )}
+            {routez && routez.num_routes > 0 && (
+              <div className="pt-1">
+                <div className="text-xs text-muted mb-1">Routes · {routez.num_routes}</div>
+                <div className="flex flex-wrap gap-1">
+                  {routez.routes.map(r => (
+                    <Badge key={r.rid} tone="neutral" mono title={r.remote_id}>
+                      {r.remote_name || r.remote_id.slice(0, 8)} · {r.ip}:{r.port}
+                      {r.rtt ? ` · ${r.rtt}` : ''}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
-      )}
 
-      {/* Active Connections Table */}
-      {connz && connz.connections && connz.connections.length > 0 && (
-        <div className="mon-card">
-          <div className="mon-card-header">Active Connections ({connz.num_connections})</div>
-          <div className="mon-table-wrap">
-            <table className="mon-table">
-              <thead>
-                <tr>
-                  <th>CID</th>
-                  <th>Name</th>
-                  <th>IP</th>
-                  <th>Subs</th>
-                  <th>Msgs In</th>
-                  <th>Msgs Out</th>
-                  <th>Data In</th>
-                  <th>Data Out</th>
-                  <th>RTT</th>
-                  <th>Uptime</th>
-                  <th>Lang</th>
-                </tr>
-              </thead>
-              <tbody>
-                {connz.connections.map((c: any) => (
-                  <tr key={c.cid}>
-                    <td>{c.cid}</td>
-                    <td className="mon-td-name">{c.name || '-'}</td>
-                    <td className="mon-td-mono">{c.ip}:{c.port}</td>
-                    <td>{c.subscriptions}</td>
-                    <td>{formatNumber(c.in_msgs)}</td>
-                    <td>{formatNumber(c.out_msgs)}</td>
-                    <td>{formatBytes(c.in_bytes)}</td>
-                    <td>{formatBytes(c.out_bytes)}</td>
-                    <td>{c.rtt || '-'}</td>
-                    <td>{c.uptime}</td>
-                    <td>{c.lang} {c.version}</td>
+        {connz && (
+          <div>
+            <SectionTitle>
+              Client connections · {formatNumber(connz.num_connections)}
+              {connz.total > connz.num_connections ? ` of ${formatNumber(connz.total)}` : ''}
+            </SectionTitle>
+            <div className="card overflow-auto max-h-[480px]">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th className="num">CID</th>
+                    <th>Name</th>
+                    <th>Address</th>
+                    <th>Client</th>
+                    <th className="num">Subs</th>
+                    <th className="num">Msgs in</th>
+                    <th className="num">Msgs out</th>
+                    <th className="num">Bytes in</th>
+                    <th className="num">Bytes out</th>
+                    <th>RTT</th>
+                    <th>Uptime</th>
+                    <th>Idle</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {connz.connections.map(c => (
+                    <tr key={c.cid}>
+                      <td className="num text-muted">{c.cid}</td>
+                      <td className="max-w-[200px] truncate">{c.name || <span className="text-faint">–</span>}</td>
+                      <td className="font-mono text-muted">
+                        {c.ip}:{c.port}
+                      </td>
+                      <td className="text-muted">
+                        {c.lang} {c.version}
+                      </td>
+                      <td className="num">{formatNumber(c.subscriptions)}</td>
+                      <td className="num">{formatNumber(c.in_msgs)}</td>
+                      <td className="num">{formatNumber(c.out_msgs)}</td>
+                      <td className="num">{formatBytes(c.in_bytes)}</td>
+                      <td className="num">{formatBytes(c.out_bytes)}</td>
+                      <td className="font-mono text-muted">{c.rtt || '–'}</td>
+                      <td className="font-mono text-muted">{c.uptime}</td>
+                      <td className="font-mono text-muted">{c.idle}</td>
+                    </tr>
+                  ))}
+                  {connz.connections.length === 0 && (
+                    <tr>
+                      <td colSpan={12} className="text-center text-muted py-4">
+                        No client connections
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

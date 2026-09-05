@@ -16,10 +16,13 @@
     "nats:stop": "pnpm --filter nats-dev stop",
     "nats:seed": "pnpm --filter nats-dev seed",
     "nats:simulate": "pnpm --filter nats-dev simulate",
-    "nats:dev": "pnpm --filter nats-dev dev"
+    "nats:dev": "pnpm --filter nats-dev dev",
+    "test": "pnpm --filter client test && cd go-server && go test ./...",
+    "test:e2e": "pnpm --filter e2e test"
   },
   "devDependencies": {
     "concurrently": "^9.0.0",
     "esbuild": "^0.24.0"
-  }
+  },
+  "packageManager": "pnpm@10.34.5"
 }

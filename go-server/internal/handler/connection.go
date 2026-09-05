@@ -1,8 +1,11 @@
 package handler
 
 import (
-	"encoding/json"
+	"context"
 	"net/http"
+	"time"
+
+	"github.com/nats-io/nats.go/jetstream"
 
 	"nats-explorer/internal/connection"
 )
@@ -15,7 +18,7 @@ type ConnectionHandler struct {
 
 func (h *ConnectionHandler) Connect(w http.ResponseWriter, r *http.Request) {
 	var cfg connection.Config
-	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+	if err := decodeBody(r, &cfg); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -27,9 +30,14 @@ func (h *ConnectionHandler) Connect(w http.ResponseWriter, r *http.Request) {
 		cfg.Name = cfg.Servers[0]
 	}
 
+	// Stop the old subscription manager first if this id is being replaced.
+	if _, exists := h.Store.Get(cfg.ID); exists && h.OnDisconnected != nil {
+		h.OnDisconnected(cfg.ID)
+	}
+
 	managed, err := h.Store.Connect(cfg)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 
@@ -48,7 +56,7 @@ func (h *ConnectionHandler) Disconnect(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ConnID string `json:"connId"`
 	}
-	json.NewDecoder(r.Body).Decode(&body)
+	decodeBody(r, &body)
 	if body.ConnID == "" {
 		writeError(w, http.StatusBadRequest, "connId required")
 		return
@@ -59,7 +67,7 @@ func (h *ConnectionHandler) Disconnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.Store.Disconnect(body.ConnID); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
 	writeJSON(w, map[string]bool{"success": true})
@@ -83,34 +91,74 @@ func (h *ConnectionHandler) Status(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *ConnectionHandler) ClusterInfo(w http.ResponseWriter, r *http.Request) {
-	connID := chi_URLParam(r, "connId")
+// ServerInfo returns what the client library knows about the server it is
+// connected to, plus a JetStream availability probe and client-side stats.
+func (h *ConnectionHandler) ServerInfo(w http.ResponseWriter, r *http.Request) {
+	connID := urlParam(r, "connId")
 	nc, err := h.Store.GetNC(connID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Connection not found")
-		return
-	}
-
-	if !nc.IsConnected() {
-		writeError(w, http.StatusInternalServerError, "Not connected")
+		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
 
 	clientID, _ := nc.GetClientID()
 	clientIP, _ := nc.GetClientIP()
+	rtt, _ := nc.RTT()
+	stats := nc.Stats()
 
-	clusterInfo := map[string]interface{}{
+	jsEnabled := false
+	jsError := ""
+	var jsAccount map[string]interface{}
+	if js, err := jetstream.New(nc); err == nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		if info, err := js.AccountInfo(ctx); err == nil {
+			jsEnabled = true
+			jsAccount = map[string]interface{}{
+				"memory":     info.Memory,
+				"storage":    info.Store,
+				"streams":    info.Streams,
+				"consumers":  info.Consumers,
+				"maxMemory":  info.Limits.MaxMemory,
+				"maxStorage": info.Limits.MaxStore,
+				"domain":     info.Domain,
+			}
+		} else {
+			jsError = err.Error()
+		}
+	}
+
+	clientIPStr := ""
+	if clientIP != nil {
+		clientIPStr = clientIP.String()
+	}
+
+	writeJSON(w, map[string]interface{}{
 		"connId":       connID,
 		"serverName":   nc.ConnectedServerName(),
 		"serverId":     nc.ConnectedServerId(),
 		"version":      nc.ConnectedServerVersion(),
 		"cluster":      nc.ConnectedClusterName(),
+		"url":          nc.ConnectedUrl(),
+		"addr":         nc.ConnectedAddr(),
 		"maxPayload":   nc.MaxPayload(),
 		"clientId":     clientID,
-		"clientIp":     clientIP.String(),
+		"clientIp":     clientIPStr,
 		"headers":      nc.HeadersSupported(),
 		"authRequired": nc.AuthRequired(),
+		"tlsRequired":  nc.TLSRequired(),
+		"rttMs":        float64(rtt.Microseconds()) / 1000.0,
+		"jetstream":    jsEnabled,
+		"jetstreamErr": jsError,
+		"jsAccount":    jsAccount,
 		"connectUrls":  nc.DiscoveredServers(),
-	}
-	writeJSON(w, clusterInfo)
+		"servers":      nc.Servers(),
+		"stats": map[string]interface{}{
+			"inMsgs":     stats.InMsgs,
+			"outMsgs":    stats.OutMsgs,
+			"inBytes":    stats.InBytes,
+			"outBytes":   stats.OutBytes,
+			"reconnects": stats.Reconnects,
+		},
+	})
 }

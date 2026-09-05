@@ -1,197 +1,345 @@
-import { useState, useEffect } from 'react';
-import { api } from '../../lib/api';
+import { useEffect, useMemo, useState } from 'react';
+import { Eraser, KeyRound, Pencil, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react';
+import type { KvEntry } from 'shared';
+import { api, errorMessage } from '../../lib/api';
+import { useAsync } from '../../lib/useAsync';
+import { useLiveWatch } from '../../lib/live';
 import { useStore } from '../../store';
-import { Plus, RefreshCw, Trash2, Edit3, Save, X } from 'lucide-react';
+import { cn, formatBytes, formatDateTime, formatRelative, prettyJson, previewPayload } from '../../lib/utils';
+import { Button, IconButton } from '../ui/Button';
+import { Field, Input, SearchInput, Textarea } from '../ui/Input';
+import { confirm, Dialog } from '../ui/Dialog';
+import { Badge, EmptyState, ErrorState, LoadingState, PaneHeader, SectionTitle } from '../ui/misc';
+import { toast } from '../ui/Toast';
+import PayloadViewer from '../subjects/PayloadViewer';
 
 export default function KvBucketView() {
-  const activeConnId = useStore(s => s.activeConnId);
-  const [bucketName, setBucketName] = useState<string | null>(null);
-  const [keys, setKeys] = useState<string[]>([]);
+  const connId = useStore(s => s.activeConnId);
+  const bucket = useStore(s => s.selectedKvBucket);
+  const setBucket = useStore(s => s.setSelectedKvBucket);
+  const bump = useStore(s => s.bumpRefresh);
+  const [filter, setFilter] = useState('');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [entry, setEntry] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
-  const [showPut, setShowPut] = useState(false);
-  const [putKey, setPutKey] = useState('');
-  const [putValue, setPutValue] = useState('');
-  const [editMode, setEditMode] = useState(false);
+  const [putOpen, setPutOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const keys = useAsync<string[]>(() => (connId && bucket ? api.listKvKeys(connId, bucket) : null), [connId, bucket]);
+  const entry = useAsync<KvEntry>(() => (connId && bucket && selectedKey ? api.getKvEntry(connId, bucket, selectedKey) : null), [connId, bucket, selectedKey]);
 
   useEffect(() => {
-    const unsub = useStore.subscribe((state: any) => {
-      if (state._selectedKvBucket !== bucketName) {
-        setBucketName(state._selectedKvBucket || null);
-        setSelectedKey(null);
-        setEntry(null);
-      }
-    });
-    const initial = (useStore.getState() as any)._selectedKvBucket;
-    if (initial) setBucketName(initial);
-    return unsub;
-  }, []);
+    setSelectedKey(null);
+    setFilter('');
+    setEditing(false);
+  }, [bucket]);
 
-  useEffect(() => {
-    if (bucketName) loadKeys();
-  }, [bucketName, activeConnId]);
+  // Server-side KV watch: keeps the key list and the open entry current without polling.
+  useLiveWatch(
+    connId && bucket ? { type: 'kv-watch', connId, bucket } : null,
+    connId && bucket ? { type: 'kv-unwatch', connId, bucket } : null,
+    'kv-update',
+    e => {
+      if (e.connId !== connId || e.bucket !== bucket) return;
+      keys.setData(prev => {
+        const list = prev ?? [];
+        if (e.entry.operation === 'put') return list.includes(e.entry.key) ? list : [...list, e.entry.key];
+        return list.filter(k => k !== e.entry.key);
+      });
+      if (e.entry.key === selectedKey && !editing) entry.reload();
+    },
+  );
 
-  useEffect(() => {
-    if (bucketName && selectedKey) loadEntry();
-  }, [selectedKey]);
+  const filteredKeys = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    const list = keys.data ?? [];
+    return (q ? list.filter(k => k.toLowerCase().includes(q)) : list).slice().sort();
+  }, [keys.data, filter]);
 
-  const loadKeys = async () => {
-    if (!bucketName || !activeConnId) return;
-    setLoading(true);
+  if (!bucket) return <EmptyState icon={KeyRound} title="Select a bucket" description="Key-Value buckets are backed by JetStream streams. Pick one to browse and edit its keys." />;
+  if (!connId) return null;
+
+  const saveEdit = async () => {
+    if (!selectedKey) return;
+    setSaving(true);
     try {
-      const data = await api.listKvKeys(activeConnId, bucketName);
-      setKeys(data);
+      const res = await api.putKvEntry(connId, bucket, selectedKey, editValue);
+      toast.success(`Saved ${selectedKey} · revision ${res.revision}`);
+      setEditing(false);
+      entry.reload();
+      keys.reload();
     } catch (err) {
-      console.error(err);
+      toast.error('Save failed', errorMessage(err));
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
-  const loadEntry = async () => {
-    if (!bucketName || !selectedKey || !activeConnId) return;
+  const deleteKey = async (key: string) => {
+    if (!(await confirm({ title: `Delete key ${key}?`, message: 'A delete marker is written; the history stays readable until purged.', confirmLabel: 'Delete', danger: true }))) return;
     try {
-      const data = await api.getKvEntry(activeConnId, bucketName, selectedKey);
-      setEntry(data);
+      await api.deleteKvEntry(connId, bucket, key);
+      toast.success(`Deleted ${key}`);
+      if (selectedKey === key) setSelectedKey(null);
+      keys.reload();
     } catch (err) {
-      console.error(err);
+      toast.error('Delete failed', errorMessage(err));
     }
   };
 
-  const handlePut = async () => {
-    if (!bucketName || !putKey || !activeConnId) return;
+  const purgeKey = async (key: string) => {
+    if (!(await confirm({ title: `Purge key ${key}?`, message: 'All revisions of this key are removed permanently.', confirmLabel: 'Purge', danger: true }))) return;
     try {
-      await api.putKvEntry(activeConnId, bucketName, putKey, putValue);
-      setShowPut(false);
-      setPutKey('');
-      setPutValue('');
-      loadKeys();
-    } catch (err: any) {
-      alert(err.message);
+      await api.purgeKvKey(connId, bucket, key);
+      toast.success(`Purged ${key}`);
+      if (selectedKey === key) setSelectedKey(null);
+      keys.reload();
+    } catch (err) {
+      toast.error('Purge failed', errorMessage(err));
     }
   };
 
-  const handleUpdate = async () => {
-    if (!bucketName || !selectedKey || !activeConnId) return;
+  const deleteBucket = async () => {
+    if (!(await confirm({ title: `Delete bucket ${bucket}?`, message: 'The bucket and all keys are removed permanently.', confirmLabel: 'Delete bucket', danger: true }))) return;
     try {
-      await api.putKvEntry(activeConnId, bucketName, selectedKey, editValue);
-      setEditMode(false);
-      loadEntry();
-    } catch (err: any) {
-      alert(err.message);
+      await api.deleteKvBucket(connId, bucket);
+      toast.success(`Deleted bucket ${bucket}`);
+      setBucket(null);
+      bump();
+    } catch (err) {
+      toast.error('Delete failed', errorMessage(err));
     }
   };
 
-  const handleDelete = async (key: string) => {
-    if (!bucketName || !activeConnId || !confirm(`Delete key ${key}?`)) return;
-    try {
-      await api.deleteKvEntry(activeConnId, bucketName, key);
-      if (selectedKey === key) { setSelectedKey(null); setEntry(null); }
-      loadKeys();
-    } catch (err: any) {
-      alert(err.message);
-    }
-  };
-
-  if (!bucketName) {
-    return (
-      <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-        Select a KV bucket to browse keys
-      </div>
-    );
-  }
+  const e = entry.data;
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="px-4 py-2 border-b border-border bg-card/50 flex items-center justify-between">
-        <h2 className="font-medium text-sm">KV: {bucketName}</h2>
-        <div className="flex gap-1">
-          <button onClick={loadKeys} className="p-1 hover:bg-accent rounded"><RefreshCw size={14} /></button>
-          <button onClick={() => setShowPut(!showPut)} className="p-1 hover:bg-accent rounded"><Plus size={14} /></button>
+    <div className="flex flex-col h-full min-h-0">
+      <PaneHeader
+        className="h-12"
+        actions={
+          <>
+            <IconButton label="Refresh keys" loading={keys.loading && !keys.initial} onClick={() => { keys.reload(); entry.reload(); }}>
+              <RefreshCw size={14} />
+            </IconButton>
+            <Button variant="primary" icon={<Plus size={13} />} onClick={() => setPutOpen(true)}>
+              Put key
+            </Button>
+            <Button variant="danger" icon={<Trash2 size={13} />} onClick={deleteBucket}>
+              Delete bucket
+            </Button>
+          </>
+        }
+      >
+        <KeyRound size={16} className="text-accent shrink-0" />
+        <div className="min-w-0">
+          <div className="text-md font-semibold truncate">{bucket}</div>
+          <div className="text-xs text-muted flex items-center gap-1.5">
+            {keys.data ? `${keys.data.length.toLocaleString()} keys` : '…'}
+            <span className="status-dot bg-ok animate-pulse-dot !w-1.5 !h-1.5" title="Live: changes are pushed from the server" />
+            <span className="text-faint">live</span>
+          </div>
         </div>
-      </div>
+      </PaneHeader>
 
-      {showPut && (
-        <div className="px-4 py-2 border-b border-border bg-muted space-y-2">
-          <input value={putKey} onChange={e => setPutKey(e.target.value)} placeholder="Key" className="w-full px-2 py-1 bg-background border border-input rounded text-xs font-mono" />
-          <textarea value={putValue} onChange={e => setPutValue(e.target.value)} placeholder="Value" rows={3} className="w-full px-2 py-1 bg-background border border-input rounded text-xs font-mono" />
-          <button onClick={handlePut} disabled={!putKey} className="px-3 py-1 bg-primary text-primary-foreground text-xs rounded disabled:opacity-50">Put</button>
+      <div className="flex-1 min-h-0 flex">
+        <div className="w-80 shrink-0 border-r border-line flex flex-col min-h-0">
+          <div className="px-2 py-2 border-b border-line">
+            <SearchInput value={filter} onChange={ev => setFilter(ev.target.value)} placeholder="Filter keys…" />
+          </div>
+          <div className="flex-1 min-h-0 overflow-auto">
+            {keys.initial && keys.loading ? (
+              <LoadingState />
+            ) : keys.error ? (
+              <ErrorState title="Cannot list keys" message={keys.error} />
+            ) : filteredKeys.length === 0 ? (
+              <EmptyState compact title={filter ? 'No matching keys' : 'Bucket is empty'} />
+            ) : (
+              filteredKeys.map(k => (
+                <div key={k} className={cn('list-row group py-1 font-mono', selectedKey === k && 'list-row-active')} onClick={() => setSelectedKey(k)}>
+                  <span className="truncate flex-1">{k}</span>
+                  <IconButton
+                    label="Delete key"
+                    size="xs"
+                    className="opacity-0 group-hover:opacity-100"
+                    onClick={ev => {
+                      ev.stopPropagation();
+                      deleteKey(k);
+                    }}
+                  >
+                    <Trash2 size={12} className="text-danger" />
+                  </IconButton>
+                </div>
+              ))
+            )}
+          </div>
         </div>
-      )}
 
-      <div className="flex-1 flex overflow-hidden">
-        <div className="w-1/3 border-r border-border overflow-auto">
-          {keys.map(key => (
-            <div
-              key={key}
-              onClick={() => setSelectedKey(key)}
-              className={`px-3 py-1.5 text-xs cursor-pointer hover:bg-accent border-b border-border flex items-center justify-between group ${
-                selectedKey === key ? 'bg-accent' : ''
-              }`}
-            >
-              <span className="font-mono truncate">{key}</span>
-              <button onClick={(e) => { e.stopPropagation(); handleDelete(key); }} className="p-0.5 hover:bg-destructive/20 rounded text-destructive opacity-0 group-hover:opacity-100">
-                <Trash2 size={10} />
-              </button>
-            </div>
-          ))}
-          {keys.length === 0 && !loading && <div className="p-4 text-xs text-muted-foreground text-center">No keys</div>}
-        </div>
-
-        <div className="flex-1 overflow-auto p-4">
-          {entry ? (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="font-mono text-sm font-medium">{entry.key}</h3>
-                <div className="flex gap-1">
-                  {!editMode ? (
-                    <button onClick={() => { setEditMode(true); setEditValue(entry.value); }} className="p-1 hover:bg-accent rounded"><Edit3 size={14} /></button>
+        <div className="flex-1 min-w-0 min-h-0 overflow-auto p-4">
+          {!selectedKey ? (
+            <EmptyState compact title="Select a key" description="The current value, its revision and the full history are shown here." />
+          ) : entry.initial && entry.loading ? (
+            <LoadingState />
+          ) : entry.error ? (
+            <ErrorState title={`Cannot load ${selectedKey}`} message={entry.error} />
+          ) : e ? (
+            <div className="flex flex-col gap-4 max-w-[1100px]">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-mono text-md font-semibold break-all">{e.key}</span>
+                <Badge tone="neutral">rev {e.revision}</Badge>
+                <Badge tone="neutral">{formatBytes(e.size)}</Badge>
+                <span className="text-xs text-muted" title={formatDateTime(e.created)}>
+                  updated {formatRelative(e.created)}
+                </span>
+                <div className="ml-auto flex items-center gap-1">
+                  {editing ? (
+                    <>
+                      <Button variant="ghost" icon={<X size={13} />} onClick={() => setEditing(false)}>
+                        Cancel
+                      </Button>
+                      <Button variant="primary" icon={<Save size={13} />} loading={saving} onClick={saveEdit}>
+                        Save
+                      </Button>
+                    </>
                   ) : (
                     <>
-                      <button onClick={handleUpdate} className="p-1 hover:bg-accent rounded text-green-500"><Save size={14} /></button>
-                      <button onClick={() => setEditMode(false)} className="p-1 hover:bg-accent rounded"><X size={14} /></button>
+                      <Button
+                        variant="outline"
+                        icon={<Pencil size={13} />}
+                        disabled={e.payloadType === 'binary'}
+                        onClick={() => {
+                          setEditValue(e.payloadType === 'json' ? prettyJson(e.value) : e.value);
+                          setEditing(true);
+                        }}
+                      >
+                        Edit
+                      </Button>
+                      <Button variant="outline" icon={<Eraser size={13} />} onClick={() => purgeKey(e.key)}>
+                        Purge
+                      </Button>
+                      <Button variant="danger" icon={<Trash2 size={13} />} onClick={() => deleteKey(e.key)}>
+                        Delete
+                      </Button>
                     </>
                   )}
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div><span className="text-muted-foreground">Revision:</span> {entry.revision}</div>
-                <div><span className="text-muted-foreground">Created:</span> {new Date(entry.created).toLocaleString()}</div>
-              </div>
-              {editMode ? (
-                <textarea value={editValue} onChange={e => setEditValue(e.target.value)} rows={10} className="w-full px-3 py-2 bg-background border border-input rounded-md text-xs font-mono" />
+
+              {editing ? (
+                <Textarea rows={14} value={editValue} onChange={ev => setEditValue(ev.target.value)} autoFocus />
               ) : (
-                <pre className="bg-muted rounded-md p-3 text-xs font-mono whitespace-pre-wrap overflow-auto max-h-64">
-                  {(() => { try { return JSON.stringify(JSON.parse(entry.value), null, 2); } catch { return entry.value; } })()}
-                </pre>
+                <PayloadViewer payload={e.value} type={e.payloadType} size={e.size} maxHeight={420} />
               )}
-              {entry.history && entry.history.length > 1 && (
+
+              {e.history && e.history.length > 0 && (
                 <div>
-                  <h4 className="text-xs font-medium text-muted-foreground uppercase mb-2">History</h4>
-                  <div className="space-y-1">
-                    {entry.history.map((h: any, i: number) => (
-                      <div key={i} className="bg-muted rounded p-2 text-xs">
-                        <div className="flex justify-between text-muted-foreground">
-                          <span>Rev: {h.revision}</span>
-                          <span>{h.operation}</span>
-                          <span>{new Date(h.created).toLocaleString()}</span>
-                        </div>
-                        <pre className="font-mono mt-1 whitespace-pre-wrap">{h.value?.substring(0, 200)}</pre>
-                      </div>
-                    ))}
+                  <SectionTitle>History · {e.history.length} revisions</SectionTitle>
+                  <div className="card overflow-hidden">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th className="num">Rev</th>
+                          <th>Operation</th>
+                          <th>Time</th>
+                          <th>Value</th>
+                          <th className="num">Size</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...e.history].reverse().map(h => {
+                          const p = previewPayload(h.value, h.payloadType, 100);
+                          return (
+                            <tr key={h.revision} className={h.revision === e.revision ? 'bg-accent/5' : ''}>
+                              <td className="num">{h.revision}</td>
+                              <td>
+                                <Badge tone={h.operation === 'put' ? 'ok' : h.operation === 'delete' ? 'warn' : 'danger'}>{h.operation}</Badge>
+                              </td>
+                              <td className="font-mono text-muted">{formatDateTime(h.created)}</td>
+                              <td className="font-mono max-w-[480px] truncate text-muted">{h.operation === 'put' ? p.text : '–'}</td>
+                              <td className="num text-muted">{formatBytes(h.size)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
             </div>
-          ) : (
-            <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-              Select a key to view its value
-            </div>
-          )}
+          ) : null}
         </div>
       </div>
+
+      {putOpen && (
+        <PutKeyDialog
+          connId={connId}
+          bucket={bucket}
+          onClose={() => setPutOpen(false)}
+          onSaved={key => {
+            setPutOpen(false);
+            keys.reload();
+            setSelectedKey(key);
+            if (selectedKey === key) entry.reload();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function PutKeyDialog({ connId, bucket, onClose, onSaved }: { connId: string; bucket: string; onClose: () => void; onSaved: (key: string) => void }) {
+  const [key, setKey] = useState('');
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const valid = key.trim().length > 0 && !/\s/.test(key);
+
+  const submit = async () => {
+    if (!valid) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api.putKvEntry(connId, bucket, key.trim(), value);
+      toast.success(`Put ${key.trim()} · revision ${res.revision}`);
+      onSaved(key.trim());
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open
+      onOpenChange={o => !o && onClose()}
+      title={`Put key in ${bucket}`}
+      footer={
+        <>
+          {error && <span className="mr-auto text-sm text-danger font-mono truncate">{error}</span>}
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" loading={busy} disabled={!valid} onClick={submit}>
+            Put
+          </Button>
+        </>
+      }
+    >
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={ev => {
+          ev.preventDefault();
+          submit();
+        }}
+      >
+        <Field label="Key" hint="Dots create a hierarchy, e.g. config.db.host" required>
+          <Input mono value={key} onChange={ev => setKey(ev.target.value)} autoFocus />
+        </Field>
+        <Field label="Value">
+          <Textarea rows={8} value={value} onChange={ev => setValue(ev.target.value)} placeholder='{"enabled": true}' />
+        </Field>
+      </form>
+    </Dialog>
   );
 }

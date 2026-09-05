@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/nats-io/nats.go"
 )
 
-var colors = []string{"#4EC9B0", "#569cd6", "#ce9178", "#b5cea8", "#d4d4aa", "#c586c0", "#9cdcfe", "#dcdcaa"}
+var colors = []string{"#2ec4a5", "#5aa9ff", "#e8a06b", "#a7d68b", "#c99cff", "#f5b53f", "#7fd3e6", "#f28fb1"}
 
 type Config struct {
 	ID             string   `json:"id"`
@@ -26,52 +27,115 @@ type Config struct {
 	MonitoringURL  string   `json:"monitoringUrl,omitempty"`
 }
 
+// Status is what the browser sees for every managed connection.
 type Status struct {
 	ID            string   `json:"id"`
 	Name          string   `json:"name"`
 	Connected     bool     `json:"connected"`
+	Reconnecting  bool     `json:"reconnecting"`
 	Server        string   `json:"server,omitempty"`
 	Color         string   `json:"color"`
 	Servers       []string `json:"servers,omitempty"`
 	Subscriptions []string `json:"subscriptions,omitempty"`
+	LastError     string   `json:"lastError,omitempty"`
+	Reconnects    uint64   `json:"reconnects"`
+	ConnectedAt   int64    `json:"connectedAt,omitempty"`
 }
 
 type Managed struct {
-	ID     string
-	Config Config
-	NC     *nats.Conn
-	Color  string
+	ID          string
+	Config      Config
+	NC          *nats.Conn
+	Color       string
+	ConnectedAt time.Time
+
+	mu        sync.Mutex
+	lastError string
+}
+
+func (m *Managed) setError(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err != nil {
+		m.lastError = err.Error()
+	} else {
+		m.lastError = ""
+	}
+}
+
+func (m *Managed) status() Status {
+	m.mu.Lock()
+	lastErr := m.lastError
+	m.mu.Unlock()
+
+	nc := m.NC
+	st := Status{
+		ID:            m.ID,
+		Name:          m.Config.Name,
+		Color:         m.Color,
+		Servers:       m.Config.Servers,
+		Subscriptions: m.Config.Subscriptions,
+		LastError:     lastErr,
+	}
+	if len(st.Subscriptions) == 0 {
+		st.Subscriptions = []string{">"}
+	}
+	if nc == nil {
+		return st
+	}
+	st.Connected = nc.IsConnected()
+	st.Reconnecting = nc.IsReconnecting()
+	st.Reconnects = nc.Stats().Reconnects
+	if st.Connected {
+		st.Server = nc.ConnectedUrl()
+		st.ConnectedAt = m.ConnectedAt.UnixMilli()
+	}
+	return st
 }
 
 type Store struct {
 	mu          sync.RWMutex
 	connections map[string]*Managed
 	colorIdx    int
-	onChange    func() // called when connections change
+	onChange    func()
 }
 
 func NewStore() *Store {
-	return &Store{
-		connections: make(map[string]*Managed),
-	}
+	return &Store{connections: make(map[string]*Managed)}
 }
 
+// SetOnChange registers a callback fired whenever a connection is added,
+// removed, or changes its NATS-level state (disconnect, reconnect, close).
 func (s *Store) SetOnChange(fn func()) {
 	s.onChange = fn
 }
 
-func (s *Store) Connect(cfg Config) (*Managed, error) {
-	s.mu.Lock()
-	// Disconnect existing with same ID
-	if old, ok := s.connections[cfg.ID]; ok {
-		s.mu.Unlock()
-		s.Disconnect(cfg.ID)
-		s.mu.Lock()
-		_ = old // already cleaned up
+func (s *Store) notify() {
+	if s.onChange != nil {
+		go s.onChange()
 	}
+}
 
+func buildOptions(cfg Config, managed *Managed, notify func()) ([]nats.Option, error) {
 	opts := []nats.Option{
 		nats.Name("nats-explorer"),
+		nats.Timeout(5 * time.Second),
+		nats.MaxReconnects(-1),
+		nats.ReconnectWait(2 * time.Second),
+		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
+			managed.setError(err)
+			notify()
+		}),
+		nats.ReconnectHandler(func(_ *nats.Conn) {
+			managed.setError(nil)
+			notify()
+		}),
+		nats.ClosedHandler(func(_ *nats.Conn) {
+			notify()
+		}),
+		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
+			managed.setError(err)
+		}),
 	}
 
 	switch cfg.AuthMethod {
@@ -80,49 +144,77 @@ func (s *Store) Connect(cfg Config) (*Managed, error) {
 	case "userpass":
 		opts = append(opts, nats.UserInfo(cfg.User, cfg.Pass))
 	case "nkey":
-		if cfg.NKeySeed != "" {
-			opt, err := nats.NkeyOptionFromSeed(cfg.NKeySeed)
-			if err == nil {
-				opts = append(opts, opt)
-			}
+		if cfg.NKeySeed == "" {
+			return nil, fmt.Errorf("nkey seed required")
 		}
+		opt, err := nats.NkeyOptionFromSeed(cfg.NKeySeed)
+		if err != nil {
+			return nil, fmt.Errorf("invalid nkey seed: %w", err)
+		}
+		opts = append(opts, opt)
 	case "jwt":
-		if cfg.Creds != "" {
-			// Write creds to temp and use
-			opts = append(opts, nats.UserCredentials(cfg.Creds))
+		if strings.TrimSpace(cfg.Creds) == "" {
+			return nil, fmt.Errorf("credentials required")
 		}
+		// The browser sends the .creds file *content*, not a path.
+		opts = append(opts, nats.UserCredentialBytes([]byte(cfg.Creds)))
 	}
 
 	if cfg.TLS {
-		opts = append(opts, nats.Secure(nil))
+		opts = append(opts, nats.Secure())
+	}
+	return opts, nil
+}
+
+func normalizeServers(servers []string) []string {
+	out := make([]string, 0, len(servers))
+	for _, s := range servers {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if !strings.Contains(s, "://") {
+			s = "nats://" + s
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// Connect dials NATS and registers the connection. Dialing happens outside the
+// store lock so a slow server does not block every other API call.
+func (s *Store) Connect(cfg Config) (*Managed, error) {
+	cfg.Servers = normalizeServers(cfg.Servers)
+	if len(cfg.Servers) == 0 {
+		return nil, fmt.Errorf("at least one server URL is required")
 	}
 
-	serverURL := ""
-	if len(cfg.Servers) > 0 {
-		serverURL = strings.Join(cfg.Servers, ",")
+	// Replace an existing connection with the same ID.
+	if _, ok := s.Get(cfg.ID); ok {
+		s.Disconnect(cfg.ID)
 	}
 
-	nc, err := nats.Connect(serverURL, opts...)
+	managed := &Managed{ID: cfg.ID, Config: cfg}
+
+	opts, err := buildOptions(cfg, managed, s.notify)
 	if err != nil {
-		s.mu.Unlock()
 		return nil, err
 	}
 
-	color := colors[s.colorIdx%len(colors)]
-	s.colorIdx++
-
-	managed := &Managed{
-		ID:     cfg.ID,
-		Config: cfg,
-		NC:     nc,
-		Color:  color,
+	nc, err := nats.Connect(strings.Join(cfg.Servers, ","), opts...)
+	if err != nil {
+		return nil, err
 	}
+
+	s.mu.Lock()
+	managed.NC = nc
+	managed.ConnectedAt = time.Now()
+	managed.Color = colors[s.colorIdx%len(colors)]
+	s.colorIdx++
 	s.connections[cfg.ID] = managed
 	s.mu.Unlock()
 
-	if s.onChange != nil {
-		s.onChange()
-	}
+	s.notify()
 	return managed, nil
 }
 
@@ -136,24 +228,16 @@ func (s *Store) Disconnect(connID string) error {
 	delete(s.connections, connID)
 	s.mu.Unlock()
 
-	managed.NC.Drain()
-
-	if s.onChange != nil {
-		s.onChange()
+	if managed.NC != nil {
+		managed.NC.Close()
 	}
+	s.notify()
 	return nil
 }
 
 func (s *Store) DisconnectAll() {
-	s.mu.Lock()
-	ids := make([]string, 0, len(s.connections))
-	for id := range s.connections {
-		ids = append(ids, id)
-	}
-	s.mu.Unlock()
-
-	for _, id := range ids {
-		s.Disconnect(id)
+	for _, m := range s.All() {
+		s.Disconnect(m.ID)
 	}
 }
 
@@ -165,10 +249,11 @@ func (s *Store) Get(connID string) (*Managed, bool) {
 }
 
 func (s *Store) GetNC(connID string) (*nats.Conn, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	m, ok := s.connections[connID]
-	if !ok || m.NC == nil || !m.NC.IsConnected() {
+	m, ok := s.Get(connID)
+	if !ok || m.NC == nil {
+		return nil, fmt.Errorf("connection not found")
+	}
+	if !m.NC.IsConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 	return m.NC, nil
@@ -185,61 +270,18 @@ func (s *Store) All() []*Managed {
 }
 
 func (s *Store) GetStatus(connID string) Status {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	m, ok := s.connections[connID]
+	m, ok := s.Get(connID)
 	if !ok {
-		return Status{ID: connID, Connected: false}
+		return Status{ID: connID}
 	}
-	server := ""
-	if m.NC.IsConnected() {
-		server = m.NC.ConnectedUrl()
-	}
-	subs := m.Config.Subscriptions
-	if len(subs) == 0 {
-		subs = []string{">"}
-	}
-	return Status{
-		ID:            connID,
-		Name:          m.Config.Name,
-		Connected:     m.NC.IsConnected(),
-		Server:        server,
-		Color:         m.Color,
-		Servers:       m.Config.Servers,
-		Subscriptions: subs,
-	}
+	return m.status()
 }
 
 func (s *Store) AllStatuses() []Status {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make([]Status, 0, len(s.connections))
-	for id := range s.connections {
-		result = append(result, s.GetStatusLocked(id))
+	all := s.All()
+	result := make([]Status, 0, len(all))
+	for _, m := range all {
+		result = append(result, m.status())
 	}
 	return result
-}
-
-func (s *Store) GetStatusLocked(connID string) Status {
-	m, ok := s.connections[connID]
-	if !ok {
-		return Status{ID: connID, Connected: false}
-	}
-	server := ""
-	if m.NC.IsConnected() {
-		server = m.NC.ConnectedUrl()
-	}
-	subs := m.Config.Subscriptions
-	if len(subs) == 0 {
-		subs = []string{">"}
-	}
-	return Status{
-		ID:            connID,
-		Name:          m.Config.Name,
-		Connected:     m.NC.IsConnected(),
-		Server:        server,
-		Color:         m.Color,
-		Servers:       m.Config.Servers,
-		Subscriptions: subs,
-	}
 }

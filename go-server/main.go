@@ -29,7 +29,11 @@ func main() {
 		log.Printf("Serving static files from %s", publicPath)
 	}
 
-	handler := createServer(staticFS)
+	authToken := os.Getenv("AUTH_TOKEN")
+	if authToken != "" {
+		log.Printf("API token authentication enabled")
+	}
+	handler := createServer(staticFS, authToken)
 
 	log.Printf("NATS Explorer running on http://localhost:%s", port)
 	if err := http.ListenAndServe(fmt.Sprintf(":%s", port), handler); err != nil {

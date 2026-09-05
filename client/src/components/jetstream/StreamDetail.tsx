@@ -1,187 +1,225 @@
-import { useState, useEffect } from 'react';
-import { api } from '../../lib/api';
+import { useState } from 'react';
+import { Eraser, Layers, Pencil, RefreshCw, Trash2 } from 'lucide-react';
+import type { StreamInfo } from 'shared';
+import { api, errorMessage } from '../../lib/api';
+import { useAsync } from '../../lib/useAsync';
 import { useStore } from '../../store';
-import { formatBytes, formatNumber, formatAge } from '../../lib/utils';
-import { Trash2, Eraser, RefreshCw, ChevronDown, ChevronRight, Users } from 'lucide-react';
+import { formatBytes, formatDateTime, formatDurationNs, formatNumber } from '../../lib/utils';
+import { Button, IconButton } from '../ui/Button';
+import { confirm } from '../ui/Dialog';
+import { Badge, EmptyState, ErrorState, KeyValueGrid, LoadingState, PaneHeader, SectionTitle, StatTile, Tabs } from '../ui/misc';
+import { toast } from '../ui/Toast';
+import StreamDialog from './StreamDialog';
+import StreamMessages from './StreamMessages';
 import ConsumerList from './ConsumerList';
 
+type Tab = 'overview' | 'messages' | 'consumers';
+
 export default function StreamDetail() {
-  const activeConnId = useStore(s => s.activeConnId);
-  const [streamName, setStreamName] = useState<string | null>(null);
-  const [stream, setStream] = useState<any>(null);
-  const [messages, setMessages] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [showConsumers, setShowConsumers] = useState(false);
-  const [showMessages, setShowMessages] = useState(false);
+  const connId = useStore(s => s.activeConnId);
+  const name = useStore(s => s.selectedStream);
+  const setSelected = useStore(s => s.setSelectedStream);
+  const bump = useStore(s => s.bumpRefresh);
+  const [tab, setTab] = useState<Tab>('overview');
+  const [editing, setEditing] = useState(false);
 
-  // Subscribe to store changes for selected stream
-  useEffect(() => {
-    const unsub = useStore.subscribe((state: any) => {
-      if (state._selectedStream !== streamName) {
-        setStreamName(state._selectedStream || null);
-      }
-    });
-    // Initial check
-    const initial = (useStore.getState() as any)._selectedStream;
-    if (initial) setStreamName(initial);
-    return unsub;
-  }, []);
+  const { data: stream, error, loading, initial, reload, setData } = useAsync<StreamInfo>(
+    () => (connId && name ? api.getStream(connId, name) : null),
+    [connId, name],
+    { interval: 5000 },
+  );
 
-  useEffect(() => {
-    if (streamName) loadStream();
-  }, [streamName, activeConnId]);
+  if (!name) return <EmptyState icon={Layers} title="Select a stream" description="Streams persist messages for the subjects they capture. Pick one to inspect its state, messages and consumers." />;
+  if (initial && loading) return <LoadingState />;
+  if (error && !stream) return <ErrorState title={`Cannot load stream ${name}`} message={error} action={<Button onClick={reload}>Retry</Button>} />;
+  if (!stream || !connId) return null;
 
-  const loadStream = async () => {
-    if (!streamName || !activeConnId) return;
-    setLoading(true);
+  const purge = async () => {
+    if (!(await confirm({ title: `Purge ${stream.name}?`, message: 'All messages in this stream are deleted. Consumers keep their configuration.', confirmLabel: 'Purge', danger: true }))) return;
     try {
-      const data = await api.getStream(activeConnId, streamName);
-      setStream(data);
+      await api.purgeStream(connId, stream.name);
+      toast.success(`Purged ${stream.name}`);
+      reload();
     } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
+      toast.error('Purge failed', errorMessage(err));
     }
   };
 
-  const loadMessages = async () => {
-    if (!streamName || !activeConnId) return;
+  const del = async () => {
+    if (!(await confirm({ title: `Delete stream ${stream.name}?`, message: 'The stream, its messages and all consumers are removed permanently.', confirmLabel: 'Delete stream', danger: true }))) return;
     try {
-      const data: any = await api.getStreamMessages(activeConnId, streamName, undefined, 50);
-      setMessages(data.messages || []);
+      await api.deleteStream(connId, stream.name);
+      toast.success(`Deleted ${stream.name}`);
+      setSelected(null);
+      bump();
     } catch (err) {
-      console.error(err);
+      toast.error('Delete failed', errorMessage(err));
     }
   };
 
-  const handlePurge = async () => {
-    if (!streamName || !activeConnId || !confirm(`Purge all messages from ${streamName}?`)) return;
-    try {
-      await api.purgeStream(activeConnId, streamName);
-      loadStream();
-      setMessages([]);
-    } catch (err: any) {
-      alert(err.message);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!streamName || !activeConnId || !confirm(`Delete stream ${streamName}?`)) return;
-    try {
-      await api.deleteStream(activeConnId, streamName);
-      setStreamName(null);
-      setStream(null);
-    } catch (err: any) {
-      alert(err.message);
-    }
-  };
-
-  if (!streamName) {
-    return (
-      <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-        Select a stream to view details
-      </div>
-    );
-  }
-
-  if (loading && !stream) {
-    return <div className="p-4 text-muted-foreground text-sm">Loading...</div>;
-  }
-
-  if (!stream) return null;
+  const st = stream.state;
 
   return (
-    <div className="p-4 space-y-4 overflow-auto">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">{stream.name}</h2>
-        <div className="flex gap-2">
-          <button onClick={loadStream} className="p-1.5 hover:bg-accent rounded" title="Refresh">
-            <RefreshCw size={14} />
-          </button>
-          <button onClick={handlePurge} className="p-1.5 hover:bg-accent rounded text-yellow-500" title="Purge">
-            <Eraser size={14} />
-          </button>
-          <button onClick={handleDelete} className="p-1.5 hover:bg-destructive/20 rounded text-destructive" title="Delete">
-            <Trash2 size={14} />
-          </button>
+    <div className="flex flex-col h-full min-h-0">
+      <PaneHeader
+        className="h-12"
+        actions={
+          <>
+            <IconButton label="Refresh" loading={loading} onClick={reload}>
+              <RefreshCw size={14} />
+            </IconButton>
+            <Button variant="outline" icon={<Pencil size={13} />} onClick={() => setEditing(true)}>
+              Edit
+            </Button>
+            <Button variant="outline" icon={<Eraser size={13} />} onClick={purge} disabled={stream.denyPurge}>
+              Purge
+            </Button>
+            <Button variant="danger" icon={<Trash2 size={13} />} onClick={del}>
+              Delete
+            </Button>
+          </>
+        }
+      >
+        <Layers size={16} className="text-accent shrink-0" />
+        <div className="min-w-0">
+          <div className="text-md font-semibold truncate">{stream.name}</div>
+          {stream.description && <div className="text-xs text-muted truncate">{stream.description}</div>}
         </div>
-      </div>
-
-      {stream.description && <p className="text-sm text-muted-foreground">{stream.description}</p>}
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          { label: 'Messages', value: formatNumber(stream.state.messages) },
-          { label: 'Size', value: formatBytes(stream.state.bytes) },
-          { label: 'Consumers', value: stream.state.consumerCount },
-          { label: 'Subjects', value: stream.state.numSubjects || 0 },
-          { label: 'First Seq', value: stream.state.firstSeq },
-          { label: 'Last Seq', value: stream.state.lastSeq },
-          { label: 'Deleted', value: stream.state.numDeleted || 0 },
-        ].map(stat => (
-          <div key={stat.label} className="bg-muted rounded-md p-2">
-            <div className="text-xs text-muted-foreground">{stat.label}</div>
-            <div className="text-sm font-medium">{stat.value}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Config */}
-      <div className="bg-muted rounded-md p-3">
-        <h3 className="text-xs font-medium mb-2 text-muted-foreground uppercase">Configuration</h3>
-        <div className="grid grid-cols-2 gap-2 text-xs">
-          <div><span className="text-muted-foreground">Subjects:</span> <span className="font-mono">{stream.subjects?.join(', ')}</span></div>
-          <div><span className="text-muted-foreground">Retention:</span> {stream.retention}</div>
-          <div><span className="text-muted-foreground">Storage:</span> {stream.storage}</div>
-          <div><span className="text-muted-foreground">Replicas:</span> {stream.replicas}</div>
-          <div><span className="text-muted-foreground">Max Msgs:</span> {stream.maxMsgs === -1 ? 'unlimited' : formatNumber(stream.maxMsgs)}</div>
-          <div><span className="text-muted-foreground">Max Bytes:</span> {stream.maxBytes === -1 ? 'unlimited' : formatBytes(stream.maxBytes)}</div>
-          <div><span className="text-muted-foreground">Max Age:</span> {formatAge(stream.maxAge)}</div>
-          <div><span className="text-muted-foreground">Discard:</span> {stream.discard}</div>
+        <div className="flex items-center gap-1 ml-2">
+          <Badge tone="neutral">{stream.retention}</Badge>
+          <Badge tone={stream.storage === 'Memory' ? 'info' : 'neutral'}>{stream.storage}</Badge>
+          <Badge tone="neutral">R{stream.replicas}</Badge>
+          {stream.sealed && <Badge tone="warn">sealed</Badge>}
         </div>
-      </div>
+      </PaneHeader>
 
-      {/* Consumers section */}
-      <div>
-        <button
-          onClick={() => setShowConsumers(!showConsumers)}
-          className="flex items-center gap-2 text-sm font-medium hover:text-primary"
-        >
-          {showConsumers ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          <Users size={14} />
-          Consumers ({stream.state.consumerCount})
-        </button>
-        {showConsumers && <ConsumerList streamName={streamName} />}
-      </div>
+      <Tabs
+        className="px-3"
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { id: 'overview', label: 'Overview' },
+          { id: 'messages', label: 'Messages', count: st.messages },
+          { id: 'consumers', label: 'Consumers', count: st.consumerCount },
+        ]}
+      />
 
-      {/* Messages section */}
-      <div>
-        <button
-          onClick={() => { setShowMessages(!showMessages); if (!showMessages) loadMessages(); }}
-          className="flex items-center gap-2 text-sm font-medium hover:text-primary"
-        >
-          {showMessages ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          Messages
-        </button>
-        {showMessages && (
-          <div className="mt-2 space-y-1">
-            {messages.map(msg => (
-              <div key={msg.seq} className="bg-muted rounded p-2 text-xs">
-                <div className="flex justify-between text-muted-foreground mb-1">
-                  <span>Seq: {msg.seq}</span>
-                  <span>{msg.subject}</span>
-                  <span>{new Date(msg.timestamp).toLocaleString()}</span>
-                </div>
-                <pre className="font-mono whitespace-pre-wrap">{
-                  msg.payloadType === 'json' ? JSON.stringify(JSON.parse(msg.payload), null, 2) : msg.payload
-                }</pre>
+      <div className="flex-1 min-h-0 overflow-auto">
+        {tab === 'overview' && (
+          <div className="p-4 flex flex-col gap-5">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+              <StatTile label="Messages" value={formatNumber(st.messages)} />
+              <StatTile label="Size" value={formatBytes(st.bytes)} />
+              <StatTile label="Subjects" value={formatNumber(st.numSubjects)} />
+              <StatTile label="Consumers" value={st.consumerCount} />
+              <StatTile label="Sequence" value={`${formatNumber(st.firstSeq)} – ${formatNumber(st.lastSeq)}`} sub={st.numDeleted ? `${formatNumber(st.numDeleted)} deleted` : undefined} />
+              <StatTile label="Last message" value={st.messages ? formatDateTime(st.lastTs) : '–'} sub={st.messages ? `first ${formatDateTime(st.firstTs)}` : undefined} className="[&>div:nth-child(2)]:text-sm" />
+            </div>
+
+            <div>
+              <SectionTitle>Subjects</SectionTitle>
+              <div className="flex flex-wrap gap-1.5">
+                {stream.subjects.length === 0 && <span className="text-sm text-muted">No subjects (sourced or mirrored)</span>}
+                {stream.subjects.map(s => (
+                  <Badge key={s} tone="accent" mono>
+                    {s}
+                  </Badge>
+                ))}
               </div>
-            ))}
-            {messages.length === 0 && <div className="text-xs text-muted-foreground">No messages</div>}
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              <div>
+                <SectionTitle>Limits</SectionTitle>
+                <KeyValueGrid
+                  columns={1}
+                  items={[
+                    { label: 'Max messages', value: formatNumber(stream.maxMsgs) },
+                    { label: 'Max messages per subject', value: formatNumber(stream.maxMsgsPerSubject) },
+                    { label: 'Max bytes', value: formatBytes(stream.maxBytes) },
+                    { label: 'Max age', value: formatDurationNs(stream.maxAge) },
+                    { label: 'Max message size', value: formatBytes(stream.maxMsgSize) },
+                    { label: 'Max consumers', value: formatNumber(stream.maxConsumers) },
+                    { label: 'Discard policy', value: stream.discard },
+                    { label: 'Duplicate window', value: formatDurationNs(stream.duplicateWindow) },
+                  ]}
+                />
+              </div>
+              <div>
+                <SectionTitle>Configuration</SectionTitle>
+                <KeyValueGrid
+                  columns={1}
+                  items={[
+                    { label: 'Created', value: formatDateTime(stream.created) },
+                    { label: 'Retention', value: stream.retention },
+                    { label: 'Storage', value: stream.storage },
+                    { label: 'Replicas', value: stream.replicas },
+                    { label: 'Allow direct', value: stream.allowDirect ? 'yes' : 'no' },
+                    { label: 'Allow roll-up', value: stream.allowRollup ? 'yes' : 'no' },
+                    { label: 'Deny delete / purge', value: `${stream.denyDelete ? 'yes' : 'no'} / ${stream.denyPurge ? 'yes' : 'no'}` },
+                    { label: 'No ack', value: stream.noAck ? 'yes' : 'no' },
+                    ...(stream.mirror ? [{ label: 'Mirror of', value: stream.mirror, mono: true }] : []),
+                    ...(stream.sources?.length ? [{ label: 'Sources', value: stream.sources.join(', '), mono: true }] : []),
+                  ]}
+                />
+              </div>
+            </div>
+
+            {stream.cluster && (
+              <div>
+                <SectionTitle>Cluster{stream.cluster.name ? ` · ${stream.cluster.name}` : ''}</SectionTitle>
+                <div className="card overflow-hidden">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Peer</th>
+                        <th>Role</th>
+                        <th>Status</th>
+                        <th className="num">Lag</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td className="font-mono">{stream.cluster.leader || '–'}</td>
+                        <td>
+                          <Badge tone="accent">leader</Badge>
+                        </td>
+                        <td>
+                          <Badge tone="ok">current</Badge>
+                        </td>
+                        <td className="num">0</td>
+                      </tr>
+                      {stream.cluster.replicas.map(r => (
+                        <tr key={r.name}>
+                          <td className="font-mono">{r.name}</td>
+                          <td>replica</td>
+                          <td>{r.offline ? <Badge tone="danger">offline</Badge> : r.current ? <Badge tone="ok">current</Badge> : <Badge tone="warn">catching up</Badge>}</td>
+                          <td className="num">{formatNumber(r.lag)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         )}
+        {tab === 'messages' && <StreamMessages connId={connId} stream={stream} onChanged={reload} />}
+        {tab === 'consumers' && <ConsumerList connId={connId} stream={stream.name} onChanged={reload} />}
       </div>
+
+      {editing && (
+        <StreamDialog
+          connId={connId}
+          existing={stream}
+          onClose={() => setEditing(false)}
+          onSaved={info => {
+            setEditing(false);
+            setData(info);
+            bump();
+          }}
+        />
+      )}
     </div>
   );
 }

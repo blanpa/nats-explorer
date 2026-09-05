@@ -1,15 +1,19 @@
 # Stage 1: Build client
-FROM node:20-alpine AS client-builder
+FROM node:22-alpine AS client-builder
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# pnpm version comes from the packageManager field in package.json (same as CI)
+COPY package.json /tmp/package.json
+RUN corepack enable && cd /tmp && corepack prepare --activate
 
 WORKDIR /app
 
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY shared/package.json shared/
 COPY client/package.json client/
+COPY dev/package.json dev/
+COPY e2e/package.json e2e/
 
-RUN pnpm install --frozen-lockfile || pnpm install
+RUN pnpm install --frozen-lockfile --filter shared --filter client
 
 COPY tsconfig.base.json ./
 COPY shared/ shared/
