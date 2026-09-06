@@ -2,159 +2,83 @@
 layout: default
 title: Features
 nav_order: 3
-has_children: true
 ---
 
 # Features
 
-NATS Explorer provides a comprehensive set of tools for managing and monitoring NATS servers.
-
 ---
 
-## Subject Tree Browsing
+## Subject tree
 
-Browse all NATS subjects in a hierarchical tree view, similar to MQTT Explorer.
+- Subjects split by `.` into a virtualized tree with inline value preview, message count and rate per subject and per branch
+- Filter with several words, keyboard navigation, expand/collapse all
+- System roots (`$JS`, `$KV`, `$SYS`, `_INBOX`, …) hidden by default behind a toggle
+- Selecting a branch shows the recent messages of everything below it
+- Built for large subject spaces: the server sends a flat delta of changed subjects with short payload previews, the browser rebuilds the hierarchy; the interval backs off for very large trees
 
-- Subjects are split by `.` into a navigable tree structure
-- Each node shows the latest message value inline
-- Live message count and rate per subject (messages/sec)
-- Click any subject to view full message details
-- Automatic throttling for high-throughput subjects (max 10 msg/sec per subject forwarded to UI)
+## Message detail
 
----
+- JSON, raw and hex views; headers; history of the last messages; diff to the previous message
+- Click a number in the JSON to chart it over time as line, area, step, bars or dots
+- Publish drawer with templates and recent sends
 
-## Multi-Connection Support
+## JetStream
 
-Connect to multiple NATS servers simultaneously.
+- Streams: list, create, edit, purge, delete; page through messages from the newest sequence; live tail; delete single messages
+- Consumers: list, create, delete, state
+- KV/Object backing streams (`KV_*`, `OBJ_*`) hidden by default behind a toggle
+- **JetStream domains**: a connection can carry a `jsDomain` or API prefix (leaf nodes behind a hub and vice versa), and the JetStream, KV and Object Store panes have a domain switch for ad-hoc changes
 
-- Each connection gets a unique color for visual distinction
-- Switch between connections to view their subject trees independently
-- All connections share the same WebSocket for real-time updates
-- Supports all NATS authentication methods
+## Key-Value
 
----
-
-## JetStream Management
-
-Full CRUD operations for JetStream resources.
-
-### Streams
-- List all streams with state overview (messages, bytes, consumers)
-- Create streams with full configuration (retention, storage, limits)
-- Update stream configuration
-- Delete and purge streams
-- Browse messages by sequence number with pagination
-
-### Consumers
-- List consumers per stream
-- Create consumers with delivery/ack policies
-- View consumer state (delivered, ack floor, pending)
-- Delete consumers
-
----
-
-## Key-Value Store
-
-Browse and manage NATS JetStream Key-Value stores.
-
-- List all KV buckets with metadata
-- Browse keys within a bucket
-- View current value with formatted JSON
-- Full revision history per key
-- Create, update, and delete keys
-- Purge key history
-- Create and delete buckets
-
----
+- Buckets with history size; keys with current value, revision and full history
+- Create, edit, delete and purge keys; create and delete buckets
+- Live updates through a server-side watch
 
 ## Object Store
 
-Manage NATS JetStream Object Stores.
+- Stores with size and chunk count; objects with description, digest and modification time
+- Drag & drop or file upload (streamed), direct download, delete objects and stores
 
-- List object stores with size and chunk info
-- Browse objects within a store
-- Upload objects (drag & drop or file picker, streamed as raw body)
-- Download objects as files
-- Delete objects
-- Create new stores
+## Services
 
----
+- Discover NATS micro services (`$SRV.INFO`, `STATS`, `PING`), see endpoints, request counts, errors and processing time
 
-## Services Discovery
+## Requests
 
-Discover and inspect NATS micro services.
+- Saved request templates in the sidebar: name, publish or request/reply, subject, headers, payload, timeout
+- Create, edit, duplicate, delete; import and export as JSON to share collections
+- **Repeated runs**: send a template up to 10 000 times with parallel senders and an optional pause; read sent/ok/errors, throughput, latency min/avg/p50/p95/max and the first replies
+- Variables replaced per message in subject, payload and headers: `{{i}}` (counter), `{{ts}}` (unix milliseconds), `{{uuid}}`, `{{rand:MIN-MAX}}`
 
-- Discover services via `$SRV.INFO`
-- View service statistics via `$SRV.STATS`
-- Ping services via `$SRV.PING`
+## Monitoring
 
----
+- Server health strip: CPU, memory, connections, subscriptions, slow consumers, traffic, routes and leaf nodes
+- Throughput history: messages/s and bytes/s in vs out, JetStream API calls and errors, connections, subscriptions, CPU
+- JetStream usage, subscription statistics, client connection table
+- Cluster routes and leaf nodes with RTT, subscriptions and traffic per peer
 
-## Server Monitoring
+The monitoring URL defaults to port 8222 of the first server and can be set per connection.
 
-Proxy to NATS server monitoring HTTP endpoints.
+## Cluster
 
-| Endpoint   | Description                    |
-|:---------- |:------------------------------ |
-| `varz`     | Server health and version info |
-| `connz`    | Connection statistics          |
-| `routez`   | Route information              |
-| `subsz`    | Subscription statistics        |
-| `jsz`      | JetStream account info         |
-| `healthz`  | Health check                   |
-| `accountz` | Account information            |
-| `gatewayz` | Gateway information            |
-| `leafz`    | Leaf node information          |
+- Every server of the cluster with version, uptime, CPU, memory, connections, subscriptions, traffic, routes and JetStream usage; the meta leader is marked
+- JetStream meta cluster: leader and peers with current/lagging/offline state
+- Every stream with account, storage, replicas, leader and placement per peer
+- Needs system-account (`$SYS`) credentials on the connection; without them the module shows the connected node only and says so
+- A second tab lists the per-connection server details
 
-The monitoring URL is auto-derived from the NATS connection (port + 4000), or can be configured manually per connection.
+## Connections
 
----
-
-## Publish & Request-Reply
-
-### Publish
-- Send messages to any NATS subject
-- Support for custom headers
-- JSON and plain text payloads
-
-### Request-Reply
-- Send request messages and view responses
-- Configurable timeout (default 5 seconds)
-- Automatic payload type detection (string/json/binary)
-
----
-
-## Live Value Charts
-
-When viewing a message with numeric JSON fields, NATS Explorer automatically offers charting capabilities.
-
-- Select any numeric field from the payload
-- Values are plotted over time as new messages arrive
-- Useful for monitoring sensor data, metrics, and telemetry
-
----
-
-## Authentication
-
-All common NATS authentication methods are supported:
-
-| Method            | Description                              |
-|:----------------- |:---------------------------------------- |
-| None              | No authentication                        |
-| Token             | Bearer token                             |
-| Username/Password | Basic credentials                        |
-| NKey              | Ed25519 key pair (seed)                  |
-| JWT/Credentials   | NATS credentials file                    |
-| TLS               | TLS client certificates                  |
-
----
+- Several servers at once, colour-coded; switch between them
+- Authentication: none, token, username/password, NKey seed, credentials file (JWT)
+- TLS with CA certificate, client certificate and key (pasted or loaded from files), plus an insecure mode for test setups
+- Optional system-account credentials for the Cluster module
+- Subscriptions and system subjects per connection, monitoring URL, JetStream domain / API prefix
 
 ## Performance
 
-NATS Explorer is designed for high-throughput environments:
-
-- **Server-side throttling** -- max 10 messages/sec per subject forwarded to the UI
-- **Message batching** -- messages are collected in 100ms batches before sending via WebSocket
-- **Subject tree updates** -- tree is rebuilt every 500ms, not on every message
-- **WebSocket backpressure** -- slow clients are skipped (64KB buffer threshold)
-- **Go backend** -- low memory footprint, high concurrency
+- Per subject at most 10 msg/s reach the browser; the selected subject or branch gets a dedicated budget, all other subjects share a background budget where the first message of a subject per second wins
+- Message batching (100 ms), compressed websocket frames, tree deltas instead of full trees
+- Module switches are served from a result cache and refreshed in the background
+- Measured under 5 000 subjects at 20 000 msg/s: backend around 5 % CPU and 41 MB, browser main thread around 11 % busy

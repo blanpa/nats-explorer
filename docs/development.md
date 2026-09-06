@@ -10,171 +10,83 @@ nav_order: 5
 
 ## Prerequisites
 
-- **Go** 1.24+
-- **Node.js** 20+ with **pnpm** (`corepack enable`)
-- **Docker** (for the dev NATS server)
+- **Go** 1.26+
+- **Node.js** 22+ with **pnpm** (`corepack enable`; the version is pinned in `package.json`)
+- **Docker** (dev NATS server, Linux desktop builder image)
+- For desktop builds: the Wails CLI (`go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0`) and, on Linux, `libgtk-3-dev libwebkit2gtk-4.1-dev`
 
 ---
 
-## Getting Started
+## Getting started
 
 ```bash
 git clone https://github.com/blanpa/nats-explorer.git
 cd nats-explorer
-
-# Install frontend dependencies
 pnpm install
-
-# Start the dev NATS server with sample data
-pnpm nats:dev
-
-# Start Go backend + Vite frontend (hot reload)
-pnpm dev
+pnpm nats:dev      # dev NATS on nats://localhost:4230 with seed data and a simulator
+pnpm dev           # Go backend on :3002 + Vite on :5173 with hot reload
 ```
 
-This starts:
-- Go server on `http://localhost:3002` (API + WebSocket)
-- Vite dev server on `http://localhost:5173` (React client with HMR)
-- Dev NATS server on `nats://localhost:4230` (with JetStream enabled)
+Connect to `nats://localhost:4230` in the connection dialog.
 
-Connect to `nats://localhost:4230` in the connection dialog to browse the simulated factory data.
+| Command | Description |
+|:-- |:-- |
+| `pnpm dev` | Go backend + Vite frontend |
+| `pnpm build` | Shared types, client and Go server |
+| `pnpm nats:start` / `nats:stop` / `nats:seed` / `nats:simulate` | Dev NATS server pieces |
+| `pnpm --filter client test` | Vitest unit tests |
+| `cd go-server && go test -race ./...` | Go unit and end-to-end tests (embedded nats-server) |
+| `pnpm test:e2e` | Playwright smoke suite against `http://localhost:3002` (`NE_URL`, `NATS_URL`, `PW_CHROME`) |
+| `scripts/build-desktop.sh linux|windows|macos` | Desktop packages for one platform (`--docker` runs Linux/Windows in the builder image) |
+| `scripts/smoke-desktop.sh <binary>` | Launches a desktop build headless and checks API, UI, websocket and settings persistence |
 
 ---
 
-## Useful Commands
-
-| Command              | Description                                    |
-|:-------------------- |:---------------------------------------------- |
-| `pnpm dev`           | Start Go backend + Vite frontend               |
-| `pnpm dev:server`    | Start Go backend only                          |
-| `pnpm dev:client`    | Start Vite frontend only                       |
-| `pnpm build`         | Build shared types + client + Go server        |
-| `pnpm nats:start`    | Start dev NATS server                          |
-| `pnpm nats:stop`     | Stop dev NATS server                           |
-| `pnpm nats:seed`     | Seed streams, KV buckets, object stores        |
-| `pnpm nats:simulate` | Start UNS factory data simulator               |
-| `pnpm nats:dev`      | Start NATS, seed, and simulate in one command  |
-
----
-
-## Dev NATS Server
-
-The `dev/` directory provides a self-contained development environment with a NATS server and a UNS (Unified Namespace) simulator that publishes realistic factory data.
-
-The simulator publishes data on an ISA-95 style topic hierarchy:
-
-```
-uns.acme.factory-berlin.assembly.line-1.robot-01.position
-uns.acme.factory-berlin.machining.line-2.cnc-01.spindle
-uns.acme.factory-berlin.energy.main-meter.power
-events.alarm.line-2.cnc-01
-metrics.oee.line-1
-```
-
----
-
-## Project Structure
+## Project structure
 
 ```
 nats-explorer/
   go-server/                  # Go backend
-    main.go                   # Entry point, router wiring
+    main.go                   # Server entry point; desktop.go: Wails window (build tag `desktop`)
+    server.go                 # Router wiring
+    build/                    # Desktop packaging assets (icon, Info.plist, NSIS script, desktop entry)
     internal/
-      connection/store.go     # Multi-connection NATS store
-      handler/                # HTTP handlers (one per feature)
-      subscription/           # Message subscription & subject tree
-      ws/hub.go               # WebSocket connection hub
-  client/                     # React frontend (Vite)
-    src/
-      components/             # Feature-organized UI components
-      lib/                    # API client, WebSocket, utilities
-      store/                  # Zustand state management
-  shared/                     # Shared TypeScript type definitions
-  dev/                        # Dev NATS server and simulators
-  docs/                       # GitHub Pages documentation
-  .github/workflows/          # CI + Release pipelines
+      connection/             # Multi-connection NATS store (main + system-account connections, TLS)
+      handler/                # HTTP handlers per feature (streams, consumers, kv, objectstore, publish, run, services, monitoring, cluster, settings, live)
+      settings/               # File-backed UI settings, keyring secrets
+      subscription/           # Subscriptions, forwarding budgets, subject tree feed
+      ws/                     # WebSocket hub
+  client/src/
+    components/               # subjects, jetstream, kv, objectstore, services, requests, monitoring, cluster, connection, layout, ui
+    lib/                      # API client, websocket, storage sync, saved connections/requests, utilities
+    store/                    # Zustand stores
+  shared/                     # TypeScript types shared by client and (documented) API
+  e2e/                        # Playwright smoke suite
+  scripts/                    # Desktop build, builder Dockerfile, smoke tests
+  dev/                        # Dev NATS server, seed and simulator
+  docs/                       # This site, architecture notes, review log
+  .github/workflows/          # ci.yml, release.yml, pages.yml
 ```
 
 ---
 
-## Adding a New Feature
+## Adding a feature
 
-Most features follow a consistent pattern:
-
-### 1. Add a Go handler
-
-Create a new handler in `go-server/internal/handler/`:
-
-```go
-type MyHandler struct {
-    Store *connection.Store
-}
-
-func (h *MyHandler) List(w http.ResponseWriter, r *http.Request) {
-    connID := getConnID(r)
-    nc, err := h.Store.GetNC(connID)
-    if err != nil {
-        writeError(w, http.StatusBadRequest, err.Error())
-        return
-    }
-    // ... use nc to interact with NATS
-    writeJSON(w, result)
-}
-```
-
-### 2. Register routes in main.go
-
-```go
-myHandler := &handler.MyHandler{Store: store}
-r.Route("/api", func(r chi.Router) {
-    r.Get("/my-feature", myHandler.List)
-})
-```
-
-### 3. Add a React component
-
-Create a component under `client/src/components/my-feature/`:
-
-```tsx
-export function MyFeatureView({ connectionId }: { connectionId: string }) {
-  const [data, setData] = useState(null);
-  useEffect(() => {
-    api.get(`/my-feature?connId=${connectionId}`)
-      .then(setData);
-  }, [connectionId]);
-  return <div>{/* render */}</div>;
-}
-```
-
-### 4. Add navigation
-
-Add a sidebar entry in `Sidebar.tsx` and handle the view in `MainContent.tsx`.
+1. **Handler** in `go-server/internal/handler/`: a struct with `Store *connection.Store`, `writeJSON` / `writeError` helpers, `connIDFromRequest(r)` for the connection id, `jetStreamFor(store, r)` for a JetStream context that honours the connection's domain.
+2. **Route** in `go-server/server.go` inside the `/api` group (token middleware applies).
+3. **Types** in `shared/src/` and a call in `client/src/lib/api.ts`.
+4. **Component** under `client/src/components/<feature>/`; lists in the explorer pane use `useAsync` with a cache `key`, detail views the same.
+5. **Module** (if it needs its own rail entry): add it to `MODULES` in `client/src/store/index.ts`, an icon in `layout/Rail.tsx`, and the panes in `layout/Explorer.tsx` / `layout/Detail.tsx`.
+6. **Tests**: a Go test next to the handler or in `server_test.go` (embedded nats-server), Vitest for pure client logic, and a Playwright step if the flow is user-visible.
 
 ---
 
-## Code Style
+## Code style
 
-### Go
-- Standard Go conventions (`gofmt`, `go vet`)
-- One handler struct per feature domain
-- Use `writeJSON` / `writeError` helpers for consistent responses
-- Thread-safe access to shared state via `sync.RWMutex`
+- Go: `gofmt`, `go vet`, one handler struct per feature, mutex-guarded shared state.
+- TypeScript/React: function components and hooks, Zustand for shared state, Tailwind classes plus the component classes in `index.css`, Radix UI primitives.
+- UI language: figures in strips rather than tiles, plain empty states, destructive actions quiet until hovered, no success toasts.
 
-### TypeScript / React
-- Functional components with hooks
-- Named exports (no default exports)
-- Zustand for shared state, local `useState` for component state
-- Tailwind CSS for styling (no CSS files)
-- Radix UI for interactive primitives
+## Commit messages
 
----
-
-## Commit Messages
-
-Use conventional commits:
-
-```
-feat(server): add object store streaming download
-fix(client): handle websocket reconnect gracefully
-build(docker): optimize multi-stage build layers
-```
+Conventional commits are welcome (`feat(server): …`, `fix(client): …`, `ci: …`).

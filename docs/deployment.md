@@ -6,13 +6,13 @@ nav_order: 6
 
 # Deployment
 
+The desktop app needs no deployment: install it, add connections, done. This page covers running the web UI for a team.
+
 ---
 
 ## Docker
 
 ### Docker Compose (with NATS)
-
-The simplest production setup -- runs NATS and NATS Explorer together:
 
 ```yaml
 # docker-compose.yml
@@ -27,13 +27,12 @@ services:
       - nats-data:/data
 
   nats-explorer:
-    build:
-      context: .
-      dockerfile: go-server/Dockerfile
+    image: ghcr.io/blanpa/nats-explorer:latest
     ports:
       - "3002:3002"
     environment:
       - PORT=3002
+      # - AUTH_TOKEN=change-me
     depends_on:
       - nats
 
@@ -45,37 +44,19 @@ volumes:
 docker compose up -d
 ```
 
-### Docker Compose (standalone)
-
-Connect to an external NATS server:
+### Standalone container
 
 ```bash
-docker compose -f docker-compose.standalone.yml up -d
-```
-
-Then configure the NATS server address in the web UI connection dialog.
-
-### Pre-built Docker Image
-
-```bash
-docker run -d -p 3002:3002 ghcr.io/blanpa/nats-explorer:latest
+docker run -d -p 3002:3002 -e AUTH_TOKEN=change-me ghcr.io/blanpa/nats-explorer:latest
 ```
 
 ---
 
-## Standalone Binary
+## Server binary
 
-Download from [Releases](https://github.com/blanpa/nats-explorer/releases) and run directly. No runtime dependencies required.
+Download `nats-explorer-server-<version>-<os>-<arch>` from [Releases](https://github.com/blanpa/nats-explorer/releases); the UI is bundled as `public/` next to the binary.
 
-### Linux
-
-```bash
-tar xzf nats-explorer-linux-x64.tar.gz
-cd nats-explorer-linux-x64
-PUBLIC_PATH=./public ./nats-explorer
-```
-
-### systemd Service
+### systemd
 
 ```ini
 # /etc/systemd/system/nats-explorer.service
@@ -85,9 +66,13 @@ After=network.target
 
 [Service]
 Type=simple
+User=nats-explorer
 WorkingDirectory=/opt/nats-explorer
 Environment=PORT=3002
-Environment=PUBLIC_PATH=/opt/nats-explorer/public
+Environment=AUTH_TOKEN=change-me
+# optional: keep connections and templates on the server (single-user)
+# Environment=STORAGE_DIR=/var/lib/nats-explorer
+# Environment=NO_KEYRING=1
 ExecStart=/opt/nats-explorer/nats-explorer
 Restart=always
 RestartSec=5
@@ -97,31 +82,29 @@ WantedBy=multi-user.target
 ```
 
 ```bash
-sudo cp -r nats-explorer-linux-x64 /opt/nats-explorer
+sudo cp -r nats-explorer-server-0.2.0-linux-x64 /opt/nats-explorer
 sudo systemctl enable --now nats-explorer
 ```
 
-### Windows
-
-Extract the zip and run `nats-explorer.exe`:
-
-```cmd
-set PUBLIC_PATH=.\public
-set PORT=3002
-nats-explorer.exe
-```
-
-Or create a Windows Service using [NSSM](https://nssm.cc/) or similar.
+On Windows, run `nats-explorer.exe` from the extracted folder or wrap it with [NSSM](https://nssm.cc/).
 
 ---
 
-## Reverse Proxy
+## Security
+
+- The backend talks to NATS with the credentials the UI sends; the web UI stores them in the browser's local storage without encryption. Put the UI behind `AUTH_TOKEN` and TLS (reverse proxy) when it is reachable by others.
+- With `STORAGE_DIR`, credentials go to the keyring or a `secrets.json` readable only by the service user.
+- Websocket upgrades are accepted from the same host and loopback origins only.
+
+---
+
+## Reverse proxy
 
 ### Nginx
 
 ```nginx
 server {
-    listen 80;
+    listen 443 ssl;
     server_name nats-explorer.example.com;
 
     location / {
@@ -135,7 +118,7 @@ server {
 }
 ```
 
-The `Upgrade` and `Connection` headers are required for WebSocket support.
+The `Upgrade` and `Connection` headers are required for the websocket.
 
 ### Caddy
 
@@ -145,34 +128,26 @@ nats-explorer.example.com {
 }
 ```
 
-Caddy handles WebSocket upgrades automatically.
-
 ---
 
-## CI/CD
+## Release pipeline
 
-Releases are fully automated via GitHub Actions. Push a version tag to trigger the pipeline:
+Pushing a `v*` tag runs `.github/workflows/release.yml`:
 
-```bash
-git tag v1.0.0
-git push --tags
-```
+1. **frontend** -- builds and tests the UI once
+2. **desktop-linux / desktop-windows / desktop-macos** -- build the installers on their native runners and smoke-test them (Linux and macOS: launch under a display and check API, UI and websocket; Windows: silent install, launch, check, uninstall)
+3. **server** -- headless binaries for five OS/arch pairs
+4. **docker** -- image on GHCR tagged with the version
+5. **release** -- GitHub release with every file and `SHA256SUMS.txt`
 
-The release workflow:
+A manual `workflow_dispatch` run produces the artifacts without publishing.
 
-1. **Build** -- Cross-compiles Go binaries for 5 platforms (linux-x64, linux-arm64, windows-x64, macos-x64, macos-arm64) and builds the React frontend
-2. **Docker** -- Builds and pushes a Docker image to GitHub Container Registry (GHCR)
-3. **Release** -- Creates a GitHub Release with all binary archives
+| File | Platform |
+|:-- |:-- |
+| `nats-explorer-desktop-<v>-windows-x64-setup.exe`, `.zip` | Windows desktop |
+| `nats-explorer-desktop-<v>-macos-universal.dmg`, `.zip` | macOS desktop |
+| `nats-explorer-desktop-<v>-linux-x64.AppImage`, `.deb`, `.tar.gz` | Linux desktop |
+| `nats-explorer-server-<v>-{linux-x64,linux-arm64,windows-x64,macos-x64,macos-arm64}` | Server |
+| `ghcr.io/blanpa/nats-explorer:<v>` | Docker |
 
-### Release Targets
-
-| Archive                              | Platform            |
-|:------------------------------------ |:------------------- |
-| `nats-explorer-linux-x64.tar.gz`     | Linux x86_64        |
-| `nats-explorer-linux-arm64.tar.gz`   | Linux ARM64         |
-| `nats-explorer-windows-x64.zip`      | Windows x86_64      |
-| `nats-explorer-macos-x64.tar.gz`     | macOS Intel         |
-| `nats-explorer-macos-arm64.tar.gz`   | macOS Apple Silicon |
-| `ghcr.io/blanpa/nats-explorer`       | Docker image        |
-
-Each archive contains the binary and a `public/` folder with the web UI.
+Installers are not code-signed; see the notes on the [Installation]({% link installation.md %}) page.
