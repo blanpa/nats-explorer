@@ -5,10 +5,15 @@ $setup = Get-ChildItem dist/desktop -Filter '*-setup.exe' | Select-Object -First
 if (-not $setup) { throw 'no installer found in dist/desktop' }
 $target = Join-Path $env:LOCALAPPDATA 'Programs\NATS Explorer'
 Write-Host "Installing $($setup.FullName) to $target"
-$p = Start-Process -FilePath $setup.FullName -ArgumentList "/S", "/D=$target" -Wait -PassThru
+# NSIS: /D= must be the last argument and must not be quoted, so pass one raw string.
+$p = Start-Process -FilePath $setup.FullName -ArgumentList "/S /D=$target" -Wait -PassThru
 if ($p.ExitCode -ne 0) { throw "installer exit code $($p.ExitCode)" }
-$exe = Join-Path $target 'nats-explorer.exe'
-if (-not (Test-Path $exe)) { throw "installed binary missing at $exe" }
+if (-not (Test-Path $target)) { throw "install directory missing: $target" }
+Write-Host "Installed files:"; Get-ChildItem $target | ForEach-Object { Write-Host "  $($_.Name)" }
+# Wails names the installed binary after the product ("NATS Explorer.exe").
+$exeItem = Get-ChildItem $target -Filter '*.exe' | Where-Object { $_.Name -notlike 'uninstall*' } | Select-Object -First 1
+if (-not $exeItem) { throw "no application binary found in $target" }
+$exe = $exeItem.FullName
 $uninst = Get-ChildItem $target -Filter 'uninstall*.exe' | Select-Object -First 1
 if (-not $uninst) { throw 'uninstaller missing' }
 Write-Host 'Launching installed app'
