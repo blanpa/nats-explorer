@@ -21,6 +21,14 @@ fi
 
 VERSION="${VERSION:-$(git -C "$ROOT" describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo 0.0.0)}"
 VERSION="${VERSION#v}"
+# Non-release builds (a branch name from workflow_dispatch, "dev", …) get a
+# version that package formats accept: 0.0.0-<name>.<short sha>.
+if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+  VERSION="0.0.0-$(echo "$VERSION" | tr -c 'A-Za-z0-9.\n' '.' | sed 's/^\.*//;s/\.*$//').$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo 0)"
+fi
+# NSIS version info and CFBundleVersion need plain X.Y.Z; pre-release suffixes stay in file names and the window title.
+NUMERIC_VERSION="$(echo "$VERSION" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+')"
+echo "version $VERSION (package metadata $NUMERIC_VERSION)"
 APP="NATS Explorer"
 BIN=nats-explorer
 OUT="$ROOT/dist/desktop"
@@ -31,7 +39,7 @@ mkdir -p "$OUT"
 WAILS_JSON="$ROOT/go-server/wails.json"
 cp "$WAILS_JSON" "$WAILS_JSON.orig"
 trap 'mv "$WAILS_JSON.orig" "$WAILS_JSON"' EXIT
-sed -i.bak "s/\"productVersion\": \"[^\"]*\"/\"productVersion\": \"$VERSION\"/" "$WAILS_JSON" && rm -f "$WAILS_JSON.bak"
+sed -i.bak "s/\"productVersion\": \"[^\"]*\"/\"productVersion\": \"$NUMERIC_VERSION\"/" "$WAILS_JSON" && rm -f "$WAILS_JSON.bak"
 
 [ -d "$ROOT/client/dist" ] || { echo "client/dist missing: run pnpm --filter client build first" >&2; exit 1; }
 rm -rf "$ROOT/go-server/frontend/dist"
