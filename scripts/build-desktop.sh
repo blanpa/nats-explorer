@@ -97,7 +97,12 @@ CTRL
     NSIS=""
     command -v makensis >/dev/null && NSIS="-nsis"
     wails_build -platform windows/amd64 -o "$BIN.exe" -webview2 download $NSIS
-    (cd build/bin && zip -q "$OUT/nats-explorer-desktop-$VERSION-windows-x64.zip" "$BIN.exe")
+    # Git Bash on the Windows runner has no zip; 7-Zip is always there.
+    if command -v zip >/dev/null; then
+      (cd build/bin && zip -q "$OUT/nats-explorer-desktop-$VERSION-windows-x64.zip" "$BIN.exe")
+    else
+      (cd build/bin && 7z a -tzip -bso0 -bsp0 "$OUT/nats-explorer-desktop-$VERSION-windows-x64.zip" "$BIN.exe")
+    fi
     if [ -n "$NSIS" ]; then
       mv build/bin/*-installer.exe "$OUT/nats-explorer-desktop-$VERSION-windows-x64-setup.exe"
     else
