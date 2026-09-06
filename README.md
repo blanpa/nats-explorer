@@ -15,7 +15,7 @@ See the [changelog](CHANGELOG.md) for what changed in each release.
 
 </details>
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 ![Go](https://img.shields.io/badge/go-1.26%2B-00ADD8.svg)
 ![NATS](https://img.shields.io/badge/NATS-2.10%2B-purple.svg)
 
@@ -265,4 +265,4 @@ Every release carries a `SHA256SUMS.txt`. Installers are not code-signed (see th
 
 ## License
 
-[MIT](LICENSE) -- Copyright (c) 2026 blanpa
+[Apache License 2.0](LICENSE) -- Copyright 2026 blanpa

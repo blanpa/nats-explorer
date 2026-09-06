@@ -14,7 +14,7 @@
     "productName": "NATS Explorer",
     "productIdentifier": "io.github.nats-explorer",
     "productVersion": "0.2.0",
-    "copyright": "NATS Explorer contributors",
+    "copyright": "Copyright 2026 blanpa. Licensed under the Apache License 2.0.",
     "comments": "Desktop explorer for NATS: subjects, JetStream, Key-Value, Object Store, services and monitoring."
   }
 }

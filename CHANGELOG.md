@@ -4,6 +4,8 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 
 ## [0.2.0] - 2026-09-06
 
+Licensed under the Apache License 2.0 from this release on (previously MIT).
+
 The first release that ships as an installable desktop application. Everything below was reviewed and verified against real NATS setups: a mutual-TLS server, a three-node cluster with a leaf node and JetStream domains, and a 20 000 msg/s stress load.
 
 ### Added
