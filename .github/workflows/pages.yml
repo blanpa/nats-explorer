@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,9 +16,8 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
-# GitHub Pages is not available on private repositories of this plan; the
-# jobs are skipped there and start working as soon as the repository is public
-# (Settings → Pages → Source: GitHub Actions).
+# GitHub Pages needs a public repository on this plan; the jobs are skipped
+# while it is private. Pages source must be "GitHub Actions".
 jobs:
   build:
     if: ${{ !github.event.repository.private }}
