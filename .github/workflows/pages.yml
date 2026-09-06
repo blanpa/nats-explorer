@@ -15,8 +15,12 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+# GitHub Pages is not available on private repositories of this plan; the
+# jobs are skipped there and start working as soon as the repository is public
+# (Settings → Pages → Source: GitHub Actions).
 jobs:
   build:
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,6 +32,7 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
 
   deploy:
+    if: ${{ !github.event.repository.private }}
     needs: build
     runs-on: ubuntu-latest
     environment:
