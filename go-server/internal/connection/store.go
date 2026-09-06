@@ -1,6 +1,8 @@
 package connection
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"strings"
 	"sync"
@@ -12,19 +14,38 @@ import (
 var colors = []string{"#2ec4a5", "#5aa9ff", "#e8a06b", "#a7d68b", "#c99cff", "#f5b53f", "#7fd3e6", "#f28fb1"}
 
 type Config struct {
-	ID             string   `json:"id"`
-	Name           string   `json:"name"`
-	Servers        []string `json:"servers"`
-	AuthMethod     string   `json:"authMethod"`
-	Token          string   `json:"token,omitempty"`
-	User           string   `json:"user,omitempty"`
-	Pass           string   `json:"pass,omitempty"`
-	NKeySeed       string   `json:"nkeySeed,omitempty"`
-	Creds          string   `json:"creds,omitempty"`
-	TLS            bool     `json:"tls,omitempty"`
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	Servers    []string `json:"servers"`
+	AuthMethod string   `json:"authMethod"`
+	Token      string   `json:"token,omitempty"`
+	User       string   `json:"user,omitempty"`
+	Pass       string   `json:"pass,omitempty"`
+	NKeySeed   string   `json:"nkeySeed,omitempty"`
+	Creds      string   `json:"creds,omitempty"`
+	TLS        bool     `json:"tls,omitempty"`
+	// PEM material for TLS: a CA to trust, and an optional client certificate
+	// + key for mutual TLS. TLSInsecure skips server verification.
+	TLSCA          string   `json:"tlsCa,omitempty"`
+	TLSCert        string   `json:"tlsCert,omitempty"`
+	TLSKey         string   `json:"tlsKey,omitempty"`
+	TLSInsecure    bool     `json:"tlsInsecure,omitempty"`
 	Subscriptions  []string `json:"subscriptions,omitempty"`
 	MonitoringPort int      `json:"monitoringPort,omitempty"`
 	MonitoringURL  string   `json:"monitoringUrl,omitempty"`
+	// JSDomain routes JetStream API calls to a specific JetStream domain
+	// (e.g. a leaf node's domain reachable through this server). JSAPIPrefix
+	// is the raw alternative for imported JetStream APIs; it wins when set.
+	JSDomain    string `json:"jsDomain,omitempty"`
+	JSAPIPrefix string `json:"jsApiPrefix,omitempty"`
+	// Optional credentials for the NATS system account ($SYS). They open a
+	// second connection used only for cluster-wide monitoring requests.
+	SysAuthMethod string `json:"sysAuthMethod,omitempty"`
+	SysToken      string `json:"sysToken,omitempty"`
+	SysUser       string `json:"sysUser,omitempty"`
+	SysPass       string `json:"sysPass,omitempty"`
+	SysNKeySeed   string `json:"sysNkeySeed,omitempty"`
+	SysCreds      string `json:"sysCreds,omitempty"`
 }
 
 // Status is what the browser sees for every managed connection.
@@ -37,15 +58,23 @@ type Status struct {
 	Color         string   `json:"color"`
 	Servers       []string `json:"servers,omitempty"`
 	Subscriptions []string `json:"subscriptions,omitempty"`
-	LastError     string   `json:"lastError,omitempty"`
-	Reconnects    uint64   `json:"reconnects"`
-	ConnectedAt   int64    `json:"connectedAt,omitempty"`
+	JSDomain      string   `json:"jsDomain,omitempty"`
+	JSAPIPrefix   string   `json:"jsApiPrefix,omitempty"`
+	// SysAccount is true when a system-account connection is open; SysError
+	// explains why it is not although credentials were given.
+	SysAccount  bool   `json:"sysAccount"`
+	SysError    string `json:"sysError,omitempty"`
+	LastError   string `json:"lastError,omitempty"`
+	Reconnects  uint64 `json:"reconnects"`
+	ConnectedAt int64  `json:"connectedAt,omitempty"`
 }
 
 type Managed struct {
 	ID          string
 	Config      Config
 	NC          *nats.Conn
+	SysNC       *nats.Conn // system account connection, nil unless configured
+	SysError    string
 	Color       string
 	ConnectedAt time.Time
 
@@ -75,6 +104,10 @@ func (m *Managed) status() Status {
 		Color:         m.Color,
 		Servers:       m.Config.Servers,
 		Subscriptions: m.Config.Subscriptions,
+		JSDomain:      m.Config.JSDomain,
+		JSAPIPrefix:   m.Config.JSAPIPrefix,
+		SysAccount:    m.SysNC != nil && m.SysNC.IsConnected(),
+		SysError:      m.SysError,
 		LastError:     lastErr,
 	}
 	if len(st.Subscriptions) == 0 {
@@ -138,30 +171,86 @@ func buildOptions(cfg Config, managed *Managed, notify func()) ([]nats.Option, e
 		}),
 	}
 
-	switch cfg.AuthMethod {
+	authOpts, err := authOptions(cfg.AuthMethod, cfg.Token, cfg.User, cfg.Pass, cfg.NKeySeed, cfg.Creds)
+	if err != nil {
+		return nil, err
+	}
+	opts = append(opts, authOpts...)
+
+	if cfg.TLS || cfg.TLSCA != "" || cfg.TLSCert != "" || cfg.TLSKey != "" {
+		tc, err := tlsConfigFor(cfg)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, nats.Secure(tc))
+	}
+	return opts, nil
+}
+
+// tlsConfigFor turns the PEM strings of a config into a tls.Config.
+func tlsConfigFor(cfg Config) (*tls.Config, error) {
+	tc := &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: cfg.TLSInsecure} //nolint:gosec // opt-in by the user
+	if ca := strings.TrimSpace(cfg.TLSCA); ca != "" {
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM([]byte(ca)) {
+			return nil, fmt.Errorf("CA certificate: no PEM certificate found")
+		}
+		tc.RootCAs = pool
+	}
+	cert, key := strings.TrimSpace(cfg.TLSCert), strings.TrimSpace(cfg.TLSKey)
+	if cert != "" || key != "" {
+		if cert == "" || key == "" {
+			return nil, fmt.Errorf("client certificate and key must both be provided")
+		}
+		pair, err := tls.X509KeyPair([]byte(cert), []byte(key))
+		if err != nil {
+			return nil, fmt.Errorf("client certificate: %w", err)
+		}
+		tc.Certificates = []tls.Certificate{pair}
+	}
+	return tc, nil
+}
+
+// authOptions turns one set of credentials into nats options.
+func authOptions(method, token, user, pass, nkeySeed, creds string) ([]nats.Option, error) {
+	switch method {
 	case "token":
-		opts = append(opts, nats.Token(cfg.Token))
+		return []nats.Option{nats.Token(token)}, nil
 	case "userpass":
-		opts = append(opts, nats.UserInfo(cfg.User, cfg.Pass))
+		return []nats.Option{nats.UserInfo(user, pass)}, nil
 	case "nkey":
-		if cfg.NKeySeed == "" {
+		if nkeySeed == "" {
 			return nil, fmt.Errorf("nkey seed required")
 		}
-		opt, err := nats.NkeyOptionFromSeed(cfg.NKeySeed)
+		opt, err := nats.NkeyOptionFromSeed(nkeySeed)
 		if err != nil {
 			return nil, fmt.Errorf("invalid nkey seed: %w", err)
 		}
-		opts = append(opts, opt)
+		return []nats.Option{opt}, nil
 	case "jwt":
-		if strings.TrimSpace(cfg.Creds) == "" {
+		if strings.TrimSpace(creds) == "" {
 			return nil, fmt.Errorf("credentials required")
 		}
 		// The browser sends the .creds file *content*, not a path.
-		opts = append(opts, nats.UserCredentialBytes([]byte(cfg.Creds)))
+		return []nats.Option{nats.UserCredentialBytes([]byte(creds))}, nil
 	}
+	return nil, nil
+}
 
-	if cfg.TLS {
-		opts = append(opts, nats.Secure())
+// buildSysOptions dials the same servers with the system-account credentials.
+func buildSysOptions(cfg Config) ([]nats.Option, error) {
+	opts := []nats.Option{nats.Name("nats-explorer (system)"), nats.Timeout(5 * time.Second), nats.MaxReconnects(-1), nats.ReconnectWait(2 * time.Second)}
+	authOpts, err := authOptions(cfg.SysAuthMethod, cfg.SysToken, cfg.SysUser, cfg.SysPass, cfg.SysNKeySeed, cfg.SysCreds)
+	if err != nil {
+		return nil, err
+	}
+	opts = append(opts, authOpts...)
+	if cfg.TLS || cfg.TLSCA != "" || cfg.TLSCert != "" || cfg.TLSKey != "" {
+		tc, err := tlsConfigFor(cfg)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, nats.Secure(tc))
 	}
 	return opts, nil
 }
@@ -206,6 +295,18 @@ func (s *Store) Connect(cfg Config) (*Managed, error) {
 		return nil, err
 	}
 
+	// The system-account connection is optional: a failure is reported, not fatal.
+	if cfg.SysAuthMethod != "" && cfg.SysAuthMethod != "none" {
+		sysOpts, err := buildSysOptions(cfg)
+		if err != nil {
+			managed.SysError = err.Error()
+		} else if sysNC, err := nats.Connect(strings.Join(cfg.Servers, ","), sysOpts...); err != nil {
+			managed.SysError = err.Error()
+		} else {
+			managed.SysNC = sysNC
+		}
+	}
+
 	s.mu.Lock()
 	managed.NC = nc
 	managed.ConnectedAt = time.Now()
@@ -230,6 +331,9 @@ func (s *Store) Disconnect(connID string) error {
 
 	if managed.NC != nil {
 		managed.NC.Close()
+	}
+	if managed.SysNC != nil {
+		managed.SysNC.Close()
 	}
 	s.notify()
 	return nil

@@ -1,24 +1,16 @@
 import { useEffect, useState } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { Braces, ChevronDown, History, Plus, Send, Trash2 } from 'lucide-react';
-import type { RequestReply } from 'shared';
-import { api, errorMessage } from '../../lib/api';
+import { Bookmark, BookmarkPlus, ChevronDown, History, SlidersHorizontal } from 'lucide-react';
 import { useStore } from '../../store';
-import { formatDurationMs, prettyJson, tryParseJson } from '../../lib/utils';
-import { Button, IconButton } from '../ui/Button';
-import { Input, Select, Textarea } from '../ui/Input';
-import { Kbd, Segmented } from '../ui/misc';
-import { toast } from '../ui/Toast';
-import PayloadViewer from './PayloadViewer';
-
-type Mode = 'publish' | 'request';
-interface HeaderPair {
-  key: string;
-  value: string;
-}
+import { useSavedRequests } from '../../store/savedRequests';
+import { draftFromSaved, emptyDraft, newSavedRequest, savedFromDraft, type RequestDraft, type RequestMode, type HeaderPair } from '../../lib/savedRequests';
+import { cn, writeSetting } from '../../lib/utils';
+import { Button } from '../ui/Button';
+import { Input } from '../ui/Input';
+import { RequestForm, RequestResult, useRequestRunner, useSendConnection } from '../requests/RequestForm';
 
 interface RecentSend {
-  mode: Mode;
+  mode: RequestMode;
   subject: string;
   payload: string;
   headers: HeaderPair[];
@@ -39,206 +31,182 @@ function loadRecent(): RecentSend[] {
 
 function pushRecent(item: RecentSend): RecentSend[] {
   const list = [item, ...loadRecent().filter(r => !(r.subject === item.subject && r.payload === item.payload && r.mode === item.mode))].slice(0, RECENT_MAX);
-  try {
-    localStorage.setItem(RECENT_KEY, JSON.stringify(list));
-  } catch {
-    /* ignore */
-  }
+  writeSetting(RECENT_KEY, list);
   return list;
 }
 
+const menuClass = 'z-50 rounded border border-line bg-panel shadow-pop p-1 animate-fade-in outline-none';
+const itemClass = 'flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer outline-none text-sm data-[highlighted]:bg-field';
+
+/** Quick publish/request drawer below the subject detail. Templates live in the Requests module. */
 export default function PublishPanel() {
   const selectedSubject = useStore(s => s.selectedSubject);
   const prefill = useStore(s => s.publishPrefill);
   const clearPrefill = useStore(s => s.prefillPublish);
-  const activeConnId = useStore(s => s.activeConnId);
-  const connections = useStore(s => s.connections);
-  const connected = connections.filter(c => c.connected);
+  const setModule = useStore(s => s.setModule);
+  const setSelectedTemplate = useStore(s => s.setSelectedTemplateId);
+  const saved = useSavedRequests(s => s.items);
+  const upsertSaved = useSavedRequests(s => s.upsert);
 
-  const [mode, setMode] = useState<Mode>('publish');
-  const [subject, setSubject] = useState(selectedSubject ?? '');
-  const [payload, setPayload] = useState('');
-  const [headers, setHeaders] = useState<HeaderPair[]>([]);
-  const [timeout, setTimeoutMs] = useState(5000);
-  const [connId, setConnId] = useState<string>('');
-  const [busy, setBusy] = useState(false);
-  const [reply, setReply] = useState<RequestReply | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState<RequestDraft>(() => emptyDraft(selectedSubject ?? ''));
+  const [connChoice, setConnChoice] = useState('');
   const [recent, setRecent] = useState<RecentSend[]>(loadRecent);
+  const [templateId, setTemplateId] = useState<string | null>(null);
+  const [naming, setNaming] = useState(false);
+  const [name, setName] = useState('');
+  const runner = useRequestRunner();
+  const { effective } = useSendConnection(connChoice);
 
   useEffect(() => {
     if (prefill) {
-      setSubject(prefill.subject);
-      if (prefill.payload !== undefined) setPayload(prefill.payload);
+      setDraft(d => ({ ...d, subject: prefill.subject, payload: prefill.payload ?? d.payload }));
       clearPrefill(null);
     }
   }, [prefill, clearPrefill]);
 
-  const effectiveConn = connected.find(c => c.id === connId)?.id ?? activeConnId ?? connected[0]?.id ?? null;
-  const jsonValid = payload.trim() === '' || !payload.trim().startsWith('{') && !payload.trim().startsWith('[') || tryParseJson(payload) !== undefined;
+  const activeTemplate = templateId ? saved.find(s => s.id === templateId) ?? null : null;
 
-  const send = async () => {
-    if (!subject.trim() || !effectiveConn) return;
-    setBusy(true);
-    setError(null);
-    setReply(null);
-    const hdrs: Record<string, string[]> = {};
-    for (const h of headers) {
-      const k = h.key.trim();
-      if (!k) continue;
-      (hdrs[k] ||= []).push(h.value);
-    }
-    const body = { subject: subject.trim(), payload, headers: Object.keys(hdrs).length ? hdrs : undefined };
-    setRecent(pushRecent({ mode, subject: body.subject, payload, headers: headers.filter(h => h.key.trim()), ts: Date.now() }));
-    try {
-      if (mode === 'request') {
-        const res = await api.requestReply(effectiveConn, { ...body, timeout });
-        setReply(res);
-      } else {
-        await api.publish(effectiveConn, body);
-        toast.success(`Published to ${body.subject}`);
-      }
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
+  const send = () => {
+    if (!effective) return;
+    setRecent(pushRecent({ mode: draft.mode, subject: draft.subject.trim(), payload: draft.payload, headers: draft.headers.filter(h => h.key.trim()), ts: Date.now() }));
+    runner.send(draft, effective);
   };
+
+  const saveNew = () => {
+    const item = newSavedRequest(savedFromDraft(draft, { id: '', name: name.trim() || draft.subject.trim() || 'Untitled request' }));
+    upsertSaved(item);
+    setTemplateId(item.id);
+    setNaming(false);
+    setName('');
+  };
+
+  const toolbarExtra = (
+    <>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger asChild>
+          <Button size="sm" variant="ghost" icon={<Bookmark size={13} />} className={cn(activeTemplate && 'text-fg')}>
+            <span className="max-w-[160px] truncate">{activeTemplate ? activeTemplate.name : 'Templates'}</span>
+            <ChevronDown size={12} />
+          </Button>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content align="end" sideOffset={6} className={cn(menuClass, 'w-[380px] max-w-[calc(100vw-32px)]')}>
+            {saved.length === 0 && <div className="px-2 py-2 text-xs text-muted">No saved templates yet.</div>}
+            <div className="max-h-[300px] overflow-auto">
+              {[...saved]
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map(t => (
+                  <DropdownMenu.Item
+                    key={t.id}
+                    onSelect={() => {
+                      setDraft(draftFromSaved(t));
+                      setTemplateId(t.id);
+                      runner.clear();
+                    }}
+                    className={cn(itemClass, t.id === templateId && 'bg-accent/10')}
+                  >
+                    <span className={cn('font-mono text-xs w-8 shrink-0', t.mode === 'request' ? 'text-info' : 'text-accent')}>{t.mode === 'request' ? 'REQ' : 'PUB'}</span>
+                    <span className="flex flex-col min-w-0 flex-1">
+                      <span className="truncate">{t.name}</span>
+                      <span className="font-mono text-xs text-muted truncate">
+                        {t.subject}
+                        {t.count && t.count > 1 ? ` · ${t.count}×` : ''}
+                      </span>
+                    </span>
+                  </DropdownMenu.Item>
+                ))}
+            </div>
+            <DropdownMenu.Separator className="h-px bg-line my-1" />
+            {activeTemplate && (
+              <DropdownMenu.Item onSelect={() => upsertSaved(savedFromDraft(draft, activeTemplate))} className={itemClass}>
+                <Bookmark size={13} /> Save changes to “{activeTemplate.name}”
+              </DropdownMenu.Item>
+            )}
+            <DropdownMenu.Item
+              onSelect={() => {
+                setName(activeTemplate?.name ?? '');
+                setNaming(true);
+              }}
+              className={itemClass}
+            >
+              <BookmarkPlus size={13} /> Save as template…
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              onSelect={() => {
+                if (activeTemplate) setSelectedTemplate(activeTemplate.id);
+                setModule('requests');
+              }}
+              className={itemClass}
+            >
+              <SlidersHorizontal size={13} /> Open Requests module
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+      {recent.length > 0 && (
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <Button size="sm" variant="ghost" icon={<History size={13} />}>
+              Recent <ChevronDown size={12} />
+            </Button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content align="end" sideOffset={6} className={cn(menuClass, 'w-[420px] max-w-[calc(100vw-32px)]')}>
+              {recent.map((r, i) => (
+                <DropdownMenu.Item
+                  key={i}
+                  onSelect={() => {
+                    setDraft(d => ({ ...d, mode: r.mode, subject: r.subject, payload: r.payload, headers: r.headers }));
+                    setTemplateId(null);
+                  }}
+                  className="flex flex-col gap-0.5 px-2 py-1.5 rounded cursor-pointer outline-none data-[highlighted]:bg-field"
+                >
+                  <span className="flex items-center gap-2 text-sm font-mono truncate">
+                    <span className={r.mode === 'request' ? 'text-info' : 'text-accent'}>{r.mode === 'request' ? 'REQ' : 'PUB'}</span>
+                    <span className="truncate">{r.subject}</span>
+                  </span>
+                  <span className="text-xs text-muted font-mono truncate">{r.payload.replace(/\s+/g, ' ').slice(0, 90) || '(empty payload)'}</span>
+                </DropdownMenu.Item>
+              ))}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
+      )}
+    </>
+  );
 
   return (
     <div className="flex flex-col gap-3 p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Segmented
-          value={mode}
-          onChange={setMode}
-          options={[
-            { id: 'publish', label: 'Publish' },
-            { id: 'request', label: 'Request / Reply' },
-          ]}
-        />
-        {connected.length > 1 && (
-          <Select inputSize="sm" className="w-44" value={effectiveConn ?? ''} onChange={e => setConnId(e.target.value)} aria-label="Connection">
-            {connected.map(c => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </Select>
-        )}
-        {mode === 'request' && (
-          <label className="flex items-center gap-1.5 text-xs text-muted">
-            Timeout
-            <Input inputSize="sm" type="number" min={100} step={100} className="w-24" value={timeout} onChange={e => setTimeoutMs(Number(e.target.value) || 5000)} />
-            ms
-          </label>
-        )}
-        <div className="ml-auto flex items-center gap-2">
-          {recent.length > 0 && (
-            <DropdownMenu.Root>
-              <DropdownMenu.Trigger asChild>
-                <Button size="sm" variant="ghost" icon={<History size={13} />}>
-                  Recent <ChevronDown size={12} />
-                </Button>
-              </DropdownMenu.Trigger>
-              <DropdownMenu.Portal>
-                <DropdownMenu.Content align="end" sideOffset={6} className="z-50 w-[420px] max-w-[calc(100vw-32px)] rounded-lg border border-line bg-panel shadow-pop p-1 animate-fade-in outline-none">
-                  {recent.map((r, i) => (
-                    <DropdownMenu.Item
-                      key={i}
-                      onSelect={() => {
-                        setMode(r.mode);
-                        setSubject(r.subject);
-                        setPayload(r.payload);
-                        setHeaders(r.headers);
-                      }}
-                      className="flex flex-col gap-0.5 px-2 py-1.5 rounded cursor-pointer outline-none data-[highlighted]:bg-field"
-                    >
-                      <span className="flex items-center gap-2 text-sm font-mono truncate">
-                        <span className={r.mode === 'request' ? 'text-info' : 'text-accent'}>{r.mode === 'request' ? 'REQ' : 'PUB'}</span>
-                        <span className="truncate">{r.subject}</span>
-                      </span>
-                      <span className="text-xs text-muted font-mono truncate">{r.payload.replace(/\s+/g, ' ').slice(0, 90) || '(empty payload)'}</span>
-                    </DropdownMenu.Item>
-                  ))}
-                </DropdownMenu.Content>
-              </DropdownMenu.Portal>
-            </DropdownMenu.Root>
-          )}
-          <span className="text-xs text-faint hidden md:flex items-center gap-1">
-            <Kbd>Ctrl</Kbd>+<Kbd>Enter</Kbd> to send
-          </span>
-          <Button variant="primary" icon={<Send size={13} />} loading={busy} disabled={!subject.trim() || !effectiveConn} onClick={send}>
-            {mode === 'request' ? 'Send request' : 'Publish'}
+      <RequestForm
+        draft={draft}
+        onChange={setDraft}
+        onSend={send}
+        busy={runner.busy}
+        canSend={!!effective}
+        connId={effective ?? ''}
+        onConnChange={setConnChoice}
+        toolbarExtra={toolbarExtra}
+        subjectPlaceholder={selectedSubject ?? undefined}
+      />
+      {naming && (
+        <form
+          className="flex items-center gap-2"
+          onSubmit={e => {
+            e.preventDefault();
+            saveNew();
+          }}
+        >
+          <span className="text-xs text-muted">Template name</span>
+          <Input inputSize="sm" className="w-64" autoFocus value={name} onChange={e => setName(e.target.value)} placeholder={draft.subject.trim() || 'e.g. Inventory lookup'} aria-label="Template name" />
+          <Button size="sm" variant="primary" type="submit">
+            Save
           </Button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-3">
-        <div className="flex flex-col gap-2">
-          <Input mono inputSize="sm" value={subject} onChange={e => setSubject(e.target.value)} placeholder={selectedSubject ?? 'subject.to.publish'} aria-label="Subject" />
-          <div className="flex flex-col gap-1">
-            {headers.map((h, i) => (
-              <div key={i} className="flex gap-1">
-                <Input inputSize="sm" mono placeholder="Header" value={h.key} onChange={e => setHeaders(hs => hs.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)))} />
-                <Input inputSize="sm" mono placeholder="Value" value={h.value} onChange={e => setHeaders(hs => hs.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} />
-                <IconButton label="Remove header" size="sm" onClick={() => setHeaders(hs => hs.filter((_, j) => j !== i))}>
-                  <Trash2 size={13} />
-                </IconButton>
-              </div>
-            ))}
-            <Button size="xs" variant="ghost" icon={<Plus size={12} />} className="self-start" onClick={() => setHeaders(hs => [...hs, { key: '', value: '' }])}>
-              Header
-            </Button>
-          </div>
-        </div>
-        <div className="flex flex-col gap-1 min-w-0">
-          <Textarea
-            rows={4}
-            value={payload}
-            onChange={e => setPayload(e.target.value)}
-            placeholder='{"hello": "world"}'
-            aria-label="Payload"
-            className={!jsonValid ? 'border-warn/60' : undefined}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault();
-                send();
-              }
-            }}
-          />
-          <div className="flex items-center gap-2 text-xs">
-            {!jsonValid && <span className="text-warn">Looks like JSON but does not parse. It will be sent as-is.</span>}
-            <span className="flex-1" />
-            <span className="text-faint font-mono">{new TextEncoder().encode(payload).length} B</span>
-            <Button size="xs" variant="ghost" icon={<Braces size={12} />} disabled={tryParseJson(payload) === undefined} onClick={() => setPayload(prettyJson(payload))}>
-              Format
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {error && <div className="text-sm text-danger font-mono rounded border border-danger/30 bg-danger/5 px-3 py-2">{error}</div>}
-
-      {reply && (
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-3 text-xs text-muted">
-            <span className="section-title">Reply</span>
-            <span className="font-mono">{reply.subject}</span>
-            <span className="font-mono">{formatDurationMs(reply.durationMs)}</span>
-            <span className="font-mono">{reply.size} B</span>
-          </div>
-          {reply.headers && Object.keys(reply.headers).length > 0 && (
-            <div className="text-xs font-mono text-muted">
-              {Object.entries(reply.headers).map(([k, v]) => (
-                <div key={k}>
-                  <span className="text-syn-key">{k}</span>: {v.join(', ')}
-                </div>
-              ))}
-            </div>
-          )}
-          <PayloadViewer compact payload={reply.payload} type={reply.payloadType} size={reply.size} maxHeight={240} />
-        </div>
+          <Button size="sm" variant="ghost" onClick={() => setNaming(false)}>
+            Cancel
+          </Button>
+        </form>
       )}
+      <RequestResult error={runner.error} run={runner.run} reply={runner.reply} />
     </div>
   );
 }

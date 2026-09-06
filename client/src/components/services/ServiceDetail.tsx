@@ -3,7 +3,7 @@ import { useStore } from '../../store';
 import { useServices } from '../../store/services';
 import { formatDateTime, formatDurationMs, formatNumber, formatRelative } from '../../lib/utils';
 import { Button, IconButton } from '../ui/Button';
-import { Badge, EmptyState, KeyValueGrid, PaneHeader, SectionTitle, StatTile } from '../ui/misc';
+import { Badge, EmptyState, KeyValueGrid, PaneHeader, SectionTitle, StatStrip, StatTile } from '../ui/misc';
 
 export default function ServiceDetail() {
   const connId = useStore(s => s.activeConnId);
@@ -41,12 +41,12 @@ export default function ServiceDetail() {
       </PaneHeader>
 
       <div className="flex-1 min-h-0 overflow-auto p-4 flex flex-col gap-5">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatStrip>
           <StatTile label="Requests" value={formatNumber(totalReq)} />
           <StatTile label="Errors" value={formatNumber(totalErr)} tone={totalErr > 0 ? 'danger' : undefined} />
           <StatTile label="Avg processing" value={avgNs ? formatDurationMs(avgNs / 1e6) : '–'} />
           <StatTile label="Started" value={st ? formatRelative(st.started) : '–'} sub={st ? formatDateTime(st.started) : undefined} className="[&>div:nth-child(2)]:text-sm" />
-        </div>
+        </StatStrip>
 
         <div>
           <SectionTitle>Endpoints · {svc.endpoints?.length ?? 0}</SectionTitle>

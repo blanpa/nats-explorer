@@ -19,7 +19,7 @@ export default function ObjStoreView() {
   const [uploading, setUploading] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
 
-  const { data, error, loading, initial, reload } = useAsync<ObjInfo[]>(() => (connId && store ? api.listObjects(connId, store) : null), [connId, store]);
+  const { data, error, loading, initial, reload } = useAsync<ObjInfo[]>(() => (connId && store ? api.listObjects(connId, store) : null), [connId, store], { key: `objects:${connId}:${store}` });
 
   if (!store) return <EmptyState icon={Archive} title="Select an object store" description="Object stores hold files and blobs split into chunks. Pick one to upload, download or delete objects." />;
   if (!connId) return null;
@@ -29,7 +29,6 @@ export default function ObjStoreView() {
       setUploading(file.name);
       try {
         const res = await api.putObject(connId, store, file);
-        toast.success(`Uploaded ${file.name}`, `${formatBytes(res.size)} in ${res.chunks} chunks`);
       } catch (err) {
         toast.error(`Upload of ${file.name} failed`, errorMessage(err));
       }
@@ -54,7 +53,6 @@ export default function ObjStoreView() {
     if (!(await confirm({ title: `Delete ${name}?`, message: 'The object is removed from the store.', confirmLabel: 'Delete', danger: true }))) return;
     try {
       await api.deleteObject(connId, store, name);
-      toast.success(`Deleted ${name}`);
       reload();
       bump();
     } catch (err) {
@@ -66,7 +64,6 @@ export default function ObjStoreView() {
     if (!(await confirm({ title: `Delete object store ${store}?`, message: 'All objects in this store are removed permanently.', confirmLabel: 'Delete store', danger: true }))) return;
     try {
       await api.deleteObjectStore(connId, store);
-      toast.success(`Deleted store ${store}`);
       setStore(null);
       bump();
     } catch (err) {

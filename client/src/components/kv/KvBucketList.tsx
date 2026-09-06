@@ -1,25 +1,28 @@
 import { useMemo, useState } from 'react';
 import { KeyRound, Plus, RefreshCw } from 'lucide-react';
 import type { KvBucketInfo } from 'shared';
-import { api, errorMessage } from '../../lib/api';
+import { api, describeJsError, errorMessage } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
-import { useStore } from '../../store';
+import { useJsDomainOverride, useStore } from '../../store';
 import { cn, formatBytes, formatDurationNs, formatNumber } from '../../lib/utils';
 import { Button, IconButton } from '../ui/Button';
 import { Field, Input, SearchInput, Select } from '../ui/Input';
 import { Dialog } from '../ui/Dialog';
 import { Badge, EmptyState, ErrorState, LoadingState, PaneHeader } from '../ui/misc';
-import { toast } from '../ui/Toast';
+import DomainSwitch from '../jetstream/DomainSwitch';
 
 export default function KvBucketList() {
   const connId = useStore(s => s.activeConnId);
+  const domainOverride = useJsDomainOverride(connId);
+  const connDomain = useStore(s => s.connections.find(c => c.id === connId)?.jsDomain);
+  const domainLabel = domainOverride || connDomain || undefined;
   const selected = useStore(s => s.selectedKvBucket);
   const setSelected = useStore(s => s.setSelectedKvBucket);
   const tick = useStore(s => s.refreshTick);
   const [filter, setFilter] = useState('');
   const [creating, setCreating] = useState(false);
 
-  const { data, error, loading, initial, reload } = useAsync<KvBucketInfo[]>(() => (connId ? api.listKvBuckets(connId) : null), [connId, tick], { interval: 10_000 });
+  const { data, error, loading, initial, reload } = useAsync<KvBucketInfo[]>(() => (connId ? api.listKvBuckets(connId) : null), [connId, tick], { key: `kv:${connId}`, interval: 10_000 });
 
   const buckets = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -30,6 +33,7 @@ export default function KvBucketList() {
     <div className="flex flex-col h-full min-h-0">
       <PaneHeader
         title="Key-Value buckets"
+        children={<DomainSwitch />}
         actions={
           <>
             <IconButton label="Refresh" size="xs" loading={loading && !initial} onClick={reload}>
@@ -48,7 +52,7 @@ export default function KvBucketList() {
         {initial && loading ? (
           <LoadingState />
         ) : error ? (
-          <ErrorState title="Cannot list buckets" message={error} />
+          <ErrorState title="Cannot list buckets" message={describeJsError(error, domainLabel)} />
         ) : buckets.length === 0 ? (
           <EmptyState compact icon={KeyRound} title={filter ? 'No matching buckets' : 'No KV buckets'} description={filter ? undefined : 'Create a bucket to store keys with revision history.'} />
         ) : (
@@ -112,7 +116,6 @@ function CreateBucketDialog({ connId, onClose, onCreated }: { connId: string; on
         replicas: Math.max(1, Number(replicas) || 1),
         maxBytes: Number(maxBytes) > 0 ? Number(maxBytes) : undefined,
       });
-      toast.success(`Bucket ${bucket} created`);
       onCreated(bucket);
     } catch (err) {
       setError(errorMessage(err));

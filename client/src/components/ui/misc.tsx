@@ -32,13 +32,13 @@ export function LoadingState({ label = 'Loading…' }: { label?: string }) {
 /* Empty state ---------------------------------------------------------- */
 
 export function EmptyState({
-  icon: Icon,
   title,
   description,
   action,
   className,
   compact,
 }: {
+  /** accepted for call-site compatibility; empty states are text-only */
   icon?: LucideIcon;
   title: ReactNode;
   description?: ReactNode;
@@ -48,14 +48,9 @@ export function EmptyState({
 }) {
   return (
     <div className={cn('flex flex-col items-center justify-center text-center h-full', compact ? 'py-6 px-4' : 'py-10 px-6', className)}>
-      {Icon && (
-        <div className={cn('rounded-full bg-field/80 text-muted flex items-center justify-center mb-3', compact ? 'w-9 h-9' : 'w-12 h-12')}>
-          <Icon size={compact ? 16 : 20} />
-        </div>
-      )}
-      <div className={cn('font-medium text-fg', compact ? 'text-sm' : 'text-md')}>{title}</div>
-      {description && <div className="text-sm text-muted mt-1 max-w-[380px]">{description}</div>}
-      {action && <div className="mt-4">{action}</div>}
+      <div className="text-sm font-medium text-muted">{title}</div>
+      {description && <div className="text-xs text-faint mt-1 max-w-[360px] leading-relaxed">{description}</div>}
+      {action && <div className="mt-3">{action}</div>}
     </div>
   );
 }
@@ -72,16 +67,21 @@ export function ErrorState({ title = 'Something went wrong', message, action }: 
   );
 }
 
-/* Stat tile ------------------------------------------------------------ */
+/* Stat strip --------------------------------------------------------- */
+
+/** A row of figures separated by hairlines; no boxes. */
+export function StatStrip({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn('flex flex-wrap items-stretch gap-y-3', className)}>{children}</div>;
+}
 
 export function StatTile({ label, value, sub, tone, className }: { label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: 'ok' | 'warn' | 'danger' | 'accent'; className?: string }) {
   return (
-    <div className={cn('card px-3 py-2.5 min-w-0', className)}>
+    <div data-stat="" className={cn('min-w-0 pl-4 pr-6 border-l border-line first:border-l-0 first:pl-0', className)}>
       <div className="text-xs text-muted truncate">{label}</div>
-      <div className={cn('text-lg font-semibold font-mono tabular-nums truncate mt-0.5', tone === 'ok' && 'text-ok', tone === 'warn' && 'text-warn', tone === 'danger' && 'text-danger', tone === 'accent' && 'text-accent')}>
+      <div className={cn('text-md font-semibold font-mono tabular-nums truncate', tone === 'ok' && 'text-ok', tone === 'warn' && 'text-warn', tone === 'danger' && 'text-danger', tone === 'accent' && 'text-accent')}>
         {value}
       </div>
-      {sub && <div className="text-xs text-faint truncate mt-0.5">{sub}</div>}
+      {sub && <div className="text-xs text-faint truncate">{sub}</div>}
     </div>
   );
 }

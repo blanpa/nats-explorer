@@ -7,7 +7,7 @@ import { useStore } from '../../store';
 import { formatBytes, formatDateTime, formatDurationNs, formatNumber } from '../../lib/utils';
 import { Button, IconButton } from '../ui/Button';
 import { confirm } from '../ui/Dialog';
-import { Badge, EmptyState, ErrorState, KeyValueGrid, LoadingState, PaneHeader, SectionTitle, StatTile, Tabs } from '../ui/misc';
+import { Badge, EmptyState, ErrorState, KeyValueGrid, LoadingState, PaneHeader, SectionTitle, StatStrip, StatTile, Tabs } from '../ui/misc';
 import { toast } from '../ui/Toast';
 import StreamDialog from './StreamDialog';
 import StreamMessages from './StreamMessages';
@@ -26,7 +26,7 @@ export default function StreamDetail() {
   const { data: stream, error, loading, initial, reload, setData } = useAsync<StreamInfo>(
     () => (connId && name ? api.getStream(connId, name) : null),
     [connId, name],
-    { interval: 5000 },
+    { key: `stream:${connId}:${name}`, interval: 5000 },
   );
 
   if (!name) return <EmptyState icon={Layers} title="Select a stream" description="Streams persist messages for the subjects they capture. Pick one to inspect its state, messages and consumers." />;
@@ -38,7 +38,6 @@ export default function StreamDetail() {
     if (!(await confirm({ title: `Purge ${stream.name}?`, message: 'All messages in this stream are deleted. Consumers keep their configuration.', confirmLabel: 'Purge', danger: true }))) return;
     try {
       await api.purgeStream(connId, stream.name);
-      toast.success(`Purged ${stream.name}`);
       reload();
     } catch (err) {
       toast.error('Purge failed', errorMessage(err));
@@ -49,7 +48,6 @@ export default function StreamDetail() {
     if (!(await confirm({ title: `Delete stream ${stream.name}?`, message: 'The stream, its messages and all consumers are removed permanently.', confirmLabel: 'Delete stream', danger: true }))) return;
     try {
       await api.deleteStream(connId, stream.name);
-      toast.success(`Deleted ${stream.name}`);
       setSelected(null);
       bump();
     } catch (err) {
@@ -107,14 +105,14 @@ export default function StreamDetail() {
       <div className="flex-1 min-h-0 overflow-auto">
         {tab === 'overview' && (
           <div className="p-4 flex flex-col gap-5">
-            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+            <StatStrip>
               <StatTile label="Messages" value={formatNumber(st.messages)} />
               <StatTile label="Size" value={formatBytes(st.bytes)} />
               <StatTile label="Subjects" value={formatNumber(st.numSubjects)} />
               <StatTile label="Consumers" value={st.consumerCount} />
               <StatTile label="Sequence" value={`${formatNumber(st.firstSeq)} – ${formatNumber(st.lastSeq)}`} sub={st.numDeleted ? `${formatNumber(st.numDeleted)} deleted` : undefined} />
               <StatTile label="Last message" value={st.messages ? formatDateTime(st.lastTs) : '–'} sub={st.messages ? `first ${formatDateTime(st.firstTs)}` : undefined} className="[&>div:nth-child(2)]:text-sm" />
-            </div>
+            </StatStrip>
 
             <div>
               <SectionTitle>Subjects</SectionTitle>

@@ -1,25 +1,28 @@
 import { useMemo, useState } from 'react';
 import { Archive, Plus, RefreshCw } from 'lucide-react';
 import type { ObjStoreInfo } from 'shared';
-import { api, errorMessage } from '../../lib/api';
+import { api, describeJsError, errorMessage } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
-import { useStore } from '../../store';
+import { useJsDomainOverride, useStore } from '../../store';
 import { cn, formatBytes, formatNumber } from '../../lib/utils';
 import { Button, IconButton } from '../ui/Button';
 import { Field, Input, SearchInput, Select } from '../ui/Input';
 import { Dialog } from '../ui/Dialog';
 import { Badge, EmptyState, ErrorState, LoadingState, PaneHeader } from '../ui/misc';
-import { toast } from '../ui/Toast';
+import DomainSwitch from '../jetstream/DomainSwitch';
 
 export default function ObjStoreList() {
   const connId = useStore(s => s.activeConnId);
+  const domainOverride = useJsDomainOverride(connId);
+  const connDomain = useStore(s => s.connections.find(c => c.id === connId)?.jsDomain);
+  const domainLabel = domainOverride || connDomain || undefined;
   const selected = useStore(s => s.selectedObjStore);
   const setSelected = useStore(s => s.setSelectedObjStore);
   const tick = useStore(s => s.refreshTick);
   const [filter, setFilter] = useState('');
   const [creating, setCreating] = useState(false);
 
-  const { data, error, loading, initial, reload } = useAsync<ObjStoreInfo[]>(() => (connId ? api.listObjectStores(connId) : null), [connId, tick], { interval: 10_000 });
+  const { data, error, loading, initial, reload } = useAsync<ObjStoreInfo[]>(() => (connId ? api.listObjectStores(connId) : null), [connId, tick], { key: `obj:${connId}`, interval: 10_000 });
 
   const stores = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -30,6 +33,7 @@ export default function ObjStoreList() {
     <div className="flex flex-col h-full min-h-0">
       <PaneHeader
         title="Object stores"
+        children={<DomainSwitch />}
         actions={
           <>
             <IconButton label="Refresh" size="xs" loading={loading && !initial} onClick={reload}>
@@ -48,7 +52,7 @@ export default function ObjStoreList() {
         {initial && loading ? (
           <LoadingState />
         ) : error ? (
-          <ErrorState title="Cannot list object stores" message={error} />
+          <ErrorState title="Cannot list object stores" message={describeJsError(error, domainLabel)} />
         ) : stores.length === 0 ? (
           <EmptyState compact icon={Archive} title={filter ? 'No matching stores' : 'No object stores'} description={filter ? undefined : 'Create a store to upload files and blobs.'} />
         ) : (
@@ -110,7 +114,6 @@ function CreateStoreDialog({ connId, onClose, onCreated }: { connId: string; onC
         maxBytes: Number(maxBytes) > 0 ? Number(maxBytes) : undefined,
         ttl: Number(ttl) > 0 ? Number(ttl) * 1e9 : undefined,
       });
-      toast.success(`Object store ${bucket} created`);
       onCreated(bucket);
     } catch (err) {
       setError(errorMessage(err));

@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/nats-io/nats.go/jetstream"
-
 	"nats-explorer/internal/connection"
 )
 
@@ -109,7 +107,7 @@ func (h *ConnectionHandler) ServerInfo(w http.ResponseWriter, r *http.Request) {
 	jsEnabled := false
 	jsError := ""
 	var jsAccount map[string]interface{}
-	if js, err := jetstream.New(nc); err == nil {
+	if js, err := jetStreamForConn(h.Store, connID, r.URL.Query().Get("domain")); err == nil {
 		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 		defer cancel()
 		if info, err := js.AccountInfo(ctx); err == nil {

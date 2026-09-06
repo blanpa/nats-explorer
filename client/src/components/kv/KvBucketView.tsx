@@ -4,7 +4,7 @@ import type { KvEntry } from 'shared';
 import { api, errorMessage } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
 import { useLiveWatch } from '../../lib/live';
-import { useStore } from '../../store';
+import { useJsDomainOverride, useStore } from '../../store';
 import { cn, formatBytes, formatDateTime, formatRelative, prettyJson, previewPayload } from '../../lib/utils';
 import { Button, IconButton } from '../ui/Button';
 import { Field, Input, SearchInput, Textarea } from '../ui/Input';
@@ -16,6 +16,7 @@ import PayloadViewer from '../subjects/PayloadViewer';
 export default function KvBucketView() {
   const connId = useStore(s => s.activeConnId);
   const bucket = useStore(s => s.selectedKvBucket);
+  const domainOverride = useJsDomainOverride(connId);
   const setBucket = useStore(s => s.setSelectedKvBucket);
   const bump = useStore(s => s.bumpRefresh);
   const [filter, setFilter] = useState('');
@@ -25,8 +26,8 @@ export default function KvBucketView() {
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const keys = useAsync<string[]>(() => (connId && bucket ? api.listKvKeys(connId, bucket) : null), [connId, bucket]);
-  const entry = useAsync<KvEntry>(() => (connId && bucket && selectedKey ? api.getKvEntry(connId, bucket, selectedKey) : null), [connId, bucket, selectedKey]);
+  const keys = useAsync<string[]>(() => (connId && bucket ? api.listKvKeys(connId, bucket) : null), [connId, bucket], { key: `kvkeys:${connId}:${bucket}` });
+  const entry = useAsync<KvEntry>(() => (connId && bucket && selectedKey ? api.getKvEntry(connId, bucket, selectedKey) : null), [connId, bucket, selectedKey], { key: `kventry:${connId}:${bucket}:${selectedKey}` });
 
   useEffect(() => {
     setSelectedKey(null);
@@ -36,7 +37,7 @@ export default function KvBucketView() {
 
   // Server-side KV watch: keeps the key list and the open entry current without polling.
   useLiveWatch(
-    connId && bucket ? { type: 'kv-watch', connId, bucket } : null,
+    connId && bucket ? { type: 'kv-watch', connId, bucket, domain: domainOverride } : null,
     connId && bucket ? { type: 'kv-unwatch', connId, bucket } : null,
     'kv-update',
     e => {
@@ -64,7 +65,6 @@ export default function KvBucketView() {
     setSaving(true);
     try {
       const res = await api.putKvEntry(connId, bucket, selectedKey, editValue);
-      toast.success(`Saved ${selectedKey} · revision ${res.revision}`);
       setEditing(false);
       entry.reload();
       keys.reload();
@@ -79,7 +79,6 @@ export default function KvBucketView() {
     if (!(await confirm({ title: `Delete key ${key}?`, message: 'A delete marker is written; the history stays readable until purged.', confirmLabel: 'Delete', danger: true }))) return;
     try {
       await api.deleteKvEntry(connId, bucket, key);
-      toast.success(`Deleted ${key}`);
       if (selectedKey === key) setSelectedKey(null);
       keys.reload();
     } catch (err) {
@@ -91,7 +90,6 @@ export default function KvBucketView() {
     if (!(await confirm({ title: `Purge key ${key}?`, message: 'All revisions of this key are removed permanently.', confirmLabel: 'Purge', danger: true }))) return;
     try {
       await api.purgeKvKey(connId, bucket, key);
-      toast.success(`Purged ${key}`);
       if (selectedKey === key) setSelectedKey(null);
       keys.reload();
     } catch (err) {
@@ -103,7 +101,6 @@ export default function KvBucketView() {
     if (!(await confirm({ title: `Delete bucket ${bucket}?`, message: 'The bucket and all keys are removed permanently.', confirmLabel: 'Delete bucket', danger: true }))) return;
     try {
       await api.deleteKvBucket(connId, bucket);
-      toast.success(`Deleted bucket ${bucket}`);
       setBucket(null);
       bump();
     } catch (err) {
@@ -233,7 +230,7 @@ export default function KvBucketView() {
 
               {e.history && e.history.length > 0 && (
                 <div>
-                  <SectionTitle>History · {e.history.length} revisions</SectionTitle>
+                  <SectionTitle>History · {e.history.length} {e.history.length === 1 ? 'revision' : 'revisions'}</SectionTitle>
                   <div className="card overflow-hidden">
                     <table className="table">
                       <thead>
@@ -300,7 +297,6 @@ function PutKeyDialog({ connId, bucket, onClose, onSaved }: { connId: string; bu
     setError(null);
     try {
       const res = await api.putKvEntry(connId, bucket, key.trim(), value);
-      toast.success(`Put ${key.trim()} · revision ${res.revision}`);
       onSaved(key.trim());
     } catch (err) {
       setError(errorMessage(err));

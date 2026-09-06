@@ -5,7 +5,6 @@ import { parseList } from '../../lib/utils';
 import { Button } from '../ui/Button';
 import { Checkbox, Field, Input, Select, Textarea } from '../ui/Input';
 import { Dialog } from '../ui/Dialog';
-import { toast } from '../ui/Toast';
 
 const UNITS: { id: string; label: string; ns: number }[] = [
   { id: 's', label: 'seconds', ns: 1e9 },
@@ -95,7 +94,6 @@ export default function StreamDialog({ connId, existing, onClose, onSaved }: Pro
     };
     try {
       const info = edit ? await api.updateStream(connId, existing!.name, cfg) : await api.createStream(connId, cfg);
-      toast.success(edit ? `Stream ${info.name} updated` : `Stream ${info.name} created`);
       onSaved(info);
     } catch (err) {
       setError(errorMessage(err));

@@ -40,7 +40,7 @@ export default function StatusBar() {
           </span>
           <span className="font-mono tabular-nums">{rate.toLocaleString()} msg/s</span>
           {dropped > 0 && (
-            <span className="font-mono tabular-nums text-warn" title="Messages not forwarded to the UI because of the 10 msg/s per-subject throttle. Counters and the tree still include them.">
+            <span className="font-mono tabular-nums text-warn" title="Messages not forwarded to the UI: at most 10 msg/s per subject, and subjects you are not looking at share a background budget. Counters and the tree still include them.">
               {formatNumber(dropped)} throttled
             </span>
           )}

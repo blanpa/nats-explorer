@@ -63,7 +63,7 @@ export default function ServiceList() {
         ) : (
           groups.map(([name, instances]) => (
             <div key={name} className="py-1">
-              <div className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-faint flex items-center gap-2">
+              <div className="px-3 py-1 text-xs font-semibold text-faint flex items-center gap-2">
                 {name}
                 <span className="font-mono normal-case tracking-normal">×{instances.length}</span>
               </div>

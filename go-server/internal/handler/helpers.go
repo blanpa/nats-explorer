@@ -4,7 +4,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/nats-io/nats.go/jetstream"
@@ -45,12 +47,31 @@ func connIDFromRequest(r *http.Request) string {
 }
 
 // jetStreamFor resolves the JetStream context for the request's connection.
+// A `domain` query parameter overrides the connection's configured domain
+// for this call, so one hub connection can browse every leaf domain.
 func jetStreamFor(store *connection.Store, r *http.Request) (jetstream.JetStream, error) {
-	nc, err := store.GetNC(connIDFromRequest(r))
-	if err != nil {
-		return nil, err
+	return jetStreamForConn(store, connIDFromRequest(r), r.URL.Query().Get("domain"))
+}
+
+func jetStreamForConn(store *connection.Store, connID, domainOverride string) (jetstream.JetStream, error) {
+	m, ok := store.Get(connID)
+	if !ok || m.NC == nil {
+		return nil, fmt.Errorf("connection not found")
 	}
-	return jetstream.New(nc)
+	if !m.NC.IsConnected() {
+		return nil, fmt.Errorf("not connected")
+	}
+	domain := strings.TrimSpace(domainOverride)
+	switch {
+	case domain != "":
+		return jetstream.NewWithDomain(m.NC, domain)
+	case m.Config.JSAPIPrefix != "":
+		return jetstream.NewWithAPIPrefix(m.NC, m.Config.JSAPIPrefix)
+	case m.Config.JSDomain != "":
+		return jetstream.NewWithDomain(m.NC, m.Config.JSDomain)
+	default:
+		return jetstream.New(m.NC)
+	}
 }
 
 func decodeBody(r *http.Request, v interface{}) error {

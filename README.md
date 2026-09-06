@@ -1,6 +1,8 @@
 # NATS Explorer
 
-A web-based NATS management tool and message explorer inspired by MQTT Explorer. Browse subjects as a live tree, manage JetStream streams, Key-Value stores, Object Stores, and monitor server health -- from one UI with dark and light themes.
+A NATS management tool and message explorer inspired by MQTT Explorer, available as a desktop app for Windows, macOS and Linux and as a web UI served by a single Go binary or Docker image. Browse subjects as a live tree, manage JetStream streams, Key-Value and Object Stores, run and repeat requests, and watch servers, clusters and leaf nodes -- with dark and light themes.
+
+See the [changelog](CHANGELOG.md) for what changed in each release.
 
 ![Subject explorer](docs/screenshots/subjects-dark.png)
 
@@ -14,10 +16,36 @@ A web-based NATS management tool and message explorer inspired by MQTT Explorer.
 </details>
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Go](https://img.shields.io/badge/go-1.24%2B-00ADD8.svg)
+![Go](https://img.shields.io/badge/go-1.26%2B-00ADD8.svg)
 ![NATS](https://img.shields.io/badge/NATS-2.10%2B-purple.svg)
 
 ---
+
+## Install
+
+Every release on the [Releases page](https://github.com/blanpa/nats-explorer/releases) ships the desktop app for all three platforms plus headless server builds and a Docker image.
+
+| Platform | File | Notes |
+|---|---|---|
+| Windows 10/11 | `nats-explorer-desktop-<version>-windows-x64-setup.exe` | Per-user installer, no admin rights needed; creates Start-menu entry and uninstaller. `…-windows-x64.zip` is the portable variant. Uses the Edge WebView2 runtime (present on Windows 11; downloaded on first start otherwise). The installer is not code-signed: SmartScreen shows "unknown publisher", choose *More info → Run anyway*. |
+| macOS 11+ (Intel and Apple Silicon) | `nats-explorer-desktop-<version>-macos-universal.dmg` | Drag *NATS Explorer* to *Applications*. The app is not notarized: on first start right-click → *Open*, or run `xattr -dr com.apple.quarantine "/Applications/NATS Explorer.app"`. |
+| Linux | `…-linux-x64.AppImage`, `…-linux-x64.deb`, `…-linux-x64.tar.gz` | AppImage: `chmod +x` and run. Debian/Ubuntu: `sudo apt install ./nats-explorer-desktop-<version>-linux-x64.deb` (pulls `libwebkit2gtk-4.1-0`). |
+| Server / headless | `nats-explorer-server-<version>-<os>-<arch>.tar.gz` / `.zip` | Run the binary; it serves the UI on http://localhost:3002. Env: `PORT`, `PUBLIC_PATH`, `AUTH_TOKEN`. |
+| Docker | `ghcr.io/blanpa/nats-explorer:<version>` | `docker run -p 3002:3002 ghcr.io/blanpa/nats-explorer:latest` |
+
+The desktop app is the same Go backend plus the UI in a native window (Wails, system webview). Connections, request templates and preferences are stored in `settings.json` under the OS config directory (`~/.config/nats-explorer`, `%AppData%\nats-explorer`, `~/Library/Application Support/nats-explorer`); credentials go to the system keyring (Secret Service, Keychain, Credential Manager) or, where none is available, to a `secrets.json` readable only by your user. Back up that directory to keep your setup. The same file storage can be enabled for a personal server with `STORAGE_DIR=/path` (`NO_KEYRING=1` forces the file fallback).
+
+### Building the installers yourself
+
+```bash
+pnpm install && pnpm --filter shared build && pnpm --filter client build
+scripts/build-desktop.sh --docker linux     # AppImage, .deb, tar.gz  (uses scripts/desktop-builder.Dockerfile)
+scripts/build-desktop.sh --docker windows   # NSIS installer + portable zip, cross-compiled
+scripts/build-desktop.sh macos              # on a Mac: universal .app + .dmg (needs the Wails CLI)
+scripts/smoke-desktop.sh go-server/build/bin/nats-explorer   # launches the build headless and checks API, UI and websocket
+```
+
+Releases are produced by `.github/workflows/release.yml` on every `v*` tag: the UI is built once, each OS job builds and smoke-tests its package (silent install/uninstall on Windows), and everything is attached to the GitHub release with a `SHA256SUMS.txt`.
 
 ## Features
 
@@ -27,12 +55,15 @@ A web-based NATS management tool and message explorer inspired by MQTT Explorer.
 - **Key-Value** -- Browse buckets, edit keys, purge, full revision history, live updates via server-side watch
 - **Object Store** -- Drag & drop upload, download, delete objects and stores
 - **Services** -- Discover NATS micro services ($SRV.INFO / STATS / PING)
-- **Monitoring** -- Server health dashboard (varz, connz, jsz, routez, etc.)
-- **Cluster Info** -- View connected server details and topology
 - **Publish / Request-Reply** -- Send messages with headers, perform request-reply with timeout
 - **Multi-Connection** -- Connect to multiple NATS servers simultaneously
 - **Authentication** -- Token, username/password, NKey, JWT/credentials, TLS
-- **Live Value Charts** -- Chart any numeric JSON field over time
+- **Live Value Charts** -- Chart any numeric JSON field over time as line, area, step, bars or dots
+- **JetStream domains** -- a connection can target a JetStream domain or API prefix (leaf nodes behind a hub and vice versa), and the JetStream, KV and Object Store panes can switch domains ad hoc
+- **Requests module** -- Postman-style request templates in the sidebar: create, edit, duplicate, run, import/export as JSON. Repeat a request up to 10 000× with parallel senders and `{{i}}`/`{{ts}}`/`{{uuid}}`/`{{rand:1-100}}` variables and read throughput and latency percentiles. The publish drawer under a subject uses the same templates
+- **TLS with certificates** -- CA certificate, client certificate and key can be pasted or loaded from files per connection (mutual TLS), plus an insecure mode for test setups
+- **Cluster module** -- every node of the cluster with version, uptime, CPU, memory, connections and JetStream usage, the JetStream meta cluster (leader, peers, lag, offline) and the placement of every stream with its leader and replicas. Needs system-account (`$SYS`) credentials on the connection; without them the module shows the connected node only
+- **Monitoring with history** -- messages/s and bytes/s in and out, connections, subscriptions, CPU and JetStream API rates over time, cluster routes and leaf nodes with their traffic
 - **Themes** -- Dark and light, follows the OS preference on first start
 
 ---
@@ -49,21 +80,18 @@ Starts NATS (port 4222) and NATS Explorer (port 3002). Open `http://localhost:30
 
 ### Standalone Binary
 
-Download from [Releases](https://github.com/blanpa/nats-explorer/releases):
+Download a `nats-explorer-server-<version>-<os>-<arch>` archive from [Releases](https://github.com/blanpa/nats-explorer/releases); the UI is bundled as `public/` next to the binary and found automatically:
 
 ```bash
 # Linux / macOS
-tar xzf nats-explorer-linux-x64.tar.gz
-cd nats-explorer-linux-x64
-PUBLIC_PATH=./public ./nats-explorer
+tar xzf nats-explorer-server-0.2.0-linux-x64.tar.gz
+cd nats-explorer-server-0.2.0-linux-x64
+./nats-explorer
 
-# Windows
-# Extract nats-explorer-windows-x64.zip, then:
-set PUBLIC_PATH=.\public
-nats-explorer.exe
+# Windows: extract nats-explorer-server-0.2.0-windows-x64.zip, then run nats-explorer.exe
 ```
 
-Open `http://localhost:3002` and configure your NATS server in the connection dialog.
+Open `http://localhost:3002` and configure your NATS server in the connection dialog. `STORAGE_DIR=/path` keeps connections and templates on the server instead of in the browser (single-user setups).
 
 ### Docker (standalone, no NATS included)
 
@@ -113,7 +141,7 @@ The e2e suite honours `NE_URL`, `NATS_URL`, `NATS_MON_URL` and `PW_CHROME=/path/
 
 | Layer   | Technology                                                   |
 | ------- | ------------------------------------------------------------ |
-| Backend | Go 1.24, chi router, gorilla/websocket, nats.go             |
+| Backend | Go 1.26, chi router, gorilla/websocket, nats.go             |
 | Client  | React 18, TypeScript, Vite, Tailwind CSS, Zustand, Radix UI |
 | Shared  | TypeScript types (workspace package)                         |
 | Build   | Docker multi-stage, Go cross-compilation                     |
@@ -146,7 +174,11 @@ The e2e suite honours `NE_URL`, `NATS_URL`, `NATS_MON_URL` and `PW_CHROME=/path/
 
 ## Building
 
-### Cross-compile all platforms
+### Desktop installers
+
+See [Building the installers yourself](#building-the-installers-yourself) above (`scripts/build-desktop.sh`).
+
+### Cross-compile the server for all platforms
 
 ```bash
 node build.mjs
@@ -191,19 +223,25 @@ See [docs/review-2026-09.md](docs/review-2026-09.md) for the findings of the Sep
 ```
 nats-explorer/
   go-server/                  # Go backend
-    main.go                   # Entry point, router wiring
+    main.go                   # Server entry point (desktop.go: Wails window, build tag `desktop`)
+    server.go                 # Router wiring
+    build/                    # Desktop packaging assets (icon, Info.plist, NSIS script, desktop entry)
     internal/
-      connection/store.go     # Multi-connection NATS store
-      handler/                # HTTP handlers (one per feature)
-      subscription/           # Message subscription & subject tree
+      connection/store.go     # Multi-connection NATS store (main + system-account connections)
+      handler/                # HTTP handlers (one per feature: streams, kv, run, cluster, settings …)
+      settings/               # File-backed UI settings + keyring secrets
+      subscription/           # Message subscription, budgets & subject tree feed
       ws/hub.go               # WebSocket connection hub
   client/                     # React frontend (Vite)
     src/
-      components/             # Feature-organized UI components
-      lib/                    # API client, WebSocket, utilities
+      components/             # Feature-organized UI components (subjects, jetstream, kv, objectstore, services, requests, monitoring, cluster)
+      lib/                    # API client, WebSocket, storage sync, utilities
       store/                  # Zustand state management
   shared/                     # Shared TypeScript type definitions
+  e2e/                        # Playwright smoke suite
+  scripts/                    # Desktop build, builder image, smoke tests
   dev/                        # Dev NATS server and simulators
+  docs/                       # Architecture notes, review log, screenshots
   .github/workflows/          # CI + Release pipelines
 ```
 
@@ -211,16 +249,17 @@ nats-explorer/
 
 ## Release Targets
 
-Releases are built automatically on tag push (`v*`):
+Releases are built automatically on tag push (`v*`); a manual `workflow_dispatch` run produces the same artifacts without publishing.
 
-| Target                  | Description           |
-| ----------------------- | --------------------- |
-| `linux-x64`             | Linux x86_64          |
-| `linux-arm64`           | Linux ARM64           |
-| `windows-x64`           | Windows x86_64 (.exe) |
-| `macos-x64`             | macOS Intel           |
-| `macos-arm64`           | macOS Apple Silicon   |
-| Docker (GHCR)           | Multi-stage Alpine    |
+| Target | Files |
+| --- | --- |
+| Windows desktop | `…-windows-x64-setup.exe` (per-user installer), `…-windows-x64.zip` (portable) |
+| macOS desktop | `…-macos-universal.dmg`, `.zip` (Intel + Apple Silicon) |
+| Linux desktop | `…-linux-x64.AppImage`, `.deb`, `.tar.gz` |
+| Server (headless) | `nats-explorer-server-<version>-{linux-x64,linux-arm64,windows-x64,macos-x64,macos-arm64}` |
+| Docker (GHCR) | `ghcr.io/blanpa/nats-explorer:<version>` |
+
+Every release carries a `SHA256SUMS.txt`. Installers are not code-signed (see the notes in [Install](#install)).
 
 ---
 

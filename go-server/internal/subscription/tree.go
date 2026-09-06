@@ -1,87 +1,104 @@
 package subscription
 
 import (
-	"sort"
-	"strings"
 	"time"
+	"unicode/utf8"
 )
 
-// rateWindowMs is the sliding window used to compute per-subject message rates.
-const rateWindowMs = 10_000
+const (
+	// rateWindowMs is the sliding window used to compute per-subject message rates.
+	rateWindowMs = 10_000
+	// PreviewMaxChars bounds the payload preview carried by the tree feed. The
+	// browser only renders a short excerpt per row; full messages travel in the
+	// message batches instead.
+	PreviewMaxChars = 160
+)
 
-type SubjectNode struct {
-	Segment      string        `json:"segment"`
-	FullSubject  string        `json:"fullSubject"`
-	MessageCount int           `json:"messageCount"`
-	LastMessage  *NatsMessage  `json:"lastMessage,omitempty"`
-	Children     []SubjectNode `json:"children"`
-	Rate         float64       `json:"rate"`
+// SubjectEntry is the compact wire form of one subject in the tree feed. The
+// browser rebuilds the hierarchy itself. Keys are short on purpose: with tens
+// of thousands of subjects the feed is the largest thing on the socket.
+type SubjectEntry struct {
+	Subject string  `json:"s"`
+	Count   int     `json:"n"`
+	Rate    float64 `json:"r"`
+	// Preview of the most recent payload, cut to PreviewMaxChars. Binary
+	// payloads carry no preview, only the type.
+	Payload     string `json:"p,omitempty"`
+	PayloadType string `json:"pt,omitempty"`
+	Timestamp   int64  `json:"ts,omitempty"`
+	Size        int    `json:"sz,omitempty"`
 }
 
-type treeNode struct {
-	segment      string
-	fullSubject  string
-	messageCount int
-	lastMessage  *NatsMessage
-	rate         float64
-	children     map[string]*treeNode
+// treeInterval slows the tree feed down as the tree grows so a huge subject
+// space does not saturate the socket and the browser's main thread.
+func treeInterval(subjects int) time.Duration {
+	switch {
+	case subjects > 10_000:
+		return 2 * time.Second
+	case subjects > 2_000:
+		return time.Second
+	default:
+		return TreeUpdateInterval
+	}
 }
 
-// BuildTree turns the flat per-subject stats into a sorted hierarchical tree.
-// Rates are only computed for leaf subjects; parents aggregate on the client.
-func BuildTree(stats map[string]*SubjectStats) []SubjectNode {
-	root := make(map[string]*treeNode)
-	now := time.Now().UnixMilli()
+// rateOf counts the timestamps inside the window and prunes older ones. The
+// slice is append-only in arrival order, so the prefix outside the window can
+// be sliced off.
+func rateOf(st *SubjectStats, now int64) float64 {
 	cutoff := now - rateWindowMs
+	i := 0
+	for i < len(st.Timestamps) && st.Timestamps[i] < cutoff {
+		i++
+	}
+	if i > 0 {
+		st.Timestamps = append(st.Timestamps[:0], st.Timestamps[i:]...)
+	}
+	return float64(len(st.Timestamps)) / (rateWindowMs / 1000.0)
+}
 
-	for subject, st := range stats {
-		segments := strings.Split(subject, ".")
-		current := root
-
-		for i, seg := range segments {
-			node, ok := current[seg]
-			if !ok {
-				node = &treeNode{
-					segment:     seg,
-					fullSubject: strings.Join(segments[:i+1], "."),
-					children:    make(map[string]*treeNode),
-				}
-				current[seg] = node
-			}
-
-			if i == len(segments)-1 {
-				node.messageCount = st.MessageCount
-				node.lastMessage = st.LastMessage
-				count := 0
-				for _, t := range st.Timestamps {
-					if t >= cutoff {
-						count++
-					}
-				}
-				node.rate = float64(count) / (rateWindowMs / 1000.0)
-			}
-
-			current = node.children
+func entryOf(subject string, st *SubjectStats, rate float64) SubjectEntry {
+	e := SubjectEntry{Subject: subject, Count: st.MessageCount, Rate: rate}
+	if lm := st.LastMessage; lm != nil {
+		e.PayloadType = lm.PayloadType
+		e.Timestamp = lm.Timestamp
+		e.Size = lm.Size
+		if lm.PayloadType != "binary" {
+			e.Payload = truncateRunes(lm.Payload, PreviewMaxChars)
 		}
 	}
-
-	return convertChildren(root)
+	return e
 }
 
-func convertChildren(children map[string]*treeNode) []SubjectNode {
-	result := make([]SubjectNode, 0, len(children))
-	for _, n := range children {
-		result = append(result, SubjectNode{
-			Segment:      n.segment,
-			FullSubject:  n.fullSubject,
-			MessageCount: n.messageCount,
-			LastMessage:  n.lastMessage,
-			Children:     convertChildren(n.children),
-			Rate:         n.rate,
-		})
+func truncateRunes(s string, max int) string {
+	if len(s) <= max {
+		return s
 	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].Segment < result[j].Segment
-	})
-	return result
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	n := 0
+	for i := range s {
+		if n == max {
+			return s[:i] + "…"
+		}
+		n++
+	}
+	return s
+}
+
+// collectEntries returns the full snapshot (full=true) or only the subjects
+// whose count or rate changed since the previous emit. Callers hold m.mu.
+func (m *Manager) collectEntries(full bool) []SubjectEntry {
+	now := time.Now().UnixMilli()
+	out := make([]SubjectEntry, 0, 64)
+	for subject, st := range m.stats {
+		rate := rateOf(st, now)
+		if full || st.MessageCount != st.sentCount || rate != st.sentRate {
+			st.sentCount = st.MessageCount
+			st.sentRate = rate
+			out = append(out, entryOf(subject, st, rate))
+		}
+	}
+	return out
 }

@@ -4,6 +4,7 @@ import type { StreamInfo, StreamMessage, StreamMessagesPage } from 'shared';
 import { api, errorMessage } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
 import { useLiveWatch } from '../../lib/live';
+import { useJsDomainOverride } from '../../store';
 import { cn, formatBytes, formatTime, previewPayload } from '../../lib/utils';
 import { Button, IconButton } from '../ui/Button';
 import { Input, Select } from '../ui/Input';
@@ -15,6 +16,7 @@ import PayloadViewer from '../subjects/PayloadViewer';
 const toneClass = { str: 'text-syn-str', num: 'text-syn-num', bool: 'text-syn-bool', null: 'text-syn-null', obj: 'text-muted', bin: 'text-muted italic' } as const;
 
 export default function StreamMessages({ connId, stream, onChanged }: { connId: string; stream: StreamInfo; onChanged: () => void }) {
+  const domainOverride = useJsDomainOverride(connId);
   const [startSeq, setStartSeq] = useState<number | undefined>(undefined); // undefined = newest page
   const [limit, setLimit] = useState(50);
   const [jump, setJump] = useState('');
@@ -25,11 +27,12 @@ export default function StreamMessages({ connId, stream, onChanged }: { connId: 
   const { data: page, error, loading, initial, reload } = useAsync<StreamMessagesPage>(
     () => api.getStreamMessages(connId, stream.name, { startSeq, limit }),
     [connId, stream.name, startSeq, limit],
+    { key: `msgs:${connId}:${stream.name}:${startSeq ?? 'newest'}:${limit}` },
   );
 
   const onNewestPage = startSeq === undefined;
   useLiveWatch(
-    live && onNewestPage ? { type: 'stream-tail', connId, stream: stream.name } : null,
+    live && onNewestPage ? { type: 'stream-tail', connId, stream: stream.name, domain: domainOverride } : null,
     live && onNewestPage ? { type: 'stream-untail', connId, stream: stream.name } : null,
     'stream-msg',
     e => {
@@ -54,7 +57,6 @@ export default function StreamMessages({ connId, stream, onChanged }: { connId: 
     if (!(await confirm({ title: `Delete message #${seq}?`, message: 'The message is removed from the stream. This cannot be undone.', confirmLabel: 'Delete', danger: true }))) return;
     try {
       await api.deleteStreamMessage(connId, stream.name, seq);
-      toast.success(`Deleted message #${seq}`);
       reload();
       onChanged();
     } catch (err) {
@@ -82,7 +84,7 @@ export default function StreamMessages({ connId, stream, onChanged }: { connId: 
           <ChevronLeft size={13} />
         </IconButton>
         <span className="font-mono tabular-nums">
-          {page && page.messages.length > 0 ? `#${pageStart} – #${pageEnd}` : 'no messages'} <span className="text-faint">of {first}–{last}</span>
+          {page && page.messages.length > 0 ? `${pageStart}–${pageEnd}` : 'no messages'} <span className="text-faint">of seq {first}–{last}</span>
         </span>
         <IconButton label="Newer" size="xs" disabled={!canNext} onClick={() => setStartSeq(pageEnd + 1)}>
           <ChevronRight size={13} />

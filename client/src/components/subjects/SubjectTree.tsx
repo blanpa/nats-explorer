@@ -1,12 +1,12 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Eraser, Network } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Eraser, Eye, EyeOff, Network } from 'lucide-react';
 import { useStore } from '../../store';
 import { cn, previewPayload } from '../../lib/utils';
 import { IconButton } from '../ui/Button';
 import { SearchInput } from '../ui/Input';
 import { EmptyState, PaneHeader } from '../ui/misc';
-import { ancestorsOf, collectBranchPaths, filterTree, flattenTree, mergeTrees, type FlatNode } from './tree';
+import { ancestorsOf, buildTree, collectBranchPaths, filterTree, flattenTree, isSystemRoot, type FlatNode } from './tree';
 
 const ROW_HEIGHT = 24;
 const INDENT = 14;
@@ -36,7 +36,7 @@ const Row = memo(function Row({
   onToggle: (subject: string) => void;
 }) {
   const { node, depth, hasChildren, expanded, guides } = item;
-  const preview = node.lastMessage && !hasChildren ? previewPayload(node.lastMessage.payload, node.lastMessage.payloadType, 80) : null;
+  const preview = node.last && !hasChildren ? previewPayload(node.last.payload, node.last.payloadType, 80) : null;
   // Leaves show their own rate; branches show the aggregate so hot subtrees stand out even when collapsed.
   const rate = hasChildren ? node.totalRate : node.rate;
 
@@ -73,10 +73,12 @@ const Row = memo(function Row({
       <span className="tree-label">{node.segment}</span>
       {node.total > 0 && <span className="tree-count ml-1.5">{node.total.toLocaleString()}</span>}
       {preview && <span className={cn('tree-value ml-2', toneClass[preview.tone])}>{preview.text}</span>}
-      {rate > 0 && (
-        <span className={cn('ml-auto pl-2 flex items-center gap-1 shrink-0', hasChildren && expanded && 'opacity-50')} title={`${rate.toFixed(1)} msg/s${hasChildren ? ' in this branch' : ''}`}>
-          <span className="h-1 rounded-full bg-warn/80" style={{ width: Math.min(4 + rate * 3, 36) }} />
-          {rate >= 0.5 && <span className="tree-rate">{rate < 10 ? rate.toFixed(1) : Math.round(rate)}/s</span>}
+      {rate >= 0.5 && (
+        <span
+          className={cn('tree-rate ml-auto pl-2', rate >= 10 && 'tree-rate-hot', hasChildren && expanded && 'opacity-50')}
+          title={`${rate.toFixed(1)} msg/s${hasChildren ? ' in this branch' : ''}`}
+        >
+          {rate < 10 ? rate.toFixed(1) : Math.round(rate)}/s
         </span>
       )}
     </div>
@@ -84,9 +86,12 @@ const Row = memo(function Row({
 });
 
 export default function SubjectTree() {
-  const trees = useStore(s => s.subjectTrees);
+  const index = useStore(s => s.subjectIndex);
+  const treeVersion = useStore(s => s.treeVersion);
   const filter = useStore(s => s.subjectFilter);
   const setFilter = useStore(s => s.setSubjectFilter);
+  const hideSystem = useStore(s => s.hideSystemSubjects);
+  const setHideSystem = useStore(s => s.setHideSystemSubjects);
   const selected = useStore(s => s.selectedSubject);
   const setSelected = useStore(s => s.setSelectedSubject);
   const expanded = useStore(s => s.expanded);
@@ -97,9 +102,14 @@ export default function SubjectTree() {
   const parentRef = useRef<HTMLDivElement>(null);
   const autoExpandedRef = useRef(false);
 
-  const merged = useMemo(() => mergeTrees(trees), [trees]);
-  const filtered = useMemo(() => filterTree(merged, filter), [merged, filter]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const merged = useMemo(() => buildTree(index), [index, treeVersion]);
   const filtering = filter.trim().length > 0;
+  // System roots stay hidden unless the user asks for them, or the filter clearly targets them.
+  const filterWantsSystem = /^[\s]*[$_]/.test(filter);
+  const systemCount = useMemo(() => merged.filter(n => isSystemRoot(n.segment)).length, [merged]);
+  const visible = useMemo(() => (hideSystem && !filterWantsSystem ? merged.filter(n => !isSystemRoot(n.segment)) : merged), [merged, hideSystem, filterWantsSystem]);
+  const filtered = useMemo(() => filterTree(visible, filter), [visible, filter]);
 
   // Expand the first level once when data first arrives.
   useEffect(() => {
@@ -128,6 +138,7 @@ export default function SubjectTree() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedIndex]);
 
+  const anyConnected = connections.some(c => c.connected);
   const multiConn = connections.filter(c => c.connected).length > 1;
   const colorOf = useCallback((id: string) => connections.find(c => c.id === id)?.color, [connections]);
 
@@ -195,6 +206,14 @@ export default function SubjectTree() {
         title="Subjects"
         actions={
           <>
+            <IconButton
+              label={hideSystem ? `Show system subjects${systemCount ? ` (${systemCount} hidden)` : ''}` : 'Hide system subjects ($…, _INBOX)'}
+              size="xs"
+              onClick={() => setHideSystem(!hideSystem)}
+              className={cn(!hideSystem && 'text-accent')}
+            >
+              {hideSystem ? <EyeOff size={13} /> : <Eye size={13} />}
+            </IconButton>
             <IconButton label="Expand all" size="xs" onClick={expandAll}>
               <ChevronsUpDown size={13} />
             </IconButton>
@@ -215,8 +234,16 @@ export default function SubjectTree() {
         <EmptyState
           compact
           icon={Network}
-          title={filtering ? 'No matching subjects' : 'Waiting for messages'}
-          description={filtering ? 'Try a shorter filter. Multiple words are combined.' : 'Subjects appear here as soon as messages arrive on the subscribed subjects.'}
+          title={filtering ? 'No matching subjects' : !anyConnected ? 'Not connected' : hideSystem && systemCount > 0 ? 'Only system subjects so far' : 'Waiting for messages'}
+          description={
+            filtering
+              ? 'Try a shorter filter. Multiple words are combined.'
+              : !anyConnected
+                ? 'Live subjects show up here once a connection is open.'
+                : hideSystem && systemCount > 0
+                  ? `${systemCount} internal root${systemCount === 1 ? '' : 's'} ($…, _INBOX) are hidden. Use the eye icon to show them.`
+                  : 'Subjects appear here as soon as messages arrive on the subscribed subjects.'
+          }
         />
       ) : (
         <div

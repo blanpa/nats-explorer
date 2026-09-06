@@ -36,6 +36,8 @@ type liveCommand struct {
 	ConnID string `json:"connId"`
 	Bucket string `json:"bucket,omitempty"`
 	Stream string `json:"stream,omitempty"`
+	// JetStream domain override; empty uses the connection's configured domain.
+	Domain string `json:"domain,omitempty"`
 }
 
 func NewLiveHandler(store *connection.Store) *LiveHandler {
@@ -136,12 +138,7 @@ func (h *LiveHandler) sendError(send Sender, cmd liveCommand, err error) {
 }
 
 func (h *LiveHandler) watchKV(ctx context.Context, cmd liveCommand, send Sender) {
-	nc, err := h.Store.GetNC(cmd.ConnID)
-	if err != nil {
-		h.sendError(send, cmd, err)
-		return
-	}
-	js, err := jetstream.New(nc)
+	js, err := jetStreamForConn(h.Store, cmd.ConnID, cmd.Domain)
 	if err != nil {
 		h.sendError(send, cmd, err)
 		return
@@ -182,12 +179,7 @@ func (h *LiveHandler) watchKV(ctx context.Context, cmd liveCommand, send Sender)
 }
 
 func (h *LiveHandler) tailStream(ctx context.Context, cmd liveCommand, send Sender) {
-	nc, err := h.Store.GetNC(cmd.ConnID)
-	if err != nil {
-		h.sendError(send, cmd, err)
-		return
-	}
-	js, err := jetstream.New(nc)
+	js, err := jetStreamForConn(h.Store, cmd.ConnID, cmd.Domain)
 	if err != nil {
 		h.sendError(send, cmd, err)
 		return

@@ -5,12 +5,15 @@ package main
 import (
 	"embed"
 	"fmt"
-	"io"
 	"io/fs"
 	"log"
 	"net"
 	"net/http"
-	"time"
+	"os"
+	"path/filepath"
+	"testing/fstest"
+
+	"nats-explorer/internal/settings"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -27,8 +30,22 @@ func main() {
 		log.Fatal("Failed to load embedded frontend:", err)
 	}
 
+	// Connections, templates and preferences live in the OS config directory
+	// (~/.config, %AppData%, ~/Library/Application Support); credentials go
+	// to the OS keyring when one is available.
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		configDir = "."
+	}
+	storeDir := filepath.Join(configDir, "nats-explorer")
+	store, err := settings.Open(storeDir, settings.NewSecretStore(storeDir, os.Getenv("NO_KEYRING") == ""))
+	if err != nil {
+		log.Fatalf("settings: %v", err)
+	}
+	log.Printf("NATS Explorer %s: settings in %s (secrets: %s)", version, store.Path(), store.SecretsName())
+
 	// Start the HTTP server (API + WebSocket) on a random port
-	handler := createServer(frontendFS, "")
+	handler := createServer(frontendFS, serverConfig{mode: "desktop", settings: store})
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -37,7 +54,7 @@ func main() {
 	port := listener.Addr().(*net.TCPAddr).Port
 	go http.Serve(listener, handler)
 
-	log.Printf("NATS Explorer API running on http://127.0.0.1:%d", port)
+	log.Printf("NATS Explorer %s: API running on http://127.0.0.1:%d", version, port)
 
 	// Minimal loader page that redirects to our HTTP server.
 	// This ensures WebSocket and all APIs work through the real HTTP server.
@@ -50,10 +67,11 @@ func main() {
 <script>window.location.replace("http://127.0.0.1:%d");</script>
 </head><body>Loading...</body></html>`, port)
 
-	loaderFS := &singleFileFS{name: "index.html", content: []byte(loaderHTML)}
+	// A real fs.FS (directory listing, Stat) is what the Wails asset server expects.
+	loaderFS := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte(loaderHTML)}}
 
 	err = wails.Run(&options.App{
-		Title:         "NATS Explorer",
+		Title:         "NATS Explorer" + versionSuffix(),
 		Width:         1400,
 		Height:        900,
 		MinWidth:      800,
@@ -70,38 +88,9 @@ func main() {
 	}
 }
 
-// singleFileFS serves a single in-memory file as an fs.FS
-type singleFileFS struct {
-	name    string
-	content []byte
-}
-
-func (f *singleFileFS) Open(name string) (fs.File, error) {
-	if name == "." || name == f.name || name == "" || name == "index.html" {
-		return &memFile{name: f.name, content: f.content}, nil
+func versionSuffix() string {
+	if version == "" || version == "dev" {
+		return ""
 	}
-	return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
+	return " " + version
 }
-
-type memFile struct {
-	name    string
-	content []byte
-	offset  int
-}
-
-func (f *memFile) Stat() (fs.FileInfo, error) { return f, nil }
-func (f *memFile) Read(b []byte) (int, error) {
-	if f.offset >= len(f.content) {
-		return 0, io.EOF
-	}
-	n := copy(b, f.content[f.offset:])
-	f.offset += n
-	return n, nil
-}
-func (f *memFile) Close() error       { return nil }
-func (f *memFile) Name() string       { return f.name }
-func (f *memFile) Size() int64        { return int64(len(f.content)) }
-func (f *memFile) Mode() fs.FileMode  { return 0444 }
-func (f *memFile) ModTime() time.Time { return time.Time{} }
-func (f *memFile) IsDir() bool        { return false }
-func (f *memFile) Sys() any           { return nil }

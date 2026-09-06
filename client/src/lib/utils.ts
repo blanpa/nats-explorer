@@ -1,3 +1,4 @@
+import { persist } from './storage';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import type { PayloadType } from 'shared';
@@ -137,6 +138,8 @@ export function previewPayload(payload: string, type: PayloadType, max = 60): { 
     if (parsed === null) return { text: 'null', tone: 'null' };
     if (typeof parsed === 'string') return { text: JSON.stringify(truncate(parsed, max)), tone: 'str' };
     if (parsed !== undefined) return { text: truncate(JSON.stringify(parsed), max), tone: 'obj' };
+    // Server-side truncated preview: not parseable, still JSON-ish.
+    return { text: truncate(payload.replace(/\s+/g, ' '), max), tone: 'obj' };
   }
   return { text: truncate(payload.replace(/\s+/g, ' '), max), tone: 'str' };
 }
@@ -176,4 +179,20 @@ export function parseList(input: string): string[] {
     .split(/[,\n]/)
     .map(s => s.trim())
     .filter(Boolean);
+}
+
+/** Reads a JSON value from localStorage; the fallback wins on any error or type mismatch. */
+export function readSetting<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return fallback;
+    const parsed = JSON.parse(raw) as unknown;
+    return typeof parsed === typeof fallback ? (parsed as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function writeSetting(key: string, value: unknown): void {
+  persist(key, value);
 }

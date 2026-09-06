@@ -1,14 +1,16 @@
+import { useState } from 'react';
 import { RefreshCw, Server } from 'lucide-react';
+import ClusterOverview from './ClusterOverview';
 import type { ConnectionStatus, ServerInfo } from 'shared';
 import { api } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
 import { useStore } from '../../store';
 import { formatBytes, formatDurationMs, formatDateTime, formatNumber } from '../../lib/utils';
 import { IconButton } from '../ui/Button';
-import { Badge, EmptyState, ErrorState, KeyValueGrid, LoadingState, PaneHeader, SectionTitle, StatTile } from '../ui/misc';
+import { Badge, EmptyState, ErrorState, KeyValueGrid, LoadingState, PaneHeader, SectionTitle, StatStrip, StatTile, Tabs } from '../ui/misc';
 
 function ServerCard({ conn }: { conn: ConnectionStatus }) {
-  const { data, error, loading, initial, reload } = useAsync<ServerInfo>(() => (conn.connected ? api.getServerInfo(conn.id) : null), [conn.id, conn.connected], { interval: 10_000 });
+  const { data, error, loading, initial, reload } = useAsync<ServerInfo>(() => (conn.connected ? api.getServerInfo(conn.id) : null), [conn.id, conn.connected], { key: `server:${conn.id}`, interval: 10_000 });
 
   return (
     <div className="card overflow-hidden">
@@ -32,14 +34,14 @@ function ServerCard({ conn }: { conn: ConnectionStatus }) {
         <ErrorState title="Cannot read server info" message={error ?? undefined} />
       ) : (
         <div className="p-4 flex flex-col gap-5">
-          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
+          <StatStrip>
             <StatTile label="RTT" value={formatDurationMs(data.rttMs)} />
             <StatTile label="Max payload" value={formatBytes(data.maxPayload)} />
-            <StatTile label="JetStream" value={data.jetstream ? 'enabled' : 'off'} tone={data.jetstream ? 'ok' : undefined} sub={data.jetstreamErr && !data.jetstream ? data.jetstreamErr : undefined} className="[&>div:nth-child(2)]:text-md" />
-            <StatTile label="Msgs in / out" value={`${formatNumber(data.stats.inMsgs)} / ${formatNumber(data.stats.outMsgs)}`} sub="this client" className="[&>div:nth-child(2)]:text-md" />
-            <StatTile label="Bytes in / out" value={`${formatBytes(data.stats.inBytes)} / ${formatBytes(data.stats.outBytes)}`} sub="this client" className="[&>div:nth-child(2)]:text-md" />
+            <StatTile label="JetStream" value={data.jetstream ? 'enabled' : 'off'} tone={data.jetstream ? 'ok' : undefined} sub={data.jetstreamErr && !data.jetstream ? data.jetstreamErr : undefined} />
+            <StatTile label="Msgs in / out" value={`${formatNumber(data.stats.inMsgs)} / ${formatNumber(data.stats.outMsgs)}`} sub="this client" />
+            <StatTile label="Bytes in / out" value={`${formatBytes(data.stats.inBytes)} / ${formatBytes(data.stats.outBytes)}`} sub="this client" />
             <StatTile label="Reconnects" value={data.stats.reconnects} tone={data.stats.reconnects > 0 ? 'warn' : undefined} />
-          </div>
+          </StatStrip>
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
             <div>
@@ -109,17 +111,37 @@ function ServerCard({ conn }: { conn: ConnectionStatus }) {
 
 export default function ClusterView() {
   const connections = useStore(s => s.connections);
+  const activeConnId = useStore(s => s.activeConnId);
+  const [tab, setTab] = useState<'cluster' | 'servers'>('cluster');
 
+  if (connections.length === 0) {
+    return (
+      <div className="flex flex-col h-full min-h-0">
+        <PaneHeader title="Cluster" />
+        <EmptyState icon={Server} title="No connections" />
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col h-full min-h-0">
-      <PaneHeader title="Servers" />
-      <div className="flex-1 min-h-0 overflow-auto p-4 flex flex-col gap-4">
-        {connections.length === 0 ? (
-          <EmptyState icon={Server} title="No connections" />
-        ) : (
-          connections.map(c => <ServerCard key={c.id} conn={c} />)
-        )}
-      </div>
+      <Tabs
+        className="px-3 shrink-0"
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { id: 'cluster', label: 'Cluster' },
+          { id: 'servers', label: 'Connections', count: connections.length },
+        ]}
+      />
+      {tab === 'cluster' ? (
+        activeConnId ? <ClusterOverview connId={activeConnId} /> : <EmptyState title="Select a connection" />
+      ) : (
+        <div className="flex-1 min-h-0 overflow-auto p-4 flex flex-col gap-4">
+          {connections.map(c => (
+            <ServerCard key={c.id} conn={c} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

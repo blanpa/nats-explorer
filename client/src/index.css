@@ -132,7 +132,9 @@
   .btn-primary { @apply bg-accent border-accent text-accent-fg hover:bg-accent/90; }
   .btn-ghost { @apply bg-transparent border-transparent text-muted hover:bg-field hover:text-fg; }
   .btn-outline { @apply bg-transparent border-line text-muted hover:text-fg hover:border-line-strong; }
-  .btn-danger { @apply bg-danger/10 border-danger/30 text-danger hover:bg-danger/20; }
+  /* Destructive actions sit quietly next to the others and only turn red on hover; confirm dialogs use the solid variant. */
+  .btn-danger { @apply bg-transparent border-line text-muted hover:text-danger hover:border-danger/50 hover:bg-danger/10; }
+  .btn-danger-solid { @apply bg-danger border-danger text-white hover:bg-danger/90; }
   .btn-active { @apply bg-accent/15 border-accent/40 text-fg; }
 
   /* --- Inputs ----------------------------------------------------------- */
@@ -153,10 +155,10 @@
   .checkbox { @apply h-3.5 w-3.5 rounded-sm accent-[rgb(var(--accent))] cursor-pointer; }
 
   /* --- Surfaces --------------------------------------------------------- */
-  .card { @apply rounded-lg border border-line bg-raised; }
+  .card { @apply rounded border border-line bg-raised; }
   .pane-header { @apply flex items-center gap-2 h-10 px-3 border-b border-line shrink-0; }
-  .pane-title { @apply text-xs font-semibold uppercase tracking-wider text-muted; }
-  .section-title { @apply text-xs font-semibold uppercase tracking-wider text-muted; }
+  .pane-title { @apply text-sm font-semibold text-fg; }
+  .section-title { @apply text-xs font-semibold text-muted; }
 
   /* --- Lists ------------------------------------------------------------ */
   .list-row {
@@ -172,7 +174,7 @@
   /* --- Tables ----------------------------------------------------------- */
   .table { @apply w-full text-sm border-collapse; }
   .table th {
-    @apply text-left px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted
+    @apply text-left px-3 py-1.5 text-xs font-medium text-muted
            border-b border-line whitespace-nowrap bg-panel sticky top-0 z-[1];
   }
   .table td { @apply px-3 py-1.5 border-b border-line/70 whitespace-nowrap align-middle; }
@@ -210,7 +212,8 @@
   .tree-label { @apply text-fg/90 shrink-0; }
   .tree-count { @apply text-xs text-faint font-mono tabular-nums shrink-0; }
   .tree-value { @apply font-mono text-xs truncate min-w-0 flex-1; }
-  .tree-rate { @apply text-[10px] font-mono text-warn tabular-nums shrink-0; }
+  .tree-rate { @apply text-[10px] font-mono text-muted tabular-nums shrink-0; }
+  .tree-rate-hot { @apply text-warn; }
 
   /* --- JSON viewer ------------------------------------------------------ */
   .jv { @apply font-mono text-sm leading-[1.55]; }

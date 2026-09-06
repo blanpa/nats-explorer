@@ -13,13 +13,12 @@ import { toast } from '../ui/Toast';
 export default function ConsumerList({ connId, stream, onChanged }: { connId: string; stream: string; onChanged: () => void }) {
   const [creating, setCreating] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
-  const { data, error, loading, initial, reload } = useAsync<ConsumerInfo[]>(() => api.listConsumers(connId, stream), [connId, stream], { interval: 5000 });
+  const { data, error, loading, initial, reload } = useAsync<ConsumerInfo[]>(() => api.listConsumers(connId, stream), [connId, stream], { key: `consumers:${connId}:${stream}`, interval: 5000 });
 
   const del = async (name: string) => {
     if (!(await confirm({ title: `Delete consumer ${name}?`, message: 'Clients using this consumer will stop receiving messages.', confirmLabel: 'Delete', danger: true }))) return;
     try {
       await api.deleteConsumer(connId, stream, name);
-      toast.success(`Deleted consumer ${name}`);
       reload();
       onChanged();
     } catch (err) {
@@ -178,7 +177,6 @@ function ConsumerDialog({ connId, stream, onClose, onCreated }: { connId: string
         maxAckPending: Number(maxAckPending) > 0 ? Number(maxAckPending) : undefined,
         replayPolicy: replay,
       });
-      toast.success(`Consumer ${name.trim()} created`);
       onCreated();
     } catch (err) {
       setError(errorMessage(err));

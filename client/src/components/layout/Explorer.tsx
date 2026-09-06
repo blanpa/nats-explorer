@@ -4,6 +4,7 @@ import StreamList from '../jetstream/StreamList';
 import KvBucketList from '../kv/KvBucketList';
 import ObjStoreList from '../objectstore/ObjStoreList';
 import ServiceList from '../services/ServiceList';
+import TemplateList from '../requests/TemplateList';
 
 export default function Explorer() {
   const module = useStore(s => s.module);
@@ -16,6 +17,7 @@ export default function Explorer() {
       {module === 'kv' && <KvBucketList />}
       {module === 'objects' && <ObjStoreList />}
       {module === 'services' && <ServiceList />}
+      {module === 'requests' && <TemplateList />}
     </aside>
   );
 }

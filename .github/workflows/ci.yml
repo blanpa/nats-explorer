@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version-file: go-server/go.mod
           cache-dependency-path: go-server/go.sum
       - run: cd go-server && test -z "$(gofmt -l .)"
       - run: cd go-server && go vet ./...
@@ -90,6 +90,29 @@ jobs:
         with:
           name: playwright-report
           path: e2e/playwright-report
+
+  desktop-linux:
+    needs: [client]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-server/go.mod
+          cache-dependency-path: go-server/go.sum
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-3-dev libwebkit2gtk-4.1-dev xvfb
+      - run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
+      - name: Build the desktop binary
+        run: |
+          mkdir -p go-server/frontend && cp -r client/dist go-server/frontend/dist
+          cd go-server && wails build -s -skipbindings -tags desktop,webkit2_41 -platform linux/amd64 -o nats-explorer
+      - run: scripts/smoke-desktop.sh go-server/build/bin/nats-explorer
 
   docker:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

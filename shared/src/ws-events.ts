@@ -1,4 +1,4 @@
-import type { NatsMessage, SubjectNode, SubscriptionStats } from './messages.js';
+import type { NatsMessage, SubjectEntry, SubscriptionStats } from './messages.js';
 import type { ConnectionStatus } from './connection.js';
 import type { KvEntry } from './kv.js';
 import type { StreamMessage } from './jetstream.js';
@@ -6,7 +6,8 @@ import type { StreamMessage } from './jetstream.js';
 /** Events pushed from the server over /ws. */
 export type WsServerEvent =
   | { type: 'connections'; data: ConnectionStatus[] }
-  | { type: 'subject-tree'; connId: string; data: SubjectNode[] }
+  /** `full` replaces everything known for the connection; otherwise only changed subjects are listed. */
+  | { type: 'subject-tree'; connId: string; full: boolean; data: SubjectEntry[] }
   | { type: 'message-batch'; connId: string; data: NatsMessage[]; stats: SubscriptionStats }
   | { type: 'kv-update'; connId: string; bucket: string; entry: KvEntry }
   | { type: 'stream-msg'; connId: string; stream: string; message: StreamMessage }
@@ -17,7 +18,9 @@ export type WsEventOf<T extends WsEventType> = Extract<WsServerEvent, { type: T 
 
 /** Commands the browser sends over /ws to start or stop live watches. */
 export type WsClientCommand =
-  | { type: 'kv-watch'; connId: string; bucket: string }
+  /** Subject or branch the user is looking at; its messages bypass the background rate budget. Empty clears. */
+  | { type: 'focus'; subject: string }
+  | { type: 'kv-watch'; connId: string; bucket: string; domain?: string }
   | { type: 'kv-unwatch'; connId: string; bucket: string }
-  | { type: 'stream-tail'; connId: string; stream: string }
+  | { type: 'stream-tail'; connId: string; stream: string; domain?: string }
   | { type: 'stream-untail'; connId: string; stream: string };

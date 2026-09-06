@@ -10,6 +10,7 @@ import ObjStoreView from '../objectstore/ObjStoreView';
 import ServiceDetail from '../services/ServiceDetail';
 import MonitoringDashboard from '../monitoring/MonitoringDashboard';
 import ClusterView from '../cluster/ClusterView';
+import TemplateEditor from '../requests/TemplateEditor';
 
 function NoConnection() {
   const openDialog = useStore(s => s.openConnectionsDialog);
@@ -42,10 +43,13 @@ function NoConnection() {
 export default function Detail() {
   const module = useStore(s => s.module);
   const hasConnection = useStore(s => s.connections.some(c => c.connected));
+  const loaded = useStore(s => s.connectionsLoaded);
 
   return (
     <main className="flex-1 min-w-0 min-h-0 flex flex-col bg-canvas">
-      {!hasConnection ? (
+      {module === 'requests' ? (
+        <TemplateEditor />
+      ) : !loaded ? null : !hasConnection ? (
         <NoConnection />
       ) : (
         <>

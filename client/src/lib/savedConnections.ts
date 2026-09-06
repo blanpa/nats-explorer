@@ -1,5 +1,6 @@
 import type { AuthMethod, ConnectionConfig } from 'shared';
 import { uuid } from './utils';
+import { persist } from './storage';
 
 export type SystemTopicKey = 'sys' | 'js' | 'kv' | 'srv';
 
@@ -14,10 +15,22 @@ export interface SavedConnection {
   nkeySeed?: string;
   creds?: string;
   tls?: boolean;
+  tlsCa?: string;
+  tlsCert?: string;
+  tlsKey?: string;
+  tlsInsecure?: boolean;
   subscriptions: string[];
   sysTopics: Partial<Record<SystemTopicKey, boolean>>;
   monitoringUrl?: string;
   monitoringPort?: number;
+  jsDomain?: string;
+  jsApiPrefix?: string;
+  sysAuthMethod?: AuthMethod;
+  sysToken?: string;
+  sysUser?: string;
+  sysPass?: string;
+  sysNkeySeed?: string;
+  sysCreds?: string;
 }
 
 export const SYSTEM_TOPICS: { key: SystemTopicKey; subject: string; label: string; description: string }[] = [
@@ -97,11 +110,7 @@ export function loadSavedConnections(): SavedConnection[] {
 }
 
 export function persistSavedConnections(items: SavedConnection[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-  } catch {
-    /* quota or private mode: keep in memory only */
-  }
+  persist(STORAGE_KEY, items);
 }
 
 /** Builds the payload for POST /api/connect, merging system subjects. */
@@ -121,12 +130,33 @@ export function toConnectionConfig(saved: SavedConnection): ConnectionConfig {
     nkeySeed: saved.authMethod === 'nkey' ? saved.nkeySeed : undefined,
     creds: saved.authMethod === 'jwt' ? saved.creds : undefined,
     tls: saved.tls,
+    tlsCa: saved.tls ? saved.tlsCa?.trim() || undefined : undefined,
+    tlsCert: saved.tls ? saved.tlsCert?.trim() || undefined : undefined,
+    tlsKey: saved.tls ? saved.tlsKey?.trim() || undefined : undefined,
+    tlsInsecure: saved.tls ? saved.tlsInsecure || undefined : undefined,
     subscriptions: subs,
     monitoringUrl: saved.monitoringUrl || undefined,
     monitoringPort: saved.monitoringPort || undefined,
+    jsDomain: saved.jsDomain?.trim() || undefined,
+    jsApiPrefix: saved.jsApiPrefix?.trim() || undefined,
+    ...systemAccountConfig(saved),
   };
 }
 
 export function serverLabel(saved: SavedConnection): string {
   return saved.servers.map(s => s.replace(/^nats:\/\//, '')).join(', ');
+}
+
+/** Only the credentials matching the chosen system-account auth method are sent. */
+function systemAccountConfig(saved: SavedConnection): Partial<ConnectionConfig> {
+  const m = saved.sysAuthMethod;
+  if (!m || m === 'none') return {};
+  return {
+    sysAuthMethod: m,
+    sysToken: m === 'token' ? saved.sysToken : undefined,
+    sysUser: m === 'userpass' ? saved.sysUser : undefined,
+    sysPass: m === 'userpass' ? saved.sysPass : undefined,
+    sysNkeySeed: m === 'nkey' ? saved.sysNkeySeed : undefined,
+    sysCreds: m === 'jwt' ? saved.sysCreds : undefined,
+  };
 }

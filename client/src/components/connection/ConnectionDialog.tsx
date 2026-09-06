@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Plug, Plus, Trash2, Unplug } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, Plug, Plus, Trash2, Unplug, Upload } from 'lucide-react';
 import type { AuthMethod } from 'shared';
 import { useStore } from '../../store';
 import { useSavedConnections } from '../../store/savedConnections';
 import { newSavedConnection, serverLabel, SYSTEM_TOPICS, type SavedConnection } from '../../lib/savedConnections';
 import { cn, parseList } from '../../lib/utils';
+import { appInfo } from '../../lib/storage';
 import { Button } from '../ui/Button';
 import { Checkbox, Field, Input, Select, Textarea } from '../ui/Input';
 import { confirm, Dialog } from '../ui/Dialog';
@@ -17,6 +18,47 @@ const AUTH_OPTIONS: { value: AuthMethod; label: string }[] = [
   { value: 'nkey', label: 'NKey seed' },
   { value: 'jwt', label: 'Credentials file (JWT)' },
 ];
+
+/** Summarises what a PEM blob contains, e.g. "1 CERTIFICATE". */
+function describePem(pem: string): string {
+  const kinds = new Map<string, number>();
+  for (const m of pem.matchAll(/-----BEGIN ([A-Z ]+)-----/g)) kinds.set(m[1], (kinds.get(m[1]) ?? 0) + 1);
+  if (kinds.size === 0) return 'no PEM block found';
+  return [...kinds].map(([k, n]) => `${n} ${k}`).join(', ');
+}
+
+function PemField({ label, hint, value, onChange, placeholder }: { label: string; hint?: string; value: string; onChange: (v: string) => void; placeholder: string }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  return (
+    <Field label={label} hint={hint}>
+      <div className="flex flex-col gap-1">
+        <Textarea rows={3} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} className="text-xs" spellCheck={false} />
+        <div className="flex items-center gap-1 text-xs">
+          <Button size="xs" variant="ghost" icon={<Upload size={12} />} onClick={() => fileRef.current?.click()}>
+            Load file…
+          </Button>
+          {value.trim() && (
+            <Button size="xs" variant="ghost" onClick={() => onChange('')}>
+              Clear
+            </Button>
+          )}
+          {value.trim() && <span className={cn('ml-auto truncate', /BEGIN/.test(value) ? 'text-faint' : 'text-warn')}>{describePem(value)}</span>}
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".pem,.crt,.cer,.key,.txt,application/x-pem-file,application/x-x509-ca-cert"
+            className="hidden"
+            onChange={async e => {
+              const f = e.target.files?.[0];
+              if (f) onChange(await f.text());
+              e.target.value = '';
+            }}
+          />
+        </div>
+      </div>
+    </Field>
+  );
+}
 
 export default function ConnectionDialog() {
   const { open, editId } = useStore(s => s.connectionsDialog);
@@ -120,7 +162,7 @@ export default function ConnectionDialog() {
       open={open}
       onOpenChange={o => !o && close()}
       title="Connections"
-      description="Saved connections live in this browser. Credentials are stored unencrypted in local storage."
+      description={appInfo.storage === 'file' ? 'Saved connections live in the app settings on this computer.' : 'Saved connections live in this browser. Credentials are stored unencrypted in local storage.'}
       width="xl"
       flush
       className="h-[640px]"
@@ -256,6 +298,15 @@ export default function ConnectionDialog() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field label="JetStream domain" hint="Optional. Streams, KV and objects of this domain, e.g. a leaf node reached through the hub. Can be switched per module later.">
+                <Input mono value={draft.jsDomain ?? ''} onChange={e => patch({ jsDomain: e.target.value })} placeholder="leaf-a" />
+              </Field>
+              <Field label="JetStream API prefix" hint="Optional, for imported JetStream APIs. Takes precedence over the domain.">
+                <Input mono value={draft.jsApiPrefix ?? ''} onChange={e => patch({ jsApiPrefix: e.target.value })} placeholder="$JS.leaf-a.API" />
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="flex flex-col gap-2">
                 <span className="text-xs font-medium text-muted">Transport</span>
                 <Checkbox label="Use TLS" description="Required for tls:// servers with certificates." checked={!!draft.tls} onChange={e => patch({ tls: e.target.checked })} />
@@ -278,10 +329,74 @@ export default function ConnectionDialog() {
               </div>
             </div>
 
+            <div className="flex flex-col gap-3 rounded border border-line p-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Field label="System account" hint="Optional. Credentials for the $SYS account enable the Cluster module: every node, the JetStream meta cluster and stream placement, including leaf nodes.">
+                  <Select value={draft.sysAuthMethod ?? 'none'} onChange={e => patch({ sysAuthMethod: e.target.value as AuthMethod })}>
+                    {AUTH_OPTIONS.map(o => (
+                      <option key={o.value} value={o.value}>
+                        {o.value === 'none' ? 'Not configured' : o.label}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                {draft.sysAuthMethod === 'token' && (
+                  <Field label="System token">
+                    <Input type="password" mono value={draft.sysToken ?? ''} onChange={e => patch({ sysToken: e.target.value })} autoComplete="off" />
+                  </Field>
+                )}
+                {draft.sysAuthMethod === 'userpass' && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="System user">
+                      <Input mono value={draft.sysUser ?? ''} onChange={e => patch({ sysUser: e.target.value })} autoComplete="off" />
+                    </Field>
+                    <Field label="System password">
+                      <Input type="password" mono value={draft.sysPass ?? ''} onChange={e => patch({ sysPass: e.target.value })} autoComplete="off" />
+                    </Field>
+                  </div>
+                )}
+                {draft.sysAuthMethod === 'nkey' && (
+                  <Field label="System NKey seed">
+                    <Input type="password" mono value={draft.sysNkeySeed ?? ''} onChange={e => patch({ sysNkeySeed: e.target.value })} placeholder="SUA…" autoComplete="off" />
+                  </Field>
+                )}
+                {draft.sysAuthMethod === 'jwt' && (
+                  <Field label="System credentials file content">
+                    <Textarea rows={4} value={draft.sysCreds ?? ''} onChange={e => patch({ sysCreds: e.target.value })} placeholder="-----BEGIN NATS USER JWT-----" />
+                  </Field>
+                )}
+              </div>
+              {live?.sysError && <span className="text-xs text-danger">System account: {live.sysError}</span>}
+              {live?.sysAccount && <span className="text-xs text-ok">System account connected.</span>}
+            </div>
+
+            {draft.tls && (
+              <div className="flex flex-col gap-3 rounded border border-line p-3">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <PemField label="CA certificate" hint="Trust this CA instead of the system store." value={draft.tlsCa ?? ''} onChange={v => patch({ tlsCa: v })} placeholder="-----BEGIN CERTIFICATE-----" />
+                  <PemField label="Client certificate" hint="For mutual TLS; needs the key as well." value={draft.tlsCert ?? ''} onChange={v => patch({ tlsCert: v })} placeholder="-----BEGIN CERTIFICATE-----" />
+                  <PemField label="Client key" value={draft.tlsKey ?? ''} onChange={v => patch({ tlsKey: v })} placeholder="-----BEGIN PRIVATE KEY-----" />
+                </div>
+                <Checkbox
+                  label="Skip server certificate verification"
+                  description="Insecure: accepts any server certificate. Only for test environments."
+                  checked={!!draft.tlsInsecure}
+                  onChange={e => patch({ tlsInsecure: e.target.checked })}
+                />
+              </div>
+            )}
+
             <div className="flex items-start gap-2 text-xs text-muted rounded border border-warn/30 bg-warn/5 px-3 py-2 mt-auto">
               <AlertTriangle size={13} className="text-warn shrink-0 mt-0.5" />
               <span>
-                Tokens, passwords and seeds are saved in this browser&apos;s local storage without encryption and sent to the NATS Explorer backend on connect. Do not use this on a shared machine with production credentials.
+                {appInfo.storage === 'file' ? (
+                  <>
+                    Connections are stored in <span className="font-mono">{appInfo.configDir}</span>. Tokens, passwords, seeds and TLS keys go to{' '}
+                    {appInfo.secrets === 'keyring' ? 'the system keyring' : <>a separate <span className="font-mono">secrets.json</span> readable only by your user account</>}.
+                  </>
+                ) : (
+                  <>Tokens, passwords, seeds and TLS keys are saved in this browser&apos;s local storage without encryption and sent to the NATS Explorer backend on connect. Do not use this on a shared machine with production credentials.</>
+                )}
               </span>
             </div>
           </form>

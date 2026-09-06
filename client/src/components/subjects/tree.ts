@@ -1,4 +1,4 @@
-import type { SubjectNode } from 'shared';
+import type { PayloadType, SubjectEntry } from 'shared';
 
 /** Merged, annotated tree node used by the explorer. */
 export interface TreeNode {
@@ -9,7 +9,8 @@ export interface TreeNode {
   rate: number;
   /** rate of this node plus every descendant */
   totalRate: number;
-  lastMessage?: SubjectNode['lastMessage'];
+  /** newest last-message preview across connections */
+  last?: { payload: string; payloadType: PayloadType; timestamp: number; size: number };
   children: TreeNode[];
   connIds: string[];
 }
@@ -23,47 +24,65 @@ export interface FlatNode {
   guides: boolean[];
 }
 
-function mergeInto(level: Map<string, TreeNode>, node: SubjectNode, connId: string) {
-  const existing = level.get(node.segment);
-  if (!existing) {
-    const created: TreeNode = {
-      segment: node.segment,
-      fullSubject: node.fullSubject,
-      messageCount: node.messageCount,
-      total: 0,
-      rate: node.rate,
-      totalRate: 0,
-      lastMessage: node.lastMessage,
-      children: [],
-      connIds: [connId],
-    };
-    level.set(node.segment, created);
-    const childMap = new Map<string, TreeNode>();
-    for (const c of node.children) mergeInto(childMap, c, connId);
-    created.children = [...childMap.values()].sort(bySegment);
-    created.total = created.messageCount + created.children.reduce((s, c) => s + c.total, 0);
-    created.totalRate = created.rate + created.children.reduce((s, c) => s + c.totalRate, 0);
-    return;
-  }
-  existing.messageCount += node.messageCount;
-  existing.rate += node.rate;
-  if (!existing.connIds.includes(connId)) existing.connIds.push(connId);
-  if (node.lastMessage && (!existing.lastMessage || node.lastMessage.timestamp > existing.lastMessage.timestamp)) {
-    existing.lastMessage = node.lastMessage;
-  }
-  const childMap = new Map<string, TreeNode>(existing.children.map(c => [c.segment, c]));
-  for (const c of node.children) mergeInto(childMap, c, connId);
-  existing.children = [...childMap.values()].sort(bySegment);
-  existing.total = existing.messageCount + existing.children.reduce((s, c) => s + c.total, 0);
-  existing.totalRate = existing.rate + existing.children.reduce((s, c) => s + c.totalRate, 0);
-}
+/** Flat per-connection subject index as maintained by the store. */
+export type SubjectIndex = Map<string, Map<string, SubjectEntry>>;
 
 const bySegment = (a: TreeNode, b: TreeNode) => a.segment.localeCompare(b.segment, undefined, { numeric: true });
 
-export function mergeTrees(trees: Map<string, SubjectNode[]>): TreeNode[] {
-  const root = new Map<string, TreeNode>();
-  for (const [connId, tree] of trees) for (const n of tree) mergeInto(root, n, connId);
-  return [...root.values()].sort(bySegment);
+interface Building {
+  node: TreeNode;
+  children: Map<string, Building>;
+}
+
+/**
+ * Builds the merged hierarchy from the flat indexes of all connections in one
+ * pass: O(subjects × depth), with a single sort per level at the end.
+ */
+export function buildTree(index: SubjectIndex): TreeNode[] {
+  const root = new Map<string, Building>();
+  for (const [connId, entries] of index) {
+    for (const e of entries.values()) {
+      const segments = e.s.split('.');
+      let level = root;
+      let full = '';
+      let b: Building | undefined;
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        full = i === 0 ? seg : `${full}.${seg}`;
+        b = level.get(seg);
+        if (!b) {
+          b = { node: { segment: seg, fullSubject: full, messageCount: 0, total: 0, rate: 0, totalRate: 0, children: [], connIds: [] }, children: new Map() };
+          level.set(seg, b);
+        }
+        level = b.children;
+      }
+      const node = b!.node;
+      node.messageCount += e.n;
+      node.rate += e.r;
+      if (!node.connIds.includes(connId)) node.connIds.push(connId);
+      if (e.ts && (!node.last || e.ts > node.last.timestamp)) {
+        node.last = { payload: e.p ?? '', payloadType: e.pt ?? 'string', timestamp: e.ts, size: e.sz ?? 0 };
+      }
+    }
+  }
+  return finish(root);
+}
+
+function finish(level: Map<string, Building>): TreeNode[] {
+  const out: TreeNode[] = [];
+  for (const b of level.values()) {
+    const n = b.node;
+    n.children = finish(b.children);
+    n.total = n.messageCount;
+    n.totalRate = n.rate;
+    for (const c of n.children) {
+      n.total += c.total;
+      n.totalRate += c.totalRate;
+      for (const id of c.connIds) if (!n.connIds.includes(id)) n.connIds.push(id);
+    }
+    out.push(n);
+  }
+  return out.sort(bySegment);
 }
 
 /** Keeps nodes whose subject matches the filter, plus all their ancestors and descendants. */
@@ -116,4 +135,9 @@ export function ancestorsOf(subject: string): string[] {
   const out: string[] = [];
   for (let i = 1; i < parts.length; i++) out.push(parts.slice(0, i).join('.'));
   return out;
+}
+
+/** NATS-internal roots: request inboxes, JetStream/KV/object-store/service/system traffic. */
+export function isSystemRoot(segment: string): boolean {
+  return segment === '_INBOX' || segment.startsWith('$');
 }

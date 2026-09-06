@@ -3,7 +3,6 @@ import { useStore } from '../../store';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/misc';
 import ConnectionSwitcher from '../connection/ConnectionSwitcher';
-import { cn } from '../../lib/utils';
 
 function Logo() {
   return (
@@ -16,9 +15,7 @@ function Logo() {
 
 export default function Header() {
   const wsOnline = useStore(s => s.wsOnline);
-  const rate = useStore(s => s.messagesPerSecond);
   const openConnections = useStore(s => s.openConnectionsDialog);
-  const anyConnected = useStore(s => s.connections.some(c => c.connected));
 
   return (
     <header className="h-11 shrink-0 flex items-center gap-3 px-3 bg-panel border-b border-line">
@@ -37,13 +34,6 @@ export default function Header() {
         <Badge tone="danger" title="The NATS Explorer backend is not reachable. Reconnecting…">
           <WifiOff size={11} /> Backend offline
         </Badge>
-      )}
-
-      {anyConnected && (
-        <div className="hidden sm:flex items-center gap-2 text-xs text-muted font-mono tabular-nums" title="Messages per second forwarded to this UI">
-          <span className={cn('status-dot', rate > 0 ? 'bg-accent animate-pulse-dot' : 'bg-faint')} />
-          {rate.toLocaleString()} msg/s
-        </div>
       )}
 
       <Button variant="outline" size="sm" icon={<Cable size={13} />} onClick={() => openConnections()}>

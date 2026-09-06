@@ -57,7 +57,7 @@ export default function ConnectionSwitcher() {
         >
           {connections.length > 0 && (
             <>
-              <DropdownMenu.Label className="px-2 py-1 text-xs font-semibold uppercase tracking-wider text-faint">Active</DropdownMenu.Label>
+              <DropdownMenu.Label className="px-2 py-1 text-xs font-semibold text-faint">Active</DropdownMenu.Label>
               {connections.map(c => (
                 <DropdownMenu.Item
                   key={c.id}
@@ -92,7 +92,7 @@ export default function ConnectionSwitcher() {
           {idle.length > 0 && (
             <>
               {connections.length > 0 && <DropdownMenu.Separator className="my-1 h-px bg-line" />}
-              <DropdownMenu.Label className="px-2 py-1 text-xs font-semibold uppercase tracking-wider text-faint">Saved</DropdownMenu.Label>
+              <DropdownMenu.Label className="px-2 py-1 text-xs font-semibold text-faint">Saved</DropdownMenu.Label>
               {idle.map(s => {
                 const busy = connecting.has(s.id);
                 return (

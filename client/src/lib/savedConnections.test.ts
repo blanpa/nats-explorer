@@ -22,6 +22,7 @@ describe('savedConnections', () => {
       token: 'should-not-be-sent',
       subscriptions: ['orders.>'],
       sysTopics: { js: true, kv: false },
+      jsDomain: ' leaf-a ',
     });
     const cfg = toConnectionConfig(saved);
     expect(cfg.id).toBe('abc');
@@ -29,6 +30,23 @@ describe('savedConnections', () => {
     expect(cfg.subscriptions).toEqual(['orders.>', '$JS.>']);
     expect(cfg.user).toBe('u');
     expect(cfg.token).toBeUndefined();
+    expect(cfg.jsDomain).toBe('leaf-a');
+    expect(cfg.jsApiPrefix).toBeUndefined();
+  });
+
+  it('sends system-account credentials only for the chosen method', () => {
+    const base = { servers: ['nats://a:4222'], authMethod: 'none' as const, subscriptions: ['>'], sysTopics: {}, sysUser: 'sys', sysPass: 'pw', sysToken: 'tok' };
+    expect(toConnectionConfig(newSavedConnection({ ...base })).sysAuthMethod).toBeUndefined();
+    const cfg = toConnectionConfig(newSavedConnection({ ...base, sysAuthMethod: 'userpass' }));
+    expect(cfg).toMatchObject({ sysAuthMethod: 'userpass', sysUser: 'sys', sysPass: 'pw' });
+    expect(cfg.sysToken).toBeUndefined();
+  });
+
+  it('sends TLS material only when TLS is on', () => {
+    const base = { servers: ['tls://a:4222'], authMethod: 'none' as const, subscriptions: ['>'], sysTopics: {}, tlsCa: 'CA', tlsCert: 'CERT', tlsKey: 'KEY', tlsInsecure: true };
+    expect(toConnectionConfig(newSavedConnection({ ...base, tls: false })).tlsCa).toBeUndefined();
+    const on = toConnectionConfig(newSavedConnection({ ...base, tls: true }));
+    expect(on).toMatchObject({ tls: true, tlsCa: 'CA', tlsCert: 'CERT', tlsKey: 'KEY', tlsInsecure: true });
   });
 
   it('does not duplicate a system subject the user already listed', () => {

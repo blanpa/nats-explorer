@@ -1,4 +1,5 @@
 import type {
+  ClusterOverview,
   ConnectionConfig,
   ConnectionStatus,
   ConnectResponse,
@@ -12,6 +13,8 @@ import type {
   ObjStoreInfo,
   PublishInput,
   RequestInput,
+  RunInput,
+  RunResult,
   RequestReply,
   ServerInfo,
   ServiceInfo,
@@ -22,6 +25,7 @@ import type {
   StreamMessagesPage,
 } from 'shared';
 import { useAuth, withToken } from './auth';
+import { useStore } from '../store';
 
 const BASE_URL = '/api';
 
@@ -74,6 +78,9 @@ const enc = encodeURIComponent;
 
 function withConn(path: string, connId: string, params: Record<string, string | number | undefined> = {}): string {
   const q = new URLSearchParams({ connId });
+  // Ad-hoc JetStream domain chosen in the UI; the backend falls back to the connection's own.
+  const domain = useStore.getState().jsDomainOverride.get(connId);
+  if (domain) q.set('domain', domain);
   for (const [k, val] of Object.entries(params)) if (val !== undefined && val !== '') q.set(k, String(val));
   return `${path}?${q.toString()}`;
 }
@@ -85,6 +92,7 @@ export const api = {
   disconnectAll: () => request<{ success: boolean }>('/disconnect-all', { method: 'POST' }),
   getConnections: () => request<ConnectionStatus[]>('/connections'),
   getServerInfo: (connId: string) => request<ServerInfo>(`/server/${enc(connId)}`),
+  clusterOverview: (connId: string) => request<ClusterOverview>(`/cluster/${enc(connId)}/overview`),
 
   // Monitoring
   getMonitoring: <T = unknown>(connId: string, endpoint: string, params: Record<string, string | number> = {}) => {
@@ -97,6 +105,7 @@ export const api = {
   // Publish / request
   publish: (connId: string, data: PublishInput) => request<{ success: boolean }>('/publish', { method: 'POST', ...json({ ...data, connId }) }),
   requestReply: (connId: string, data: RequestInput) => request<RequestReply>('/request', { method: 'POST', ...json({ ...data, connId }) }),
+  run: (connId: string, data: RunInput) => request<RunResult>('/run', { method: 'POST', ...json({ ...data, connId }) }),
 
   // Streams
   listStreams: (connId: string) => request<StreamInfo[]>(withConn('/streams', connId)),
@@ -163,4 +172,19 @@ export const api = {
 export function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
+}
+
+/**
+ * JetStream calls to a domain nobody serves cannot fail fast: the explorer's
+ * own `>` subscription answers every subject, so NATS never reports "no
+ * responders" and the call runs into its deadline. Say so instead of
+ * showing a bare "context deadline exceeded".
+ */
+export function describeJsError(error: string, domain?: string): string {
+  if (/deadline exceeded|timeout/i.test(error)) {
+    return domain
+      ? `No answer from JetStream domain "${domain}". Check the domain name and whether that JetStream is reachable through this server.`
+      : 'No answer from JetStream within the time limit. Is JetStream enabled on this server or account?';
+  }
+  return error;
 }

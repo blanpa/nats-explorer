@@ -1,152 +1,182 @@
 name: Release
 
+# Builds installers for Windows, macOS and Linux, headless server binaries and
+# the Docker image, then publishes everything as a GitHub release.
+# Trigger: push a tag like v0.2.0, or run manually (artifacts only, no release).
+
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: write
   packages: write
 
+env:
+  NODE_VERSION: '22'
+  WAILS_VERSION: 'v2.11.0'
+
 jobs:
-  # Headless server binaries (cross-compiled, no CGO)
-  build-server:
+  # The UI is built once and reused by every packaging job.
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter shared build
+      - run: pnpm --filter client typecheck
+      - run: pnpm --filter client test
+      - run: pnpm --filter client build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist
+
+  desktop-linux:
+    needs: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-server/go.mod
+          cache-dependency-path: go-server/go.sum
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-3-dev libwebkit2gtk-4.1-dev nsis dpkg-dev file
+          curl -fsSL -o /usr/local/bin/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          sudo chmod +x /usr/local/bin/appimagetool
+      - run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+      - name: Build Linux packages (AppImage, .deb, tar.gz)
+        run: VERSION=${{ github.ref_name }} scripts/build-desktop.sh linux
+      - name: Smoke test the built app
+        run: |
+          sudo apt-get install -y --no-install-recommends xvfb
+          scripts/smoke-desktop.sh go-server/build/bin/nats-explorer
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux
+          path: dist/desktop/*
+
+  desktop-windows:
+    needs: frontend
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-server/go.mod
+          cache-dependency-path: go-server/go.sum
+      - run: choco install nsis -y --no-progress
+      - run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+      - name: Build Windows installer and portable zip
+        shell: bash
+        run: |
+          export PATH="$PATH:/c/Program Files (x86)/NSIS"
+          VERSION=${{ github.ref_name }} scripts/build-desktop.sh windows
+      - name: Smoke test the installer (silent install, launch, uninstall)
+        shell: pwsh
+        run: scripts/smoke-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          path: dist/desktop/*
+
+  desktop-macos:
+    needs: frontend
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-server/go.mod
+          cache-dependency-path: go-server/go.sum
+      - run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+      - name: Build universal .app and .dmg
+        run: VERSION=${{ github.ref_name }} scripts/build-desktop.sh macos
+      - name: Smoke test the app bundle
+        run: scripts/smoke-desktop.sh "$(find go-server/build/bin -path '*.app/Contents/MacOS/*' -type f | head -1)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-macos
+          path: dist/desktop/*
+
+  # Headless server (UI served from the same binary's folder) for people who run it on a box.
+  server:
+    needs: frontend
     runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
-          - goos: linux
-            goarch: amd64
-            name: linux-x64
-          - goos: linux
-            goarch: arm64
-            name: linux-arm64
-          - goos: windows
-            goarch: amd64
-            name: windows-x64
-          - goos: darwin
-            goarch: amd64
-            name: macos-x64
-          - goos: darwin
-            goarch: arm64
-            name: macos-arm64
+          - { goos: linux,   goarch: amd64, name: linux-x64 }
+          - { goos: linux,   goarch: arm64, name: linux-arm64 }
+          - { goos: windows, goarch: amd64, name: windows-x64 }
+          - { goos: darwin,  goarch: amd64, name: macos-x64 }
+          - { goos: darwin,  goarch: arm64, name: macos-arm64 }
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/download-artifact@v4
         with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-      - run: pnpm install
-      - run: pnpm --filter shared build
-      - run: pnpm --filter client build
+          name: client-dist
+          path: client/dist
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version-file: go-server/go.mod
           cache-dependency-path: go-server/go.sum
-      - name: Build server binary
+      - name: Build and package
         env:
-          CGO_ENABLED: 0
+          CGO_ENABLED: '0'
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
-          cd go-server
-          ext=""
-          if [ "${{ matrix.goos }}" = "windows" ]; then ext=".exe"; fi
-          go build -ldflags="-s -w" -o ../dist/nats-explorer${ext} .
-      - name: Package
-        run: |
-          ext=""
-          if [ "${{ matrix.name }}" = "windows-x64" ]; then ext=".exe"; fi
-          mkdir -p release/nats-explorer-server-${{ matrix.name }}
-          cp dist/nats-explorer${ext} release/nats-explorer-server-${{ matrix.name }}/
-          cp -r client/dist release/nats-explorer-server-${{ matrix.name }}/public
+          ext=""; [ "${{ matrix.goos }}" = windows ] && ext=.exe
+          name=nats-explorer-server-${{ github.ref_name }}-${{ matrix.name }}
+          mkdir -p release/$name
+          (cd go-server && go build -trimpath -ldflags="-s -w" -o ../release/$name/nats-explorer$ext .)
+          cp -r client/dist release/$name/public
+          cat > release/$name/README.txt <<'TXT'
+          NATS Explorer server build. Run the binary; it serves the UI on http://localhost:3002.
+          Environment: PORT (default 3002), PUBLIC_PATH (default ./public next to the binary), AUTH_TOKEN (optional API token).
+          TXT
           cd release
-          if [ "${{ matrix.name }}" = "windows-x64" ]; then
-            zip -r nats-explorer-server-${{ matrix.name }}.zip nats-explorer-server-${{ matrix.name }}/
-          else
-            tar czf nats-explorer-server-${{ matrix.name }}.tar.gz nats-explorer-server-${{ matrix.name }}/
-          fi
+          if [ "${{ matrix.goos }}" = windows ]; then zip -qr $name.zip $name; else tar czf $name.tar.gz $name; fi
       - uses: actions/upload-artifact@v4
         with:
           name: server-${{ matrix.name }}
-          path: release/nats-explorer-server-${{ matrix.name }}.*
-
-  # Desktop app (native build, needs CGO + system webview)
-  build-desktop:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            name: linux-x64
-            ext: ""
-            archive: tar.gz
-          - os: windows-latest
-            name: windows-x64
-            ext: ".exe"
-            archive: zip
-          - os: macos-latest
-            name: macos-arm64
-            ext: ""
-            archive: tar.gz
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-      - run: pnpm install
-      - run: pnpm --filter shared build
-      - run: pnpm --filter client build
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.24'
-          cache-dependency-path: go-server/go.sum
-
-      # Linux: install webkit2gtk
-      - name: Install Linux dependencies
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
-
-      # Copy frontend build into go-server for embedding
-      - name: Prepare frontend for embedding
-        run: |
-          mkdir -p go-server/frontend
-          cp -r client/dist go-server/frontend/dist
-
-      - name: Build desktop app
-        shell: bash
-        run: |
-          cd go-server
-          CGO_ENABLED=1 go build -tags desktop -ldflags="-s -w" -o ../dist/nats-explorer${{ matrix.ext }} .
-
-      - name: Package
-        shell: bash
-        run: |
-          mkdir -p release/nats-explorer-desktop-${{ matrix.name }}
-          cp dist/nats-explorer${{ matrix.ext }} release/nats-explorer-desktop-${{ matrix.name }}/
-          cd release
-          if [ "${{ matrix.archive }}" = "zip" ]; then
-            7z a nats-explorer-desktop-${{ matrix.name }}.zip nats-explorer-desktop-${{ matrix.name }}/
-          else
-            tar czf nats-explorer-desktop-${{ matrix.name }}.tar.gz nats-explorer-desktop-${{ matrix.name }}/
-          fi
-
+          path: release/*.zip
       - uses: actions/upload-artifact@v4
+        if: matrix.goos != 'windows'
         with:
-          name: desktop-${{ matrix.name }}
-          path: release/nats-explorer-desktop-${{ matrix.name }}.*
+          name: server-${{ matrix.name }}-tgz
+          path: release/*.tar.gz
 
   docker:
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -156,8 +186,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Docker meta
-        id: meta
+      - id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
@@ -176,24 +205,20 @@ jobs:
           cache-to: type=gha,mode=max
 
   release:
-    needs: [build-server, build-desktop, docker]
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [desktop-linux, desktop-windows, desktop-macos, server, docker]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: '*-*64'
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
+      - name: Collect files
+        run: |
+          mkdir -p out
+          find artifacts -type f \( -name '*.exe' -o -name '*.zip' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.tar.gz' \) -exec cp {} out/ \;
+          (cd out && sha256sum * > SHA256SUMS.txt)
+          ls -la out
+      - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: |
-            artifacts/server-linux-x64/*
-            artifacts/server-linux-arm64/*
-            artifacts/server-windows-x64/*
-            artifacts/server-macos-x64/*
-            artifacts/server-macos-arm64/*
-            artifacts/desktop-linux-x64/*
-            artifacts/desktop-windows-x64/*
-            artifacts/desktop-macos-arm64/*
+          files: out/*

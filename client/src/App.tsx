@@ -21,12 +21,12 @@ export default function App() {
   const counter = useRef(0);
 
   useEffect(() => {
-    const { setConnections, setSubjectTree, addMessages, setSubscriptionStats, setWsOnline, setMessagesPerSecond } = useStore.getState();
+    const { setConnections, applySubjectTree, addMessages, setSubscriptionStats, setWsOnline, setMessagesPerSecond } = useStore.getState();
 
     const unsubs = [
       wsClient.onStatus(status => setWsOnline(status === 'open')),
       wsClient.on('connections', e => setConnections(e.data)),
-      wsClient.on('subject-tree', e => setSubjectTree(e.connId, e.data)),
+      wsClient.on('subject-tree', e => applySubjectTree(e.connId, e.full, e.data)),
       wsClient.on('message-batch', e => {
         addMessages(e.connId, e.data);
         counter.current += e.data.length;
@@ -39,6 +39,13 @@ export default function App() {
         if (info.required && !useAuth.getState().token) useAuth.getState().setRequired(true);
       })
       .catch(() => undefined);
+    // Tell the server what the user is looking at so the live feed spends its
+    // budget there; repeated on every (re)connect.
+    const sendFocus = () => wsClient.send({ type: 'focus', subject: useStore.getState().selectedSubject ?? '' });
+    unsubs.push(
+      wsClient.onStatus(status => status === 'open' && sendFocus()),
+      useStore.subscribe((s, prev) => s.selectedSubject !== prev.selectedSubject && sendFocus()),
+    );
     wsClient.connect();
 
     // Rate = messages over the last 3 seconds, so bursty publishers read steadily.

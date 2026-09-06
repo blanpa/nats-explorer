@@ -97,11 +97,31 @@ export default function SubjectDetail() {
         <IconButton label="Copy subject" onClick={copySubject}>
           {copied ? <Check size={14} className="text-ok" /> : <Copy size={14} />}
         </IconButton>
-        <Button variant="outline" icon={<Send size={13} />} onClick={() => prefillPublish({ subject, payload: display ? prettyJson(display.payload) : undefined })}>
+        <Button variant="outline" icon={<Send size={13} />} onClick={() => prefillPublish({ subject: isBranch ? `${subject}.` : subject, payload: display ? prettyJson(display.payload) : undefined })}>
           Publish here
         </Button>
       </div>
     </PaneHeader>
+  );
+
+  // Publish drawer, shared by the leaf and the branch view.
+  const drawer = (
+    <div className="shrink-0 border-t border-line bg-panel">
+      <button
+        className="w-full h-8 flex items-center gap-2 px-3 text-xs font-semibold text-muted hover:text-fg"
+        onClick={() => setPublishOpen(!publishOpen)}
+        aria-expanded={publishOpen}
+      >
+        <Send size={12} />
+        Publish
+        <span className="ml-auto">{publishOpen ? <ChevronDown size={14} /> : <ChevronUp size={14} />}</span>
+      </button>
+      {publishOpen && (
+        <div className="border-t border-line max-h-[45vh] overflow-auto">
+          <PublishPanel />
+        </div>
+      )}
+    </div>
   );
 
   if (isBranch) {
@@ -139,6 +159,7 @@ export default function SubjectDetail() {
             <FolderTree size={12} /> Showing buffered messages of all subjects below <span className="font-mono">{subject}</span>. Click a row to open that subject.
           </div>
         </div>
+        {drawer}
       </div>
     );
   }
@@ -260,23 +281,7 @@ export default function SubjectDetail() {
         </div>
       </div>
 
-      {/* Publish drawer */}
-      <div className="shrink-0 border-t border-line bg-panel">
-        <button
-          className="w-full h-8 flex items-center gap-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted hover:text-fg"
-          onClick={() => setPublishOpen(!publishOpen)}
-          aria-expanded={publishOpen}
-        >
-          <Send size={12} />
-          Publish
-          <span className="ml-auto">{publishOpen ? <ChevronDown size={14} /> : <ChevronUp size={14} />}</span>
-        </button>
-        {publishOpen && (
-          <div className="border-t border-line max-h-[45vh] overflow-auto">
-            <PublishPanel />
-          </div>
-        )}
-      </div>
+      {drawer}
     </div>
   );
 }

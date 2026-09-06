@@ -11,6 +11,8 @@
       (function () {
         try {
           var t = localStorage.getItem('ne.theme');
+          // stored as JSON since settings sync; older versions wrote the bare word
+          if (t && t.charAt(0) === '"') t = JSON.parse(t);
           if (t !== 'light' && t !== 'dark') {
             t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
           }

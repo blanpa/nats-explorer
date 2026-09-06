@@ -41,3 +41,51 @@ func TestManagerStopIsIdempotent(t *testing.T) {
 		t.Fatal("fresh manager must have no stats")
 	}
 }
+
+func TestAdmitBudgets(t *testing.T) {
+	m := NewManager("c1")
+	m.SetFocus("tab", "hot.branch")
+
+	// Focused subjects ignore the background budget but keep the per-subject cap.
+	got := 0
+	for i := 0; i < MaxMsgsPerSecondPerSubject+5; i++ {
+		if m.admit("hot.branch.leaf") {
+			got++
+		}
+	}
+	if got != MaxMsgsPerSecondPerSubject {
+		t.Fatalf("focused subject admitted %d, want %d", got, MaxMsgsPerSecondPerSubject)
+	}
+	if m.admit("hot.branchx") {
+		// "hot.branchx" is not below "hot.branch"; it counts as background.
+	}
+	if m.bgSent != 1 {
+		t.Fatalf("prefix match must respect segment boundaries, bgSent=%d", m.bgSent)
+	}
+
+	// Background: first message per subject wins over repeats once half the budget is used.
+	m.emitCounts = map[string]int{}
+	m.bgSent = 0
+	for i := 0; i < MaxBackgroundMsgsPerSecond/2; i++ {
+		m.admit("bg.repeat")
+		m.emitCounts["bg.repeat"] = 1 // keep it below the per-subject cap
+	}
+	if m.admit("bg.repeat") {
+		t.Fatal("repeat message must be refused above half the background budget")
+	}
+	if !m.admit("bg.fresh") {
+		t.Fatal("first message of a subject must still get through")
+	}
+	m.bgSent = MaxBackgroundMsgsPerSecond
+	if m.admit("bg.other") {
+		t.Fatal("background budget exhausted must drop")
+	}
+	if !m.admit("hot.branch") {
+		t.Fatal("focused subject itself must get through")
+	}
+
+	m.ClearFocus("tab")
+	if m.isFocused("hot.branch.leaf") {
+		t.Fatal("focus should be cleared")
+	}
+}

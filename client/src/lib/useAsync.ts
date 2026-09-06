@@ -16,6 +16,27 @@ interface Options {
   interval?: number;
   /** skip polling while the tab is hidden (default true) */
   pauseHidden?: boolean;
+  /**
+   * Cache key. With a key, a remount (e.g. switching modules and back) renders
+   * the last result immediately and revalidates in the background; deps that
+   * change without changing the key (a refresh tick) refetch without a
+   * loading flash.
+   */
+  key?: string;
+}
+
+const cache = new Map<string, unknown>();
+const CACHE_MAX = 300;
+
+/** Forget every cached result, e.g. when the JetStream domain changes. */
+export function clearAsyncCache(): void {
+  cache.clear();
+}
+
+function remember(key: string, value: unknown) {
+  if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value as string);
+  cache.delete(key);
+  cache.set(key, value);
 }
 
 /**
@@ -23,19 +44,31 @@ interface Options {
  * skip (e.g. no connection selected). Stale responses are discarded.
  */
 export function useAsync<T>(loader: () => Promise<T> | null, deps: unknown[], opts: Options = {}): AsyncState<T> {
-  const [data, setData] = useState<T | null>(null);
+  const key = opts.key ?? null;
+  const cached = key !== null && cache.has(key) ? (cache.get(key) as T) : null;
+  const [data, setDataState] = useState<T | null>(cached);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [initial, setInitial] = useState(true);
+  const [initial, setInitial] = useState(cached === null);
   const seq = useRef(0);
   const loaderRef = useRef(loader);
   loaderRef.current = loader;
+  const keyRef = useRef(key);
+  keyRef.current = key;
+
+  const setData = useCallback((updater: T | null | ((prev: T | null) => T | null)) => {
+    setDataState(prev => {
+      const next = typeof updater === 'function' ? (updater as (p: T | null) => T | null)(prev) : updater;
+      if (keyRef.current !== null && next !== null) remember(keyRef.current, next);
+      return next;
+    });
+  }, []);
 
   const run = useCallback(async () => {
     const p = loaderRef.current();
     if (!p) {
       seq.current++;
-      setData(null);
+      setDataState(null);
       setError(null);
       setLoading(false);
       setInitial(true);
@@ -46,7 +79,8 @@ export function useAsync<T>(loader: () => Promise<T> | null, deps: unknown[], op
     try {
       const result = await p;
       if (id !== seq.current) return;
-      setData(result);
+      if (keyRef.current !== null) remember(keyRef.current, result);
+      setDataState(result);
       setError(null);
     } catch (err) {
       if (id !== seq.current) return;
@@ -60,7 +94,13 @@ export function useAsync<T>(loader: () => Promise<T> | null, deps: unknown[], op
   }, []);
 
   useEffect(() => {
-    setInitial(true);
+    const hit = key !== null && cache.has(key) ? (cache.get(key) as T) : null;
+    if (hit !== null) {
+      setDataState(hit);
+      setInitial(false);
+    } else {
+      setInitial(true);
+    }
     run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);

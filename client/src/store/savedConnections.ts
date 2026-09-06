@@ -36,7 +36,6 @@ export const useSavedConnections = create<SavedConnectionsState>((set, get) => (
     try {
       const res = await api.connect(toConnectionConfig(saved));
       useStore.getState().setActiveConnId(res.id);
-      toast.success(`Connected to ${saved.name || saved.servers[0]}`);
       return true;
     } catch (err) {
       toast.error(`Could not connect to ${saved.name || saved.servers[0]}`, errorMessage(err));

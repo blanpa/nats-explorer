@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"nats-explorer/internal/settings"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -23,9 +25,11 @@ func startNATS(t *testing.T) *natsserver.Server {
 		Host:      "127.0.0.1",
 		Port:      -1,
 		JetStream: true,
-		StoreDir:  t.TempDir(),
-		NoLog:     true,
-		NoSigs:    true,
+		// A domain so the domain routing of the API can be exercised.
+		JetStreamDomain: "hub",
+		StoreDir:        t.TempDir(),
+		NoLog:           true,
+		NoSigs:          true,
 	}
 	ns, err := natsserver.NewServer(opts)
 	if err != nil {
@@ -78,7 +82,7 @@ func (c *apiClient) do(method, path string, body interface{}, out interface{}) i
 
 func TestServerEndToEnd(t *testing.T) {
 	ns := startNATS(t)
-	srv := httptest.NewServer(createServer(nil, ""))
+	srv := httptest.NewServer(createServer(nil, serverConfig{}))
 	defer srv.Close()
 	api := &apiClient{t: t, base: srv.URL}
 
@@ -202,6 +206,25 @@ func TestServerEndToEnd(t *testing.T) {
 		t.Fatalf("connections event = %v", ev)
 	}
 
+	// A new browser gets a full, flat tree snapshot with compact entries.
+	ev = readEvent(t, ws, "subject-tree")
+	if ev["full"] != true {
+		t.Fatalf("first subject-tree must be a full snapshot, got %v", ev)
+	}
+	var sawT1 bool
+	for _, e := range ev["data"].([]interface{}) {
+		em := e.(map[string]interface{})
+		if em["s"] == "t.1" {
+			sawT1 = true
+			if em["n"].(float64) < 1 || em["pt"] != "json" || em["p"] == "" {
+				t.Errorf("snapshot entry t.1 = %v", em)
+			}
+		}
+	}
+	if !sawT1 {
+		t.Fatalf("snapshot lacks subject t.1: %v", ev["data"])
+	}
+
 	// KV watch over the websocket.
 	ws.WriteJSON(map[string]string{"type": "kv-watch", "connId": "t1", "bucket": "cfg"})
 	time.Sleep(200 * time.Millisecond) // let the watcher subscribe
@@ -248,6 +271,64 @@ func TestServerEndToEnd(t *testing.T) {
 		t.Errorf("binary payload = %v", binMsg)
 	}
 
+	// Repeated request run with template variables against an echo responder.
+	echo, _ := nc.Subscribe("echo.*", func(m *nats.Msg) { m.Respond(m.Data) })
+	defer echo.Unsubscribe()
+	nc.Flush()
+	var run struct {
+		Sent, OK, Errors int
+		Replies          []struct {
+			Subject string
+			Payload string
+		}
+		Latency *struct{ P50, Max float64 }
+	}
+	if st := api.do("POST", "/api/run"+q, map[string]interface{}{"mode": "request", "subject": "echo.{{i}}", "payload": `{"n":{{i}},"r":{{rand:1-3}}}`, "count": 20, "concurrency": 4, "timeout": 2000}, &run); st != 200 {
+		t.Fatalf("run: %d", st)
+	}
+	if run.Sent != 20 || run.OK != 20 || run.Errors != 0 || len(run.Replies) != 5 || run.Latency == nil || run.Latency.Max <= 0 {
+		t.Fatalf("run result = %+v", run)
+	}
+	if !strings.HasPrefix(run.Replies[0].Subject, "_INBOX.") || !strings.Contains(run.Replies[0].Payload, `"n":`) {
+		t.Errorf("run reply = %+v", run.Replies[0])
+	}
+	// No responder: every attempt is an error, the run still completes.
+	if st := api.do("POST", "/api/run"+q, map[string]interface{}{"mode": "request", "subject": "nobody.home", "count": 3, "timeout": 500}, &run); st != 200 || run.Errors != 3 {
+		t.Fatalf("run without responders: status %d, %+v", st, run)
+	}
+
+	// JetStream domains: a connection configured for the "hub" domain sees
+	// the same streams; a per-call override to a domain nobody serves fails.
+	if st := api.do("POST", "/api/connect", map[string]interface{}{
+		"id": "t2", "name": "hub-domain", "servers": []string{ns.ClientURL()}, "authMethod": "none", "jsDomain": "hub",
+	}, &connResp); st != 200 {
+		t.Fatalf("connect t2: %d", st)
+	}
+	var domainStreams []struct {
+		Name string `json:"name"`
+	}
+	st := api.do("GET", "/api/streams?connId=t2", nil, &domainStreams)
+	sawT := false
+	for _, s := range domainStreams {
+		sawT = sawT || s.Name == "T"
+	}
+	if st != 200 || !sawT {
+		t.Fatalf("streams via domain: %d %+v", st, domainStreams)
+	}
+	if st := api.do("GET", "/api/streams"+q+"&domain=nowhere", nil, nil); st == 200 {
+		t.Fatal("unknown domain override must fail")
+	}
+	var domainInfo struct {
+		JsAccount struct {
+			Domain string `json:"domain"`
+		} `json:"jsAccount"`
+	}
+	api.do("GET", "/api/server/t2", nil, &domainInfo)
+	if domainInfo.JsAccount.Domain != "hub" {
+		t.Errorf("account info domain = %q, want hub", domainInfo.JsAccount.Domain)
+	}
+	api.do("POST", "/api/disconnect", map[string]string{"connId": "t2"}, nil)
+
 	// Server info probe
 	var srvInfo struct {
 		JetStream bool    `json:"jetstream"`
@@ -269,7 +350,7 @@ func TestServerEndToEnd(t *testing.T) {
 }
 
 func TestServerAuthToken(t *testing.T) {
-	srv := httptest.NewServer(createServer(nil, "tok"))
+	srv := httptest.NewServer(createServer(nil, serverConfig{authToken: "tok"}))
 	defer srv.Close()
 
 	var info struct {
@@ -314,4 +395,160 @@ func readEvent(t *testing.T, ws *websocket.Conn, wantType string) map[string]int
 	}
 	t.Fatalf("no %s event within deadline", wantType)
 	return nil
+}
+
+func TestServerSettingsAPI(t *testing.T) {
+	dir := t.TempDir()
+	store, err := settings.Open(dir, settings.NewSecretStore(dir, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(createServer(nil, serverConfig{mode: "desktop", settings: store}))
+	defer srv.Close()
+	api := &apiClient{t: t, base: srv.URL}
+
+	var app struct {
+		Mode, Storage, Secrets, ConfigDir string
+	}
+	api.do("GET", "/api/app", nil, &app)
+	if app.Mode != "desktop" || app.Storage != "file" || app.Secrets != "file" || app.ConfigDir != dir {
+		t.Fatalf("app info = %+v", app)
+	}
+
+	conns := []map[string]interface{}{{"id": "c1", "name": "Prod", "authMethod": "token", "token": "sekrit"}}
+	if st := api.do("PUT", "/api/settings/ne.connections.v2", conns, nil); st != 200 {
+		t.Fatalf("put connections: %d", st)
+	}
+	if st := api.do("PUT", "/api/settings/ne.theme", "light", nil); st != 200 {
+		t.Fatalf("put theme: %d", st)
+	}
+	if st := api.do("PUT", "/api/settings/other.key", "x", nil); st != 400 {
+		t.Fatalf("foreign key must be rejected, got %d", st)
+	}
+	var all struct {
+		Entries map[string]json.RawMessage `json:"entries"`
+	}
+	api.do("GET", "/api/settings", nil, &all)
+	if string(all.Entries["ne.theme"]) != `"light"` || !strings.Contains(string(all.Entries["ne.connections.v2"]), `"sekrit"`) {
+		t.Fatalf("entries = %v", all.Entries)
+	}
+	file, _ := os.ReadFile(store.Path())
+	if strings.Contains(string(file), "sekrit") {
+		t.Fatal("settings.json must not contain the token")
+	}
+	if st := api.do("DELETE", "/api/settings/ne.theme", nil, nil); st != 200 {
+		t.Fatalf("delete: %d", st)
+	}
+	all.Entries = nil // json.Unmarshal merges into an existing map
+	api.do("GET", "/api/settings", nil, &all)
+	if _, ok := all.Entries["ne.theme"]; ok {
+		t.Fatal("theme still present after delete")
+	}
+}
+
+// startNATSWithSystemAccount runs a server whose $SYS account can be used by
+// user sys/pw; unauthenticated clients land in the APP account.
+func startNATSWithSystemAccount(t *testing.T) *natsserver.Server {
+	t.Helper()
+	sysAcc := natsserver.NewAccount("$SYS")
+	appAcc := natsserver.NewAccount("APP")
+	opts := &natsserver.Options{
+		Host:          "127.0.0.1",
+		Port:          -1,
+		JetStream:     true,
+		StoreDir:      t.TempDir(),
+		NoLog:         true,
+		NoSigs:        true,
+		Accounts:      []*natsserver.Account{sysAcc, appAcc},
+		SystemAccount: "$SYS",
+		Users: []*natsserver.User{
+			{Username: "sys", Password: "pw", Account: sysAcc},
+			{Username: "app", Password: "app", Account: appAcc},
+		},
+		NoAuthUser: "app",
+	}
+	ns, err := natsserver.NewServer(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go ns.Start()
+	if !ns.ReadyForConnections(5 * time.Second) {
+		t.Fatal("nats-server did not start")
+	}
+	acc, err := ns.LookupAccount("APP")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := acc.EnableJetStream(nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(ns.Shutdown)
+	return ns
+}
+
+func TestClusterOverview(t *testing.T) {
+	ns := startNATSWithSystemAccount(t)
+	srv := httptest.NewServer(createServer(nil, serverConfig{}))
+	defer srv.Close()
+	api := &apiClient{t: t, base: srv.URL}
+
+	type overview struct {
+		Source  string `json:"source"`
+		Servers []struct {
+			Name      string `json:"name"`
+			JetStream bool   `json:"jetstream"`
+			Cores     int    `json:"cores"`
+		} `json:"servers"`
+		Streams []struct {
+			Account string `json:"account"`
+			Name    string `json:"name"`
+			Storage string `json:"storage"`
+		} `json:"streams"`
+		Errors []string `json:"errors"`
+	}
+
+	// Without system credentials: monitoring fallback (no HTTP monitoring here → error listed, nothing crashes).
+	if st := api.do("POST", "/api/connect", map[string]interface{}{"id": "c1", "name": "plain", "servers": []string{ns.ClientURL()}, "authMethod": "none"}, nil); st != 200 {
+		t.Fatalf("connect: %d", st)
+	}
+	var ov overview
+	if st := api.do("GET", "/api/cluster/c1/overview", nil, &ov); st != 200 || ov.Source != "monitoring" || len(ov.Errors) == 0 {
+		t.Fatalf("fallback overview: %d %+v", st, ov)
+	}
+
+	// With system credentials: every server answers the ping, streams are listed with their account.
+	var conn struct {
+		Status struct {
+			SysAccount bool   `json:"sysAccount"`
+			SysError   string `json:"sysError"`
+		} `json:"status"`
+	}
+	if st := api.do("POST", "/api/connect", map[string]interface{}{"id": "c2", "name": "sys", "servers": []string{ns.ClientURL()}, "authMethod": "none", "sysAuthMethod": "userpass", "sysUser": "sys", "sysPass": "pw"}, &conn); st != 200 || !conn.Status.SysAccount {
+		t.Fatalf("connect with system account: %d %+v", st, conn)
+	}
+	if st := api.do("POST", "/api/streams?connId=c2", map[string]interface{}{"name": "C", "subjects": []string{"c.>"}, "storage": "memory"}, nil); st != 200 {
+		t.Fatalf("create stream: %d", st)
+	}
+	ov = overview{}
+	if st := api.do("GET", "/api/cluster/c2/overview", nil, &ov); st != 200 {
+		t.Fatalf("overview: %d", st)
+	}
+	if ov.Source != "system" || len(ov.Servers) != 1 || ov.Servers[0].Name != ns.Name() || !ov.Servers[0].JetStream || ov.Servers[0].Cores == 0 {
+		t.Fatalf("servers = %+v (errors %v)", ov.Servers, ov.Errors)
+	}
+	found := false
+	for _, s := range ov.Streams {
+		if s.Name == "C" && s.Account == "APP" && s.Storage == "memory" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("stream C not in overview: %+v (errors %v)", ov.Streams, ov.Errors)
+	}
+
+	// Wrong system credentials: the main connection still works, the status explains.
+	if st := api.do("POST", "/api/connect", map[string]interface{}{"id": "c3", "name": "badsys", "servers": []string{ns.ClientURL()}, "authMethod": "none", "sysAuthMethod": "userpass", "sysUser": "sys", "sysPass": "wrong"}, &conn); st != 200 || conn.Status.SysAccount || conn.Status.SysError == "" {
+		t.Fatalf("connect with bad system credentials: %d %+v", st, conn)
+	}
+	api.do("POST", "/api/disconnect-all", nil, nil)
 }

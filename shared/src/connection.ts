@@ -13,9 +13,27 @@ export interface ConnectionConfig {
   /** Full content of a .creds file (JWT + seed). */
   creds?: string;
   tls?: boolean;
+  /** PEM: CA certificate to trust */
+  tlsCa?: string;
+  /** PEM: client certificate and key for mutual TLS */
+  tlsCert?: string;
+  tlsKey?: string;
+  /** skip server certificate verification */
+  tlsInsecure?: boolean;
   subscriptions?: string[];
   monitoringPort?: number;
   monitoringUrl?: string;
+  /** JetStream domain to address (e.g. a leaf node's domain reachable through this server). */
+  jsDomain?: string;
+  /** Raw JetStream API prefix for imported APIs; takes precedence over jsDomain. */
+  jsApiPrefix?: string;
+  /** Optional system-account ($SYS) credentials for cluster-wide monitoring. */
+  sysAuthMethod?: AuthMethod;
+  sysToken?: string;
+  sysUser?: string;
+  sysPass?: string;
+  sysNkeySeed?: string;
+  sysCreds?: string;
 }
 
 /** Live state of a managed connection, pushed over the websocket. */
@@ -28,6 +46,11 @@ export interface ConnectionStatus {
   color: string;
   servers?: string[];
   subscriptions?: string[];
+  jsDomain?: string;
+  jsApiPrefix?: string;
+  /** a system-account connection is open */
+  sysAccount?: boolean;
+  sysError?: string;
   lastError?: string;
   reconnects: number;
   connectedAt?: number;

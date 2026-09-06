@@ -13,6 +13,8 @@ const streamName = `E2E_${run}`;
 const bucketName = `e2e_${run}`;
 
 test.beforeAll(async () => {
+  // The suite assumes a backend without active connections (e.g. left over from a manual session).
+  await fetch(`${process.env.NE_URL ?? 'http://localhost:3002'}/api/disconnect-all`, { method: 'POST' }).catch(() => undefined);
   nc = await connect({ servers: NATS_URL });
   const jsm = await nc.jetstreamManager();
   await jsm.streams.add({ name: streamName, subjects: [`${subjectRoot}.orders.>`] });
@@ -52,9 +54,12 @@ async function openApp(page: Page) {
 }
 
 async function ensureConnected(page: Page) {
+  // The UI renders nothing until the backend reported its connection list; wait for either state.
   const connectBtn = page.getByRole('button', { name: /Connect to E2E/ });
-  if (await connectBtn.isVisible().catch(() => false)) await connectBtn.click();
-  await expect(page.getByRole('button', { name: 'Switch connection' })).toContainText('E2E');
+  const switcher = page.getByRole('button', { name: 'Switch connection' });
+  await expect(connectBtn.or(switcher.filter({ hasText: 'E2E' }))).toBeVisible({ timeout: 15_000 });
+  if (await connectBtn.isVisible()) await connectBtn.click();
+  await expect(switcher).toContainText('E2E', { timeout: 15_000 });
 }
 
 test('subjects: live tree, detail, chart, branch view', async ({ page }) => {
@@ -95,7 +100,7 @@ test('jetstream: stream overview, newest page, consumers', async ({ page }) => {
   await page.locator('.list-row').filter({ has: page.getByText(streamName, { exact: true }) }).click();
 
   await expect(page.getByText('Overview')).toBeVisible();
-  await expect(page.locator('.card').filter({ hasText: 'Messages' }).first()).toContainText('5');
+  await expect(page.locator('[data-stat]').filter({ hasText: 'Messages' }).first()).toContainText('5');
 
   await page.getByRole('tab', { name: /Messages/ }).click();
   const rows = page.locator('tbody tr');
@@ -146,12 +151,16 @@ test('server and monitoring modules render', async ({ page }) => {
   const errors = await openApp(page);
   await ensureConnected(page);
 
-  await page.getByRole('button', { name: 'Server' }).click();
+  await page.getByRole('button', { name: 'Cluster' }).click();
+  // Without system-account credentials the overview shows the connected node only and says so.
+  await expect(page.getByText('single server view')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('table').first()).toContainText('2.');
+  await page.getByRole('tab', { name: /Connections/ }).click();
   await expect(page.getByText('JetStream account')).toBeVisible();
 
   await page.getByRole('button', { name: 'Monitoring' }).click();
   // Either data or the actionable error must render; never a blank pane.
-  await expect(page.getByText(/Client connections|Monitoring endpoint not reachable/)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(/Client connections|Monitoring endpoint not reachable/).first()).toBeVisible({ timeout: 10_000 });
 
   expect(errors, errors.join('\n')).toEqual([]);
 });

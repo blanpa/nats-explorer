@@ -99,7 +99,7 @@ export function ConfirmHost() {
           <Button variant="ghost" onClick={() => settle(false)} autoFocus={!pending?.danger}>
             {pending?.cancelLabel ?? 'Cancel'}
           </Button>
-          <Button variant={pending?.danger ? 'danger' : 'primary'} onClick={() => settle(true)} autoFocus={pending?.danger}>
+          <Button variant={pending?.danger ? 'danger-solid' : 'primary'} onClick={() => settle(true)} autoFocus={pending?.danger}>
             {pending?.confirmLabel ?? 'Confirm'}
           </Button>
         </>

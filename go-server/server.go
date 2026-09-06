@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"io/fs"
 	"log"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 
 	"nats-explorer/internal/connection"
 	"nats-explorer/internal/handler"
+	"nats-explorer/internal/settings"
 	"nats-explorer/internal/subscription"
 	"nats-explorer/internal/ws"
 )
@@ -24,6 +26,9 @@ import (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 64 * 1024,
+	// permessage-deflate: the tree feed and message batches are repetitive
+	// JSON and shrink several-fold.
+	EnableCompression: true,
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
 		if origin == "" {
@@ -41,13 +46,30 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// serverConfig carries what differs between the headless server, the desktop
+// app and tests.
+type serverConfig struct {
+	authToken string
+	// "server" or "desktop"; shown to the UI
+	mode string
+	// file-backed UI settings; nil keeps everything in the browser
+	settings *settings.Store
+}
+
 // createServer builds the chi router with the REST API, the websocket feed
 // and (optionally) the static UI from staticFS.
-func createServer(staticFS fs.FS, authToken string) http.Handler {
+func createServer(staticFS fs.FS, cfg serverConfig) http.Handler {
+	authToken := cfg.authToken
+	if cfg.mode == "" {
+		cfg.mode = "server"
+	}
 	hub := ws.NewHub()
 
 	var subMu sync.RWMutex
 	subManagers := make(map[string]*subscription.Manager)
+	// Subject each browser tab is looking at; applied to every manager so the
+	// live feed spends its budget where the user is looking.
+	clientFocus := make(map[*ws.Client]string)
 
 	store := connection.NewStore()
 	store.SetOnChange(func() {
@@ -86,11 +108,12 @@ func createServer(staticFS fs.FS, authToken string) http.Handler {
 					"stats":  stats,
 				})
 			}
-			mgr.OnTree = func(cID string, tree []subscription.SubjectNode) {
+			mgr.OnTree = func(cID string, full bool, entries []subscription.SubjectEntry) {
 				hub.Broadcast(map[string]interface{}{
 					"type":   "subject-tree",
 					"connId": cID,
-					"data":   tree,
+					"full":   full,
+					"data":   entries,
 				})
 			}
 
@@ -105,6 +128,9 @@ func createServer(staticFS fs.FS, authToken string) http.Handler {
 
 			subMu.Lock()
 			subManagers[connID] = mgr
+			for c, subject := range clientFocus {
+				mgr.SetFocus(c, subject)
+			}
 			subMu.Unlock()
 		},
 		OnDisconnected: stopManager,
@@ -116,13 +142,39 @@ func createServer(staticFS fs.FS, authToken string) http.Handler {
 	kvHandler := &handler.KVHandler{Store: store}
 	objHandler := &handler.ObjectStoreHandler{Store: store}
 	monHandler := &handler.MonitoringHandler{Store: store}
+	clusterHandler := &handler.ClusterHandler{Store: store}
 	svcHandler := &handler.ServicesHandler{Store: store}
 	liveHandler := handler.NewLiveHandler(store)
 
 	hub.OnMessage = func(c *ws.Client, data []byte) {
+		var cmd struct {
+			Type    string `json:"type"`
+			Subject string `json:"subject"`
+		}
+		if json.Unmarshal(data, &cmd) == nil && cmd.Type == "focus" {
+			subMu.Lock()
+			if cmd.Subject == "" {
+				delete(clientFocus, c)
+			} else {
+				clientFocus[c] = cmd.Subject
+			}
+			for _, mgr := range subManagers {
+				mgr.SetFocus(c, cmd.Subject)
+			}
+			subMu.Unlock()
+			return
+		}
 		liveHandler.HandleCommand(c, data, func(ev interface{}) { hub.SendToClient(c, ev) })
 	}
-	hub.OnDisconnect = func(c *ws.Client) { liveHandler.StopAll(c) }
+	hub.OnDisconnect = func(c *ws.Client) {
+		liveHandler.StopAll(c)
+		subMu.Lock()
+		delete(clientFocus, c)
+		for _, mgr := range subManagers {
+			mgr.ClearFocus(c)
+		}
+		subMu.Unlock()
+	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RealIP)
@@ -130,6 +182,17 @@ func createServer(staticFS fs.FS, authToken string) http.Handler {
 	r.Use(middleware.Compress(5, "application/json"))
 
 	r.Get("/api/auth", handler.AuthInfo(authToken))
+	// What kind of installation this is, so the UI knows where state lives.
+	r.Get("/api/app", func(w http.ResponseWriter, req *http.Request) {
+		info := map[string]interface{}{"mode": cfg.mode, "storage": "browser", "version": version}
+		if cfg.settings != nil {
+			info["storage"] = "file"
+			info["configDir"] = cfg.settings.Dir()
+			info["secrets"] = cfg.settings.SecretsName()
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(info)
+	})
 
 	r.With(handler.RequireToken(authToken)).Get("/ws", func(w http.ResponseWriter, req *http.Request) {
 		conn, err := upgrader.Upgrade(w, req, nil)
@@ -147,13 +210,12 @@ func createServer(staticFS fs.FS, authToken string) http.Handler {
 
 		subMu.RLock()
 		for connID, mgr := range subManagers {
-			if tree := mgr.GetTree(); len(tree) > 0 {
-				hub.SendToClient(client, map[string]interface{}{
-					"type":   "subject-tree",
-					"connId": connID,
-					"data":   tree,
-				})
-			}
+			hub.SendToClient(client, map[string]interface{}{
+				"type":   "subject-tree",
+				"connId": connID,
+				"full":   true,
+				"data":   mgr.Snapshot(),
+			})
 		}
 		subMu.RUnlock()
 	})
@@ -175,10 +237,19 @@ func createServer(staticFS fs.FS, authToken string) http.Handler {
 		r.Get("/connections", connHandler.ListConnections)
 		r.Get("/status", connHandler.Status)
 		r.Get("/cluster/{connId}", connHandler.ServerInfo)
+		r.Get("/cluster/{connId}/overview", clusterHandler.Overview)
 		r.Get("/server/{connId}", connHandler.ServerInfo)
 
 		r.Post("/publish", publishHandler.Publish)
 		r.Post("/request", publishHandler.Request)
+		r.Post("/run", publishHandler.Run)
+
+		if cfg.settings != nil {
+			sh := &handler.SettingsHandler{Store: cfg.settings}
+			r.Get("/settings", sh.All)
+			r.Put("/settings/{key}", sh.Put)
+			r.Delete("/settings/{key}", sh.Delete)
+		}
 
 		r.Get("/streams", streamsHandler.List)
 		r.Post("/streams", streamsHandler.Create)
