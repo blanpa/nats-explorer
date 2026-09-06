@@ -15,9 +15,10 @@ See the [changelog](CHANGELOG.md) for what changed in each release.
 
 </details>
 
-![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![Go](https://img.shields.io/badge/go-1.26%2B-00ADD8.svg)
 ![NATS](https://img.shields.io/badge/NATS-2.10%2B-purple.svg)
+[![Sponsor](https://img.shields.io/github/sponsors/blanpa?label=Sponsor&logo=githubsponsors&logoColor=white&color=EA4AAA)](https://github.com/sponsors/blanpa)
 
 ---
 
@@ -254,6 +255,18 @@ Releases are built automatically on tag push (`v*`); a manual `workflow_dispatch
 Every release carries a `SHA256SUMS.txt`. Installers are not code-signed (see the notes in [Install](#install)).
 
 ---
+
+## Sponsor this project
+
+This project is developed and maintained in my own time.
+If it saves you some, consider supporting it:
+
+<a href="https://github.com/sponsors/blanpa">
+  <img height="41" alt="Sponsor on GitHub" src="https://img.shields.io/badge/Sponsor%20on%20GitHub-EA4AAA?style=for-the-badge&logo=githubsponsors&logoColor=white">
+</a>
+<a href="https://buymeacoffee.com/blanpa">
+  <img height="41" alt="Buy Me a Coffee" src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png">
+</a>
 
 ## License
 
