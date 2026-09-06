@@ -178,11 +178,12 @@ The e2e suite honours `NE_URL`, `NATS_URL`, `NATS_MON_URL` and `PW_CHROME=/path/
 
 See [Building the installers yourself](#building-the-installers-yourself) above (`scripts/build-desktop.sh`).
 
-### Cross-compile the server for all platforms
+### Server binaries
 
 ```bash
-node build.mjs
-# Output: release/nats-explorer-{linux-x64,linux-arm64,windows-x64,macos-x64,macos-arm64}/
+scripts/build-server.sh              # all five platforms into dist/server/ (what the release ships)
+scripts/build-server.sh linux/arm64  # one platform
+pnpm build                           # this machine only: dist/nats-explorer serving client/dist
 ```
 
 ### Docker image
@@ -190,15 +191,6 @@ node build.mjs
 ```bash
 docker build -f go-server/Dockerfile -t nats-explorer .
 ```
-
-### Single platform (portable)
-
-```bash
-node build-portable.mjs
-# Output: release/portable/ (binary + public/ + start scripts)
-```
-
----
 
 ## Security
 

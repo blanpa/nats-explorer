@@ -299,8 +299,6 @@ export const useJsDomainOverride = (connId: string | null) => useStore(s => (con
 export const useActiveConnection = () =>
   useStore(s => s.connections.find(c => c.id === s.activeConnId) ?? null);
 
-export const useConnectedCount = () => useStore(s => s.connections.filter(c => c.connected).length);
-
 /**
  * Messages for the selected subject. The underlying array is mutated in place
  * for throughput, so a fresh copy is handed out per batch to keep memo/effect

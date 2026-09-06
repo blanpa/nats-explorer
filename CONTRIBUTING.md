@@ -1,93 +1,25 @@
 # Contributing to NATS Explorer
 
-Thank you for your interest in contributing.
+Thanks for helping. The [development guide](docs/development.md) has the full setup, project structure and the "adding a feature" walkthrough; this page is the short version.
 
----
+## Setup
 
-## Development Setup
+- Go 1.26+, Node.js 22+ with pnpm (`corepack enable`), Docker for the dev NATS server
+- `pnpm install`, then `pnpm nats:dev` (NATS on `nats://localhost:4230` with seed data) and `pnpm dev` (backend on :3002, Vite on :5173)
 
-### Prerequisites
+## Before you open a pull request
 
-- **Go** 1.24+
-- **Node.js** 20+ with **pnpm** (`corepack enable`)
-- **Docker** (for the dev NATS server)
+- `cd go-server && gofmt -l . && go vet ./... && go test -race ./...`
+- `pnpm --filter client typecheck && pnpm --filter client test && pnpm --filter client build`
+- `pnpm test:e2e` against a running backend (see the development guide)
+- For changes to packaging: `scripts/build-desktop.sh --docker linux` and `scripts/smoke-desktop.sh go-server/build/bin/nats-explorer`
 
-### Getting Started
+## Conventions
 
-```bash
-git clone https://github.com/blanpa/nats-explorer.git
-cd nats-explorer
-pnpm install
+- Go: one handler struct per feature, `writeJSON` / `writeError` helpers, `jetStreamFor` for JetStream contexts, mutex-guarded shared state
+- TypeScript/React: function components and hooks, Zustand for shared state, Tailwind classes plus the component classes in `index.css`, Radix UI primitives, lists and details through `useAsync` with a cache key
+- UI language: figures in strips rather than tiles, plain empty states, quiet destructive actions, no success toasts
+- Keep pull requests focused; conventional commit messages (`feat(server): …`, `fix(client): …`) are welcome
+- Document user-visible changes in `CHANGELOG.md`
 
-# Start dev NATS with sample data
-pnpm nats:dev
-
-# Start Go backend + React frontend
-pnpm dev
-```
-
-- Go server: `http://localhost:3002`
-- Vite dev server: `http://localhost:5173`
-- Dev NATS: `nats://localhost:4230`
-
----
-
-## Project Structure
-
-```
-nats-explorer/
-  go-server/        # Go backend (chi router, nats.go)
-  client/           # React frontend (Vite + Tailwind + Zustand)
-  shared/           # Shared TypeScript types
-  dev/              # Dev NATS server and simulators
-  docs/             # GitHub Pages documentation
-```
-
----
-
-## Adding a Feature
-
-1. **Go handler** -- Add to `go-server/internal/handler/`, register routes in `main.go`
-2. **React component** -- Add to `client/src/components/`, wire into `Sidebar.tsx` / `MainContent.tsx`
-3. **Shared types** (if needed) -- Add to `shared/src/`, re-export from `index.ts`
-
----
-
-## Code Style
-
-### Go
-- Standard Go conventions (`gofmt`, `go vet`)
-- One handler struct per feature domain
-- Use `writeJSON` / `writeError` helpers
-
-### TypeScript / React
-- Functional components, named exports
-- Zustand for shared state
-- Tailwind CSS, Radix UI primitives
-
----
-
-## Pull Request Process
-
-1. Fork and create a feature branch from `main`
-2. Keep PRs focused -- one feature or fix per PR
-3. Ensure `go build ./...` and `pnpm build` pass
-4. Test against the dev NATS server (`pnpm nats:dev`)
-5. Use conventional commit messages:
-
-```
-feat(server): add object store streaming
-fix(client): handle reconnect gracefully
-```
-
----
-
-## Testing
-
-Before submitting:
-
-- [ ] `cd go-server && go build ./... && go vet ./...`
-- [ ] `pnpm --filter client build` (TypeScript check)
-- [ ] Feature works against dev NATS server
-- [ ] No console errors in browser or server
-- [ ] Works with both Vite dev server and production build
+By contributing you agree that your contributions are licensed under the Apache License 2.0.

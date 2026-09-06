@@ -75,17 +75,6 @@ func (h *LiveHandler) StopAll(client any) {
 	}
 }
 
-// ActiveWatches reports how many watches are running (for tests/metrics).
-func (h *LiveHandler) ActiveWatches() int {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	n := 0
-	for _, ws := range h.watchers {
-		n += len(ws)
-	}
-	return n
-}
-
 func (h *LiveHandler) start(client any, key string, run func(ctx context.Context)) {
 	ctx, cancel := context.WithCancel(context.Background())
 	h.mu.Lock()

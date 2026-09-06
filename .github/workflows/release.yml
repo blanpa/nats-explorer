@@ -149,31 +149,11 @@ jobs:
           go-version-file: go-server/go.mod
           cache-dependency-path: go-server/go.sum
       - name: Build and package
-        env:
-          CGO_ENABLED: '0'
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-        run: |
-          ext=""; [ "${{ matrix.goos }}" = windows ] && ext=.exe
-          name=nats-explorer-server-${{ github.ref_name }}-${{ matrix.name }}
-          mkdir -p release/$name
-          (cd go-server && go build -trimpath -ldflags="-s -w" -o ../release/$name/nats-explorer$ext .)
-          cp -r client/dist release/$name/public
-          cat > release/$name/README.txt <<'TXT'
-          NATS Explorer server build. Run the binary; it serves the UI on http://localhost:3002.
-          Environment: PORT (default 3002), PUBLIC_PATH (default ./public next to the binary), AUTH_TOKEN (optional API token).
-          TXT
-          cd release
-          if [ "${{ matrix.goos }}" = windows ]; then zip -qr $name.zip $name; else tar czf $name.tar.gz $name; fi
+        run: VERSION=${{ github.ref_name }} scripts/build-server.sh ${{ matrix.goos }}/${{ matrix.goarch }}
       - uses: actions/upload-artifact@v4
         with:
           name: server-${{ matrix.name }}
-          path: release/*.zip
-      - uses: actions/upload-artifact@v4
-        if: matrix.goos != 'windows'
-        with:
-          name: server-${{ matrix.name }}-tgz
-          path: release/*.tar.gz
+          path: dist/server/*
 
   docker:
     if: startsWith(github.ref, 'refs/tags/')

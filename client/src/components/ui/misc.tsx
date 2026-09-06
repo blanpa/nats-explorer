@@ -205,13 +205,3 @@ export const TooltipProvider = RadixTooltip.Provider;
 export function Kbd({ children }: { children: ReactNode }) {
   return <kbd className="kbd">{children}</kbd>;
 }
-
-/* Copyable mono text --------------------------------------------------- */
-
-export function Mono({ children, className, title }: { children: ReactNode; className?: string; title?: string }) {
-  return (
-    <span className={cn('font-mono', className)} title={title}>
-      {children}
-    </span>
-  );
-}
