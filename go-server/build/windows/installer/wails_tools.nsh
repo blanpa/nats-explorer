@@ -17,7 +17,7 @@
     !define INFO_PRODUCTVERSION "0.2.0"
 !endif
 !ifndef INFO_COPYRIGHT
-    !define INFO_COPYRIGHT "NATS Explorer contributors"
+    !define INFO_COPYRIGHT "Copyright 2026 blanpa. Licensed under the Apache License 2.0."
 !endif
 !ifndef PRODUCT_EXECUTABLE
     !define PRODUCT_EXECUTABLE "${INFO_PROJECTNAME}.exe"
