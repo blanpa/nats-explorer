@@ -175,6 +175,8 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
       - uses: docker/build-push-action@v6
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: 'false'
         with:
           context: .
           file: go-server/Dockerfile
@@ -189,9 +191,18 @@ jobs:
     needs: [desktop-linux, desktop-windows, desktop-macos, server, docker]
     runs-on: ubuntu-latest
     steps:
+      # Only our packages: the docker job also uploads a build-record artifact
+      # that is not needed here and made the download step fail.
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: desktop-*
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: server-*
+          merge-multiple: true
       - name: Collect files
         run: |
           mkdir -p out
