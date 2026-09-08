@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Development
-nav_order: 5
+nav_order: 6
 ---
 
 # Development Guide
@@ -11,7 +11,7 @@ nav_order: 5
 ## Prerequisites
 
 - **Go** 1.26+
-- **Node.js** 22+ with **pnpm** (`corepack enable`; the version is pinned in `package.json`)
+- **Bun** 1.2+ (package manager and script runner; the tools run on Bun, Node.js is not required)
 - **Docker** (dev NATS server, Linux desktop builder image)
 - For desktop builds: the Wails CLI (`go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0`) and, on Linux, `libgtk-3-dev libwebkit2gtk-4.1-dev`
 
@@ -22,21 +22,22 @@ nav_order: 5
 ```bash
 git clone https://github.com/blanpa/nats-explorer.git
 cd nats-explorer
-pnpm install
-pnpm nats:dev      # dev NATS on nats://localhost:4230 with seed data and a simulator
-pnpm dev           # Go backend on :3002 + Vite on :5173 with hot reload
+bun install
+bun run nats:dev   # dev NATS on nats://localhost:4230 with seed data and a simulator
+bun run dev        # Go backend on :3002 + Vite on :5173 with hot reload
 ```
 
 Connect to `nats://localhost:4230` in the connection dialog.
 
 | Command | Description |
 |:-- |:-- |
-| `pnpm dev` | Go backend + Vite frontend |
-| `pnpm build` | Shared types, client and Go server |
-| `pnpm nats:start` / `nats:stop` / `nats:seed` / `nats:simulate` | Dev NATS server pieces |
-| `pnpm --filter client test` | Vitest unit tests |
+| `bun run lint` / `bun run format` | Biome lint and formatting check / apply (`biome.json`) |
+| `bun run dev` | Go backend + Vite frontend |
+| `bun run build` | Shared types, client and Go server |
+| `bun run nats:start` / `nats:stop` / `nats:seed` / `nats:simulate` | Dev NATS server pieces (`NATS_URL` picks the server) |
+| `bun run --filter client test` | Vitest: pure unit tests in Node, component tests (`*.test.tsx`, `@vitest-environment jsdom`) with Testing Library |
 | `cd go-server && go test -race ./...` | Go unit and end-to-end tests (embedded nats-server) |
-| `pnpm test:e2e` | Playwright smoke suite against `http://localhost:3002` (`NE_URL`, `NATS_URL`, `PW_CHROME`) |
+| `bun run test:e2e` | Playwright suite, one file per module in `e2e/` with shared helpers in `support.ts` against `http://localhost:3002` (`NE_URL`, `NATS_URL`, `PW_CHROME`) |
 | `scripts/build-desktop.sh linux|windows|macos` | Desktop packages for one platform (`--docker` runs Linux/Windows in the builder image) |
 | `scripts/smoke-desktop.sh <binary>` | Launches a desktop build headless and checks API, UI, websocket and settings persistence |
 
@@ -77,7 +78,7 @@ nats-explorer/
 3. **Types** in `shared/src/` and a call in `client/src/lib/api.ts`.
 4. **Component** under `client/src/components/<feature>/`; lists in the explorer pane use `useAsync` with a cache `key`, detail views the same.
 5. **Module** (if it needs its own rail entry): add it to `MODULES` in `client/src/store/index.ts`, an icon in `layout/Rail.tsx`, and the panes in `layout/Explorer.tsx` / `layout/Detail.tsx`.
-6. **Tests**: a Go test next to the handler or in `server_test.go` (embedded nats-server), Vitest for pure client logic, and a Playwright step if the flow is user-visible.
+6. **Tests**: a Go test next to the handler or in `server_test.go` (embedded nats-server), Vitest for pure client logic and for components whose behaviour depends on state or role, and a Playwright step if the flow is user-visible.
 
 ---
 

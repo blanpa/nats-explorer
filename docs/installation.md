@@ -6,17 +6,17 @@ nav_order: 2
 
 # Installation
 
-NATS Explorer runs as a desktop application, as a Docker container, or as a standalone server binary. All downloads are on the [Releases page](https://github.com/blanpa/nats-explorer/releases) together with a `SHA256SUMS.txt`.
+NATS Explorer runs as a desktop application, as a Docker container, or as a standalone server binary. The download links below always point at the newest release; the [Releases page](https://github.com/blanpa/nats-explorer/releases) carries the same files with the version in their name, plus a [`SHA256SUMS.txt`](https://github.com/blanpa/nats-explorer/releases/latest/download/SHA256SUMS.txt) over all of them.
 
 ---
 
 ## Desktop app
 
-| Platform | File | Notes |
+| Platform | Download | Notes |
 |:-- |:-- |:-- |
-| Windows 10/11 | `nats-explorer-desktop-<version>-windows-x64-setup.exe` | Per-user installer, no admin rights, Start-menu entry and uninstaller. `…-windows-x64.zip` is the portable variant. Uses the Edge WebView2 runtime (downloaded on first start if missing). Not code-signed: SmartScreen shows "unknown publisher", choose *More info → Run anyway*. |
-| macOS 11+ | `nats-explorer-desktop-<version>-macos-universal.dmg` | Intel and Apple Silicon. Drag to *Applications*. Not notarized: right-click → *Open* on first start, or `xattr -dr com.apple.quarantine "/Applications/NATS Explorer.app"`. |
-| Linux | `…-linux-x64.AppImage`, `…-linux-x64.deb`, `…-linux-x64.tar.gz` | AppImage: `chmod +x` and run. Debian/Ubuntu: `sudo apt install ./nats-explorer-desktop-<version>-linux-x64.deb`. Needs webkit2gtk 4.1 (Ubuntu 22.04+, Debian 12+, Fedora 37+). |
+| Windows 10/11 | [installer (.exe)](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-windows-x64-setup.exe) · [portable (.zip)](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-windows-x64.zip) | Per-user installer, no admin rights, Start-menu entry and uninstaller. Uses the Edge WebView2 runtime (downloaded on first start if missing). Not code-signed: SmartScreen shows "unknown publisher", choose *More info → Run anyway*. |
+| macOS 11+ | [disk image (.dmg)](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-macos-universal.dmg) · [app bundle (.zip)](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-macos-universal.zip) | Intel and Apple Silicon. Drag to *Applications*. Not notarized: right-click → *Open* on first start, or `xattr -dr com.apple.quarantine "/Applications/NATS Explorer.app"`. |
+| Linux | [AppImage](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-linux-x64.AppImage) · [.deb](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-linux-x64.deb) · [.tar.gz](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-linux-x64.tar.gz) | AppImage: `chmod +x` and run. Debian/Ubuntu: `sudo apt install ./nats-explorer-desktop-linux-x64.deb`. Needs webkit2gtk 4.1 (Ubuntu 22.04+, Debian 12+, Fedora 37+). |
 
 ### Where the desktop app keeps its data
 
@@ -54,12 +54,21 @@ Open `http://localhost:3002` and add your server in the connection dialog. In th
 
 ## Server binary
 
-Download `nats-explorer-server-<version>-<os>-<arch>` for linux-x64, linux-arm64, windows-x64, macos-x64 or macos-arm64. The UI is bundled as `public/` next to the binary and found automatically.
+One binary plus the UI as `public/` next to it, found automatically.
+
+| Target | Download |
+|:-- |:-- |
+| Linux x64 | [nats-explorer-server-linux-x64.tar.gz](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-server-linux-x64.tar.gz) |
+| Linux arm64 | [nats-explorer-server-linux-arm64.tar.gz](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-server-linux-arm64.tar.gz) |
+| macOS arm64 | [nats-explorer-server-macos-arm64.tar.gz](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-server-macos-arm64.tar.gz) |
+| macOS x64 | [nats-explorer-server-macos-x64.tar.gz](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-server-macos-x64.tar.gz) |
+| Windows x64 | [nats-explorer-server-windows-x64.zip](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-server-windows-x64.zip) |
 
 ```bash
-tar xzf nats-explorer-server-0.2.0-linux-x64.tar.gz
-cd nats-explorer-server-0.2.0-linux-x64
-./nats-explorer
+curl -fL -o nats-explorer-server.tar.gz \
+  https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-server-linux-x64.tar.gz
+mkdir -p nats-explorer && tar xzf nats-explorer-server.tar.gz -C nats-explorer --strip-components=1
+cd nats-explorer && ./nats-explorer
 # Windows: extract the zip and run nats-explorer.exe
 ```
 
@@ -71,9 +80,30 @@ cd nats-explorer-server-0.2.0-linux-x64
 |:-- |:-- |:-- |
 | `PORT` | `3002` | HTTP port of the web UI and API |
 | `PUBLIC_PATH` | auto | UI files; defaults to `public/` next to the binary or `client/dist` in a checkout |
-| `AUTH_TOKEN` | unset | When set, every API and websocket call needs this token (entered once in the UI) |
-| `STORAGE_DIR` | unset | Keep connections, templates and preferences in this directory instead of the browser (single-user servers). Same layout as the desktop app |
+| `AUTH_TOKEN` | unset | When set, every API and websocket call needs this token. The UI asks for it once; the backend answers with a session cookie that lasts a day |
+| `AUTH_USERS` | unset | Path of a users file (`name:role:bcrypt-hash` per line, roles `admin` and `viewer`). The UI asks for a login; viewers see everything but cannot publish or change anything. `nats-explorer hash-password` prints a hash |
+| `STORAGE_DIR` | unset | Keep connections, templates and preferences in this directory instead of the browser (single-user servers). Same layout as the desktop app. Saved connections marked "Connect when the server starts" are opened by the backend at start |
 | `NO_KEYRING` | unset | With `STORAGE_DIR`: always use `secrets.json` instead of the system keyring |
+| `PPROF` | unset | When set, Go's profiler is served under `/debug/pprof` (load investigations only) |
+| `SOURCE_URL` | this project | Where the source of this build is offered. The status bar and the login dialog link it as "source"; unset, it points at this project at the commit or tag the binary was built from. Set it when you deploy a version you changed -- see [License]({% link license.md %}) |
+| `HISTORY_DB` | unset | Path of a SQLite file; every message is also written there, and the UI can load time ranges from it (`from`/`to` on the history endpoints, the range picker in the subject detail) |
+| `HISTORY_RETENTION` | `72h` | With `HISTORY_DB`: rows older than this are deleted once a minute (Go duration, e.g. `24h`, `168h`) |
+| `ROLLUP_RETENTION` | `2160h` | With `HISTORY_DB`: how long the minute aggregates behind long-range charts are kept (90 days by default; they are far smaller than the messages) |
+| `HISTORY_MB` | `256` | Memory budget for the recorded message history the UI pulls from (all connections together; the process gets a soft memory limit of twice that plus 128 MB) |
+
+### Accounts and roles
+
+```bash
+./nats-explorer hash-password            # prompts, prints a bcrypt hash
+printf 'alice:admin:%s\nbob:viewer:%s\n' "$ADMIN_HASH" "$VIEWER_HASH" > users.txt
+AUTH_USERS=users.txt ./nats-explorer
+```
+
+Admins may publish, create, edit and delete; viewers get a read-only explorer (writes answer `403`). Scripts and Prometheus can authenticate with HTTP basic auth or, with `AUTH_TOKEN`, a bearer token; browsers use the session cookie set by `POST /api/login`. Sessions live in memory and end with a restart.
+
+### Metrics
+
+`GET /metrics` exposes the explorer's own counters in the Prometheus text format: messages received, throttled and per-second rate per connection, distinct subjects, history size in memory and on disk, websocket clients and connection states. It is protected like the API.
 
 ---
 

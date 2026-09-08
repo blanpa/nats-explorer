@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Deployment
-nav_order: 6
+nav_order: 4
 ---
 
 # Deployment
@@ -82,7 +82,7 @@ WantedBy=multi-user.target
 ```
 
 ```bash
-sudo cp -r nats-explorer-server-0.2.0-linux-x64 /opt/nats-explorer
+sudo cp -r nats-explorer-server-0.3.0-linux-x64 /opt/nats-explorer
 sudo systemctl enable --now nats-explorer
 ```
 
@@ -127,6 +127,24 @@ nats-explorer.example.com {
     reverse_proxy localhost:3002
 }
 ```
+
+---
+
+## If you changed the code
+
+The UI carries a "source" link -- in the status bar, and in the login dialog
+before anyone signs in. Unset it leads to this project at the commit the binary
+was built from. If you deploy a version you have changed, point it at your own
+source:
+
+```bash
+SOURCE_URL=https://git.example.org/ops/nats-explorer
+```
+
+That is what the AGPL asks of a deployment people reach over a network: its users
+have to be able to get the source of the version that is serving them. An
+unmodified deployment needs nothing -- the link already points at the source it
+was built from. See [License]({% link license.md %}).
 
 ---
 
