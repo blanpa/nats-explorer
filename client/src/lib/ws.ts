@@ -1,98 +1,95 @@
-import type { WsClientCommand, WsEventOf, WsEventType, WsServerEvent } from 'shared';
-import { useAuth, withToken } from './auth';
+import type { WsClientCommand, WsEventOf, WsEventType, WsServerEvent, NatsMessage } from 'shared';
+import type { FlatNode } from '../components/subjects/tree';
+import type { FromWorker, ToWorker, TreeView, WsStatus } from '../worker/protocol';
+import { useAuth } from './auth';
+import { readSetting } from './utils';
+
+export type { WsStatus, TreeView };
 
 type Listener<T extends WsEventType> = (event: WsEventOf<T>) => void;
 type StatusListener = (status: WsStatus) => void;
 
-export type WsStatus = 'connecting' | 'open' | 'closed';
-
 /**
- * Thin auto-reconnecting websocket client. A manual disconnect suppresses the
- * reconnect so React StrictMode's double effect does not leave two sockets
- * behind. Commands sent while the socket is down are dropped; callers
- * re-issue them on the next 'open' status (see lib/live.ts).
+ * Main-thread side of the websocket. The socket itself lives in the feed
+ * worker (see worker/feed.worker.ts), which decodes frames, keeps the subject
+ * tree and coalesces live messages; this class relays commands to it and
+ * fans its messages out to listeners. Commands sent while the socket is down
+ * are dropped; callers re-issue them on the next 'open' status.
  */
 class WsClient {
-  private ws: WebSocket | null = null;
+  private worker: Worker | null = null;
   private listeners = new Map<WsEventType, Set<(event: WsServerEvent) => void>>();
   private statusListeners = new Set<StatusListener>();
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private reconnectDelay = 1000;
-  private readonly maxReconnectDelay = 15000;
-  private manuallyClosed = false;
+  private treeListeners = new Set<(rows: FlatNode[], systemCount: number) => void>();
+  private feedListeners = new Set<(msgs: NatsMessage[]) => void>();
+  private view: TreeView | null = null;
   status: WsStatus = 'closed';
 
-  connect(): void {
-    this.manuallyClosed = false;
-    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) return;
+  private ensureWorker(): Worker {
+    if (this.worker) return this.worker;
+    const worker = new Worker(new URL('../worker/feed.worker.ts', import.meta.url), { type: 'module' });
+    worker.onmessage = (ev: MessageEvent<FromWorker>) => this.handle(ev.data);
+    this.worker = worker;
+    if (this.view) this.post({ type: 'view', view: this.view });
+    return worker;
+  }
 
+  private post(msg: ToWorker) {
+    this.ensureWorker().postMessage(msg);
+  }
+
+  private handle(msg: FromWorker) {
+    switch (msg.type) {
+      case 'status':
+        this.setStatus(msg.status);
+        break;
+      case 'auth-required':
+        useAuth.getState().setRequired(true);
+        break;
+      case 'event':
+        for (const cb of this.listeners.get(msg.event.type) ?? []) cb(msg.event);
+        break;
+      case 'feed':
+        for (const cb of this.feedListeners) cb(msg.msgs);
+        break;
+      case 'tree':
+        for (const cb of this.treeListeners) cb(msg.rows, msg.systemCount);
+        break;
+    }
+  }
+
+  private url(): string {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(withToken(`${protocol}//${window.location.host}/ws`));
-    this.ws = ws;
-    this.setStatus('connecting');
+    return `${protocol}//${window.location.host}/ws`;
+  }
 
-    ws.onopen = () => {
-      if (this.ws !== ws) return;
-      this.reconnectDelay = 1000;
-      this.setStatus('open');
-    };
-    ws.onmessage = event => {
-      if (this.ws !== ws) return;
-      let msg: WsServerEvent;
-      try {
-        msg = JSON.parse(event.data);
-      } catch {
-        return;
-      }
-      this.listeners.get(msg.type)?.forEach(cb => cb(msg));
-    };
-    ws.onclose = ev => {
-      if (this.ws !== ws) return;
-      this.ws = null;
-      this.setStatus('closed');
-      // 1008 = policy violation is what browsers report for a rejected upgrade (401).
-      if (ev.code === 1008 || ev.code === 1006) {
-        // Ask /api/auth whether a token is the reason before hammering reconnects.
-        fetch('/api/auth')
-          .then(r => r.json())
-          .then((info: { required: boolean }) => {
-            if (info.required && !useAuth.getState().token) useAuth.getState().setRequired(true);
-          })
-          .catch(() => undefined);
-      }
-      if (!this.manuallyClosed) this.scheduleReconnect();
-    };
-    ws.onerror = () => {
-      ws.close();
-    };
+  connect(): void {
+    // ne.wire = "json" switches the frames back to JSON, e.g. to compare.
+    const binary = readSetting<string>('ne.wire', 'msgpack') !== 'json';
+    this.post({ type: 'connect', url: this.url(), binary });
   }
 
   disconnect(): void {
-    this.manuallyClosed = true;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    const ws = this.ws;
-    this.ws = null;
-    if (ws) {
-      ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
-      ws.close();
-    }
+    if (this.worker) this.post({ type: 'disconnect' });
     this.setStatus('closed');
   }
 
   /** Reconnect now (e.g. after a token was entered). */
   reset(): void {
     this.disconnect();
-    this.reconnectDelay = 1000;
     this.connect();
   }
 
   send(cmd: WsClientCommand): boolean {
-    if (this.ws?.readyState !== WebSocket.OPEN) return false;
-    this.ws.send(JSON.stringify(cmd));
+    if (this.status !== 'open') return false;
+    this.post({ type: 'send', cmd });
     return true;
+  }
+
+  /** Tell the worker (and through it the server) what part of the tree to show. */
+  setView(view: TreeView): void {
+    this.view = view;
+    this.post({ type: 'view', view });
   }
 
   on<T extends WsEventType>(type: T, callback: Listener<T>): () => void {
@@ -106,6 +103,16 @@ class WsClient {
     return () => set!.delete(cb);
   }
 
+  onTree(callback: (rows: FlatNode[], systemCount: number) => void): () => void {
+    this.treeListeners.add(callback);
+    return () => this.treeListeners.delete(callback);
+  }
+
+  onFeed(callback: (msgs: NatsMessage[]) => void): () => void {
+    this.feedListeners.add(callback);
+    return () => this.feedListeners.delete(callback);
+  }
+
   onStatus(callback: StatusListener): () => void {
     this.statusListeners.add(callback);
     callback(this.status);
@@ -115,16 +122,7 @@ class WsClient {
   private setStatus(status: WsStatus) {
     if (this.status === status) return;
     this.status = status;
-    this.statusListeners.forEach(cb => cb(status));
-  }
-
-  private scheduleReconnect(): void {
-    if (this.reconnectTimer) return;
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.maxReconnectDelay);
-      this.connect();
-    }, this.reconnectDelay);
+    for (const cb of this.statusListeners) cb(status);
   }
 }
 

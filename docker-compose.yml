@@ -16,8 +16,14 @@ services:
       - "3002:3002"
     environment:
       - PORT=3002
+      # Keep a copy of every message for three days; the UI loads time ranges from it.
+      - HISTORY_DB=/data/history.db
+      - HISTORY_RETENTION=72h
+    volumes:
+      - explorer-data:/data
     depends_on:
       - nats
 
 volumes:
   nats-data:
+  explorer-data:

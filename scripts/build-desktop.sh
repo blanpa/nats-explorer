@@ -7,7 +7,7 @@
 #   scripts/build-desktop.sh macos      -> dist/desktop/*.dmg (macOS only)
 #   scripts/build-desktop.sh --docker linux|windows   run the Linux/Windows build in the builder image
 #
-# Expects client/dist to exist (pnpm --filter client build). VERSION defaults to
+# Expects client/dist to exist (bun run --filter client build). VERSION defaults to
 # the last git tag; set VERSION=1.2.3 to override.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -32,7 +32,10 @@ echo "version $VERSION (package metadata $NUMERIC_VERSION)"
 APP="NATS Explorer"
 BIN=nats-explorer
 OUT="$ROOT/dist/desktop"
-LDFLAGS="-s -w -X main.version=$VERSION"
+# The commit is stamped too, so the "source" link in the UI leads to the
+# source this build was made from (AGPL).
+COMMIT="${COMMIT:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo "")}"
+LDFLAGS="-s -w -X main.version=$VERSION -X main.commit=$COMMIT"
 mkdir -p "$OUT"
 
 # Installer metadata (NSIS version info, Info.plist) comes from wails.json; stamp the version there for this build.
@@ -41,7 +44,7 @@ cp "$WAILS_JSON" "$WAILS_JSON.orig"
 trap 'mv "$WAILS_JSON.orig" "$WAILS_JSON"' EXIT
 sed -i.bak "s/\"productVersion\": \"[^\"]*\"/\"productVersion\": \"$NUMERIC_VERSION\"/" "$WAILS_JSON" && rm -f "$WAILS_JSON.bak"
 
-[ -d "$ROOT/client/dist" ] || { echo "client/dist missing: run pnpm --filter client build first" >&2; exit 1; }
+[ -d "$ROOT/client/dist" ] || { echo "client/dist missing: run bun run --filter client build first" >&2; exit 1; }
 rm -rf "$ROOT/go-server/frontend/dist"
 mkdir -p "$ROOT/go-server/frontend"
 cp -r "$ROOT/client/dist" "$ROOT/go-server/frontend/dist"

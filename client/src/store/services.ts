@@ -32,8 +32,10 @@ export const useServices = create<ServicesState>((set, get) => ({
     set({
       loading: false,
       error: null,
-      services: info.value,
-      stats: stats.status === 'fulfilled' ? stats.value : [],
+      // A server without responders answers discovery with an empty message;
+      // anything that is not a service description is dropped here.
+      services: (info.value ?? []).filter(s => s && typeof s.name === 'string'),
+      stats: stats.status === 'fulfilled' ? (stats.value ?? []).filter(s => s && typeof s.id === 'string') : [],
       loadedAt: Date.now(),
     });
   },

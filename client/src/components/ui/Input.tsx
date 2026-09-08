@@ -1,4 +1,13 @@
-import { cloneElement, forwardRef, isValidElement, useId, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
+import {
+  cloneElement,
+  forwardRef,
+  isValidElement,
+  useId,
+  type InputHTMLAttributes,
+  type ReactNode,
+  type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
+} from 'react';
 import { cn } from '../../lib/utils';
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
@@ -81,6 +90,7 @@ export function Field({ label, hint, htmlFor, className, children, required }: F
   );
 }
 
+/** A filter field: "/" focuses it from anywhere, Escape clears it. */
 export function SearchInput({ className, ...rest }: InputProps) {
   return (
     <div className={cn('relative', className)}>
@@ -99,7 +109,19 @@ export function SearchInput({ className, ...rest }: InputProps) {
         <circle cx="11" cy="11" r="7" />
         <path d="m21 21-4.3-4.3" />
       </svg>
-      <input type="search" className="input input-sm pl-7" {...rest} />
+      <input
+        type="search"
+        className="input input-sm pl-7"
+        {...rest}
+        data-filter
+        onKeyDown={e => {
+          rest.onKeyDown?.(e);
+          if (e.key === 'Escape' && !e.defaultPrevented) {
+            if (e.currentTarget.value) rest.onChange?.({ ...e, target: { ...e.currentTarget, value: '' } } as unknown as React.ChangeEvent<HTMLInputElement>);
+            else e.currentTarget.blur();
+          }
+        }}
+      />
     </div>
   );
 }

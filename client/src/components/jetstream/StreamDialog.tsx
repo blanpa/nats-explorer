@@ -107,7 +107,9 @@ export default function StreamDialog({ connId, existing, onClose, onSaved }: Pro
       open
       onOpenChange={o => !o && onClose()}
       title={edit ? `Edit stream ${existing!.name}` : 'Create stream'}
-      description={edit ? 'Storage, retention and name cannot be changed after creation.' : 'Messages published to the listed subjects are persisted in this stream.'}
+      description={
+        edit ? 'Storage, retention and name cannot be changed after creation.' : 'Messages published to the listed subjects are persisted in this stream.'
+      }
       width="lg"
       footer={
         <>
@@ -199,11 +201,36 @@ export default function StreamDialog({ connId, existing, onClose, onSaved }: Pro
         </Field>
 
         <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-2 pt-1">
-          <Checkbox label="Allow direct get" description="Serve GetMsg requests directly from replicas." checked={flags.allowDirect} onChange={e => setFlags(f => ({ ...f, allowDirect: e.target.checked }))} />
-          <Checkbox label="Allow roll-ups" description="Permit Nats-Rollup headers to replace history." checked={flags.allowRollup} onChange={e => setFlags(f => ({ ...f, allowRollup: e.target.checked }))} />
-          <Checkbox label="Deny delete" description="Disallow deleting individual messages." checked={flags.denyDelete} onChange={e => setFlags(f => ({ ...f, denyDelete: e.target.checked }))} />
-          <Checkbox label="Deny purge" description="Disallow purging the stream." checked={flags.denyPurge} onChange={e => setFlags(f => ({ ...f, denyPurge: e.target.checked }))} />
-          <Checkbox label="No ack" description="Do not acknowledge publishes (fire and forget)." checked={flags.noAck} onChange={e => setFlags(f => ({ ...f, noAck: e.target.checked }))} />
+          <Checkbox
+            label="Allow direct get"
+            description="Serve GetMsg requests directly from replicas."
+            checked={flags.allowDirect}
+            onChange={e => setFlags(f => ({ ...f, allowDirect: e.target.checked }))}
+          />
+          <Checkbox
+            label="Allow roll-ups"
+            description="Permit Nats-Rollup headers to replace history."
+            checked={flags.allowRollup}
+            onChange={e => setFlags(f => ({ ...f, allowRollup: e.target.checked }))}
+          />
+          <Checkbox
+            label="Deny delete"
+            description="Disallow deleting individual messages."
+            checked={flags.denyDelete}
+            onChange={e => setFlags(f => ({ ...f, denyDelete: e.target.checked }))}
+          />
+          <Checkbox
+            label="Deny purge"
+            description="Disallow purging the stream."
+            checked={flags.denyPurge}
+            onChange={e => setFlags(f => ({ ...f, denyPurge: e.target.checked }))}
+          />
+          <Checkbox
+            label="No ack"
+            description="Do not acknowledge publishes (fire and forget)."
+            checked={flags.noAck}
+            onChange={e => setFlags(f => ({ ...f, noAck: e.target.checked }))}
+          />
         </div>
       </form>
     </Dialog>

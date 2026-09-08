@@ -21,7 +21,9 @@ export default function TemplateList() {
 
   const list = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    return [...items].filter(t => !q || t.name.toLowerCase().includes(q) || t.subject.toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name) || a.subject.localeCompare(b.subject));
+    return [...items]
+      .filter(t => !q || t.name.toLowerCase().includes(q) || t.subject.toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name) || a.subject.localeCompare(b.subject));
   }, [items, filter]);
 
   const create = () => {
@@ -68,18 +70,35 @@ export default function TemplateList() {
           </>
         }
       />
-      <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={e => importFile(e.target.files?.[0]).finally(() => (e.target.value = ''))} />
+      <input
+        ref={fileRef}
+        type="file"
+        accept="application/json,.json"
+        className="hidden"
+        onChange={e => importFile(e.target.files?.[0]).finally(() => (e.target.value = ''))}
+      />
       <div className="px-2 py-2 border-b border-line">
         <SearchInput value={filter} onChange={e => setFilter(e.target.value)} placeholder="Filter requests…" />
       </div>
       <div className="flex-1 min-h-0 overflow-auto">
         {list.length === 0 ? (
-          <EmptyState compact icon={Send} title={filter ? 'No matching requests' : 'No saved requests'} description={filter ? undefined : 'Create a request template or import a JSON collection. Templates are stored in this browser.'} />
+          <EmptyState
+            compact
+            icon={Send}
+            title={filter ? 'No matching requests' : 'No saved requests'}
+            description={filter ? undefined : 'Create a request template or import a JSON collection. Templates are stored in this browser.'}
+          />
         ) : (
           list.map(t => (
-            <div key={t.id} className={cn('list-row flex-col items-stretch gap-0.5 py-1.5', selected === t.id && 'list-row-active')} onClick={() => setSelected(t.id)}>
+            <div
+              key={t.id}
+              className={cn('list-row flex-col items-stretch gap-0.5 py-1.5', selected === t.id && 'list-row-active')}
+              onClick={() => setSelected(t.id)}
+            >
               <div className="flex items-center gap-2 min-w-0">
-                <span className={cn('font-mono text-[10px] w-7 shrink-0', t.mode === 'request' ? 'text-info' : 'text-accent')}>{t.mode === 'request' ? 'REQ' : 'PUB'}</span>
+                <span className={cn('font-mono text-[10px] w-7 shrink-0', t.mode === 'request' ? 'text-info' : 'text-accent')}>
+                  {t.mode === 'request' ? 'REQ' : 'PUB'}
+                </span>
                 <span className="font-medium truncate">{t.name || <span className="text-faint italic">unnamed</span>}</span>
                 {t.count && t.count > 1 && <span className="ml-auto text-xs text-faint font-mono shrink-0">{t.count}×</span>}
               </div>

@@ -59,7 +59,11 @@ export default function DomainSwitch() {
         />
         <datalist id="ne-js-domains">
           {defaultDomain && <option value={defaultDomain} />}
-          {recent.filter(r => r !== defaultDomain).map(r => <option key={r} value={r} />)}
+          {recent
+            .filter(r => r !== defaultDomain)
+            .map(r => (
+              <option key={r} value={r} />
+            ))}
         </datalist>
       </form>
     );

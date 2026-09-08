@@ -7,7 +7,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"nats-explorer/internal/connection"
-	"nats-explorer/internal/subscription"
+	"nats-explorer/internal/message"
 )
 
 type PublishHandler struct {
@@ -101,7 +101,7 @@ func (h *PublishHandler) Request(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload, payloadType := subscription.EncodePayload(resp.Data)
+	payload, payloadType := message.EncodePayload(resp.Data)
 	out := map[string]interface{}{
 		"subject":     resp.Subject,
 		"payload":     payload,

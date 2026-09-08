@@ -1,133 +1,201 @@
 import type { PayloadType, SubjectEntry } from 'shared';
 
-/** Merged, annotated tree node used by the explorer. */
+/**
+ * The subject tree as the browser shows it. The server keeps the hierarchy
+ * and its aggregates and sends only the nodes visible in this tab's view
+ * (see the `view` websocket command); the browser merges the nodes of all
+ * connections by subject and lays them out.
+ */
 export interface TreeNode {
   segment: string;
   fullSubject: string;
+  /** messages on exactly this subject, summed over connections */
   messageCount: number;
+  /** messages in the whole subtree */
   total: number;
   rate: number;
   /** rate of this node plus every descendant */
   totalRate: number;
+  /** children the server knows of; the received ones are in `children` */
+  childCount: number;
   /** newest last-message preview across connections */
   last?: { payload: string; payloadType: PayloadType; timestamp: number; size: number };
   children: TreeNode[];
   connIds: string[];
+  parent?: TreeNode;
+  byConn: Map<string, SubjectEntry>;
 }
 
+/** One rendered row. Plain data so it can cross a worker boundary. */
 export interface FlatNode {
-  node: TreeNode;
+  subject: string;
+  segment: string;
   depth: number;
   hasChildren: boolean;
   expanded: boolean;
   /** for each ancestor level: whether a vertical guide line continues */
   guides: boolean[];
+  total: number;
+  rate: number;
+  totalRate: number;
+  last?: TreeNode['last'];
+  connIds: string[];
 }
-
-/** Flat per-connection subject index as maintained by the store. */
-export type SubjectIndex = Map<string, Map<string, SubjectEntry>>;
 
 const bySegment = (a: TreeNode, b: TreeNode) => a.segment.localeCompare(b.segment, undefined, { numeric: true });
 
-interface Building {
-  node: TreeNode;
-  children: Map<string, Building>;
+function newNode(segment: string, fullSubject: string, parent?: TreeNode): TreeNode {
+  return { segment, fullSubject, messageCount: 0, total: 0, rate: 0, totalRate: 0, childCount: 0, children: [], connIds: [], parent, byConn: new Map() };
+}
+
+/** Index of the position at which node belongs in a sorted sibling list. */
+function insertionIndex(list: TreeNode[], node: TreeNode): number {
+  let lo = 0;
+  let hi = list.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (bySegment(list[mid], node) < 0) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
 }
 
 /**
- * Builds the merged hierarchy from the flat indexes of all connections in one
- * pass: O(subjects × depth), with a single sort per level at the end.
+ * Merged view over the node entries of all connections. Nodes are mutated in
+ * place; the owner bumps a version to re-render. Applying an entry is O(1)
+ * apart from creating a missing path.
  */
-export function buildTree(index: SubjectIndex): TreeNode[] {
-  const root = new Map<string, Building>();
-  for (const [connId, entries] of index) {
-    for (const e of entries.values()) {
-      const segments = e.s.split('.');
-      let level = root;
-      let full = '';
-      let b: Building | undefined;
-      for (let i = 0; i < segments.length; i++) {
-        const seg = segments[i];
-        full = i === 0 ? seg : `${full}.${seg}`;
-        b = level.get(seg);
-        if (!b) {
-          b = { node: { segment: seg, fullSubject: full, messageCount: 0, total: 0, rate: 0, totalRate: 0, children: [], connIds: [] }, children: new Map() };
-          level.set(seg, b);
-        }
-        level = b.children;
-      }
-      const node = b!.node;
-      node.messageCount += e.n;
-      node.rate += e.r;
-      if (!node.connIds.includes(connId)) node.connIds.push(connId);
-      if (e.ts && (!node.last || e.ts > node.last.timestamp)) {
-        node.last = { payload: e.p ?? '', payloadType: e.pt ?? 'string', timestamp: e.ts, size: e.sz ?? 0 };
-      }
+export class TreeModel {
+  roots: TreeNode[] = [];
+  private nodes = new Map<string, TreeNode>();
+
+  get size(): number {
+    return this.nodes.size;
+  }
+
+  get(subject: string): TreeNode | undefined {
+    return this.nodes.get(subject);
+  }
+
+  /** Applies a tree update of one connection. */
+  apply(connId: string, full: boolean, entries: SubjectEntry[], removed: string[] = []): void {
+    if (full) this.dropConnection(connId);
+    for (const s of removed) this.removeEntry(connId, s);
+    for (const e of entries) this.applyEntry(connId, e);
+  }
+
+  /** Forgets everything a connection contributed. */
+  dropConnection(connId: string): void {
+    for (const node of [...this.nodes.values()]) {
+      if (node.byConn.has(connId)) this.removeEntry(connId, node.fullSubject);
     }
   }
-  return finish(root);
-}
 
-function finish(level: Map<string, Building>): TreeNode[] {
-  const out: TreeNode[] = [];
-  for (const b of level.values()) {
-    const n = b.node;
-    n.children = finish(b.children);
-    n.total = n.messageCount;
-    n.totalRate = n.rate;
-    for (const c of n.children) {
-      n.total += c.total;
-      n.totalRate += c.totalRate;
-      for (const id of c.connIds) if (!n.connIds.includes(id)) n.connIds.push(id);
-    }
-    out.push(n);
+  private applyEntry(connId: string, e: SubjectEntry): void {
+    const node = this.nodes.get(e.s) ?? this.insert(e.s);
+    node.byConn.set(connId, e);
+    this.recompute(node);
+    if (!node.connIds.includes(connId)) node.connIds.push(connId);
   }
-  return out.sort(bySegment);
-}
 
-/** Keeps nodes whose subject matches the filter, plus all their ancestors and descendants. */
-export function filterTree(nodes: TreeNode[], filter: string): TreeNode[] {
-  const q = filter.trim().toLowerCase();
-  if (!q) return nodes;
-  const terms = q.split(/\s+/);
-  const matches = (s: string) => terms.every(t => s.includes(t));
-  const walk = (list: TreeNode[]): TreeNode[] => {
-    const out: TreeNode[] = [];
-    for (const n of list) {
-      if (matches(n.fullSubject.toLowerCase())) {
-        out.push(n);
-        continue;
-      }
-      const kids = walk(n.children);
-      if (kids.length) out.push({ ...n, children: kids });
+  private recompute(node: TreeNode): void {
+    let count = 0;
+    let total = 0;
+    let rate = 0;
+    let totalRate = 0;
+    let childCount = 0;
+    let last: TreeNode['last'];
+    for (const c of node.byConn.values()) {
+      count += c.n ?? 0;
+      total += c.t ?? 0;
+      rate += c.r ?? 0;
+      totalRate += c.tr ?? 0;
+      childCount = Math.max(childCount, c.c ?? 0);
+      if (c.ts && (!last || c.ts > last.timestamp)) last = { payload: c.p ?? '', payloadType: c.pt ?? 'string', timestamp: c.ts, size: c.sz ?? 0 };
     }
-    return out;
-  };
-  return walk(nodes);
+    node.messageCount = count;
+    node.total = total;
+    node.rate = rate;
+    node.totalRate = totalRate;
+    node.childCount = childCount;
+    node.last = last;
+  }
+
+  private removeEntry(connId: string, subject: string): void {
+    const node = this.nodes.get(subject);
+    if (!node?.byConn.delete(connId)) return;
+    node.connIds = node.connIds.filter(id => id !== connId);
+    if (node.byConn.size > 0) {
+      this.recompute(node);
+      return;
+    }
+    // Nothing left from any connection: drop the node and whatever hangs below it.
+    for (const child of [...node.children]) for (const id of child.connIds) this.removeEntry(id, child.fullSubject);
+    if (node.byConn.size > 0 || node.children.length > 0) return; // placeholder kept by children of other connections
+    this.detach(node);
+  }
+
+  private detach(node: TreeNode): void {
+    const siblings = node.parent ? node.parent.children : this.roots;
+    const i = siblings.indexOf(node);
+    if (i >= 0) siblings.splice(i, 1);
+    this.nodes.delete(node.fullSubject);
+    // A placeholder parent that only existed for this child goes too.
+    const p = node.parent;
+    if (p && p.byConn.size === 0 && p.children.length === 0) this.detach(p);
+  }
+
+  private insert(fullSubject: string): TreeNode {
+    const segments = fullSubject.split('.');
+    let parent: TreeNode | undefined;
+    let full = '';
+    let node: TreeNode | undefined;
+    for (let i = 0; i < segments.length; i++) {
+      full = i === 0 ? segments[i] : `${full}.${segments[i]}`;
+      node = this.nodes.get(full);
+      if (!node) {
+        node = newNode(segments[i], full, parent);
+        const siblings = parent ? parent.children : this.roots;
+        siblings.splice(insertionIndex(siblings, node), 0, node);
+        this.nodes.set(full, node);
+      }
+      parent = node;
+    }
+    return node!;
+  }
 }
 
-export function flattenTree(nodes: TreeNode[], isExpanded: (path: string) => boolean): FlatNode[] {
+export interface FlattenOptions {
+  isExpanded: (path: string) => boolean;
+  /** hide _INBOX and $-prefixed roots */
+  hideSystem: boolean;
+}
+
+/** Lays the received nodes out as rows: roots, then the children of expanded branches. */
+export function flattenTree(roots: TreeNode[], opts: FlattenOptions): FlatNode[] {
   const out: FlatNode[] = [];
   const walk = (list: TreeNode[], depth: number, guides: boolean[]) => {
     list.forEach((node, i) => {
-      const hasChildren = node.children.length > 0;
-      const expanded = hasChildren && isExpanded(node.fullSubject);
-      out.push({ node, depth, hasChildren, expanded, guides });
-      if (expanded) walk(node.children, depth + 1, [...guides, i < list.length - 1]);
+      const hasChildren = node.childCount > 0 || node.children.length > 0;
+      const expanded = hasChildren && opts.isExpanded(node.fullSubject);
+      out.push({
+        subject: node.fullSubject,
+        segment: node.segment,
+        depth,
+        hasChildren,
+        expanded,
+        guides,
+        total: node.total,
+        rate: node.rate,
+        totalRate: node.totalRate,
+        last: node.last,
+        connIds: node.connIds,
+      });
+      if (expanded && node.children.length) walk(node.children, depth + 1, [...guides, i < list.length - 1]);
     });
   };
-  walk(nodes, 0, []);
+  walk(opts.hideSystem ? roots.filter(n => !isSystemRoot(n.segment)) : roots, 0, []);
   return out;
-}
-
-export function collectBranchPaths(nodes: TreeNode[], into: string[] = []): string[] {
-  for (const n of nodes) {
-    if (n.children.length) {
-      into.push(n.fullSubject);
-      collectBranchPaths(n.children, into);
-    }
-  }
-  return into;
 }
 
 export function ancestorsOf(subject: string): string[] {

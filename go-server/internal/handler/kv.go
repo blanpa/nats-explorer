@@ -10,7 +10,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"nats-explorer/internal/connection"
-	"nats-explorer/internal/subscription"
+	"nats-explorer/internal/message"
 )
 
 type KVHandler struct {
@@ -176,7 +176,7 @@ func KvEntryToMap(bucket string, e jetstream.KeyValueEntry) map[string]interface
 	case jetstream.KeyValuePurge:
 		op = "purge"
 	}
-	payload, payloadType := subscription.EncodePayload(e.Value())
+	payload, payloadType := message.EncodePayload(e.Value())
 	return map[string]interface{}{
 		"bucket":      bucket,
 		"key":         e.Key(),

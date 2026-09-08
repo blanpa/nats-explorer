@@ -9,6 +9,8 @@ import { Button, IconButton } from '../ui/Button';
 import { Input, Select, Textarea } from '../ui/Input';
 import { Kbd, Segmented, StatStrip, StatTile } from '../ui/misc';
 import PayloadViewer from '../subjects/PayloadViewer';
+import LatencyHistogram from './LatencyHistogram';
+import { useCanWrite } from '../../lib/auth';
 
 export const MAX_COUNT = 10_000;
 
@@ -37,7 +39,16 @@ export function useRequestRunner() {
     const body = { subject: draft.subject.trim(), payload: draft.payload, headers: Object.keys(hdrs).length ? hdrs : undefined };
     try {
       if (draft.count > 1) {
-        setRun(await api.run(connId, { ...body, mode: draft.mode, count: Math.min(MAX_COUNT, draft.count), concurrency: draft.concurrency, intervalMs: draft.intervalMs, timeout: draft.timeout }));
+        setRun(
+          await api.run(connId, {
+            ...body,
+            mode: draft.mode,
+            count: Math.min(MAX_COUNT, draft.count),
+            concurrency: draft.concurrency,
+            intervalMs: draft.intervalMs,
+            timeout: draft.timeout,
+          }),
+        );
       } else if (draft.mode === 'request') {
         setReply(await api.requestReply(connId, { ...body, timeout: draft.timeout }));
       } else {
@@ -77,6 +88,7 @@ interface FormProps {
 }
 
 export function RequestForm({ draft, onChange, onSend, busy, canSend, connId, onConnChange, toolbarExtra, payloadRows = 4, subjectPlaceholder }: FormProps) {
+  const canWrite = useCanWrite();
   const { connected } = useSendConnection(connId);
   const patch = (p: Partial<RequestDraft>) => onChange({ ...draft, ...p });
   const trimmed = draft.payload.trim();
@@ -106,24 +118,62 @@ export function RequestForm({ draft, onChange, onSend, busy, canSend, connId, on
         {draft.mode === 'request' && (
           <label className="flex items-center gap-1.5 text-xs text-muted">
             Timeout
-            <Input inputSize="sm" type="number" min={100} step={100} className="w-20" value={draft.timeout} onChange={e => patch({ timeout: Number(e.target.value) || 5000 })} />
+            <Input
+              inputSize="sm"
+              type="number"
+              min={100}
+              step={100}
+              className="w-20"
+              value={draft.timeout}
+              onChange={e => patch({ timeout: Number(e.target.value) || 5000 })}
+            />
             ms
           </label>
         )}
-        <label className="flex items-center gap-1.5 text-xs text-muted" title="Send the message this many times. Use {{i}}, {{ts}}, {{uuid}} or {{rand:1-100}} in subject, payload or headers.">
+        <label
+          className="flex items-center gap-1.5 text-xs text-muted"
+          title="Send the message this many times. Use {{i}}, {{ts}}, {{uuid}} or {{rand:1-100}} in subject, payload or headers."
+        >
           Repeat
-          <Input inputSize="sm" type="number" min={1} max={MAX_COUNT} className="w-20" value={draft.count} onChange={e => patch({ count: Math.max(1, Math.min(MAX_COUNT, Math.floor(Number(e.target.value) || 1))) })} aria-label="Repeat count" />
+          <Input
+            inputSize="sm"
+            type="number"
+            min={1}
+            max={MAX_COUNT}
+            className="w-20"
+            value={draft.count}
+            onChange={e => patch({ count: Math.max(1, Math.min(MAX_COUNT, Math.floor(Number(e.target.value) || 1))) })}
+            aria-label="Repeat count"
+          />
           ×
         </label>
         {repeated && (
           <>
             <label className="flex items-center gap-1.5 text-xs text-muted" title="Parallel senders">
               Parallel
-              <Input inputSize="sm" type="number" min={1} max={64} className="w-16" value={draft.concurrency} onChange={e => patch({ concurrency: Math.max(1, Math.min(64, Math.floor(Number(e.target.value) || 1))) })} aria-label="Concurrency" />
+              <Input
+                inputSize="sm"
+                type="number"
+                min={1}
+                max={64}
+                className="w-16"
+                value={draft.concurrency}
+                onChange={e => patch({ concurrency: Math.max(1, Math.min(64, Math.floor(Number(e.target.value) || 1))) })}
+                aria-label="Concurrency"
+              />
             </label>
             <label className="flex items-center gap-1.5 text-xs text-muted" title="Pause between sends per parallel sender">
               Every
-              <Input inputSize="sm" type="number" min={0} step={10} className="w-20" value={draft.intervalMs} onChange={e => patch({ intervalMs: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} aria-label="Interval" />
+              <Input
+                inputSize="sm"
+                type="number"
+                min={0}
+                step={10}
+                className="w-20"
+                value={draft.intervalMs}
+                onChange={e => patch({ intervalMs: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
+                aria-label="Interval"
+              />
               ms
             </label>
           </>
@@ -133,7 +183,14 @@ export function RequestForm({ draft, onChange, onSend, busy, canSend, connId, on
           <span className="text-xs text-faint hidden md:flex items-center gap-1">
             <Kbd>Ctrl</Kbd>+<Kbd>Enter</Kbd>
           </span>
-          <Button variant="primary" icon={<Send size={13} />} loading={busy} disabled={!canSend || !draft.subject.trim()} onClick={onSend} title={canSend ? undefined : 'Connect to a server to send'}>
+          <Button
+            variant="primary"
+            icon={<Send size={13} />}
+            loading={busy}
+            disabled={!canSend || !canWrite || !draft.subject.trim()}
+            onClick={onSend}
+            title={!canWrite ? 'Read-only account: sending needs the admin role' : canSend ? undefined : 'Connect to a server to send'}
+          >
             {repeated ? `Run ${formatNumber(draft.count)}×` : draft.mode === 'request' ? 'Send request' : 'Publish'}
           </Button>
         </div>
@@ -141,18 +198,43 @@ export function RequestForm({ draft, onChange, onSend, busy, canSend, connId, on
 
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-3">
         <div className="flex flex-col gap-2">
-          <Input mono inputSize="sm" value={draft.subject} onChange={e => patch({ subject: e.target.value })} placeholder={subjectPlaceholder ?? 'subject.to.publish'} aria-label="Subject" />
+          <Input
+            mono
+            inputSize="sm"
+            value={draft.subject}
+            onChange={e => patch({ subject: e.target.value })}
+            placeholder={subjectPlaceholder ?? 'subject.to.publish'}
+            aria-label="Subject"
+          />
           <div className="flex flex-col gap-1">
             {draft.headers.map((h, i) => (
               <div key={i} className="flex gap-1">
-                <Input inputSize="sm" mono placeholder="Header" value={h.key} onChange={e => patch({ headers: draft.headers.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)) })} />
-                <Input inputSize="sm" mono placeholder="Value" value={h.value} onChange={e => patch({ headers: draft.headers.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)) })} />
+                <Input
+                  inputSize="sm"
+                  mono
+                  placeholder="Header"
+                  value={h.key}
+                  onChange={e => patch({ headers: draft.headers.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)) })}
+                />
+                <Input
+                  inputSize="sm"
+                  mono
+                  placeholder="Value"
+                  value={h.value}
+                  onChange={e => patch({ headers: draft.headers.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)) })}
+                />
                 <IconButton label="Remove header" size="sm" onClick={() => patch({ headers: draft.headers.filter((_, j) => j !== i) })}>
                   <Trash2 size={13} />
                 </IconButton>
               </div>
             ))}
-            <Button size="xs" variant="ghost" icon={<Plus size={12} />} className="self-start" onClick={() => patch({ headers: [...draft.headers, { key: '', value: '' }] })}>
+            <Button
+              size="xs"
+              variant="ghost"
+              icon={<Plus size={12} />}
+              className="self-start"
+              onClick={() => patch({ headers: [...draft.headers, { key: '', value: '' }] })}
+            >
               Header
             </Button>
           </div>
@@ -168,7 +250,7 @@ export function RequestForm({ draft, onChange, onSend, busy, canSend, connId, on
             onKeyDown={e => {
               if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
-                if (canSend) onSend();
+                if (canSend && canWrite) onSend();
               }
             }}
           />
@@ -182,7 +264,13 @@ export function RequestForm({ draft, onChange, onSend, busy, canSend, connId, on
             )}
             <span className="flex-1" />
             <span className="text-faint font-mono">{new TextEncoder().encode(draft.payload).length} B</span>
-            <Button size="xs" variant="ghost" icon={<Braces size={12} />} disabled={tryParseJson(draft.payload) === undefined} onClick={() => patch({ payload: prettyJson(draft.payload) })}>
+            <Button
+              size="xs"
+              variant="ghost"
+              icon={<Braces size={12} />}
+              disabled={tryParseJson(draft.payload) === undefined}
+              onClick={() => patch({ payload: prettyJson(draft.payload) })}
+            >
               Format
             </Button>
           </div>
@@ -235,10 +323,13 @@ function RunSummary({ run }: { run: RunResult }) {
           <>
             <StatTile label="Latency p50" value={formatDurationMs(run.latency.p50)} />
             <StatTile label="p95" value={formatDurationMs(run.latency.p95)} />
+            <StatTile label="p99" value={formatDurationMs(run.latency.p99)} />
             <StatTile label="max" value={formatDurationMs(run.latency.max)} sub={`min ${formatDurationMs(run.latency.min)}`} />
           </>
         )}
       </StatStrip>
+      {/* The shape matters: a summary hides a few replies stuck on a timeout. */}
+      {run.latency?.histogram && run.ok >= 5 && <LatencyHistogram buckets={run.latency.histogram} />}
       {errorKinds.length > 0 && (
         <div className="text-xs font-mono text-danger flex flex-col gap-0.5">
           {errorKinds.map(([msg, n]) => (

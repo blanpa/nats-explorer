@@ -48,8 +48,22 @@ export interface StreamInfo {
   created: string;
   state: StreamState;
   cluster?: { name: string; leader: string; replicas: StreamReplica[] };
-  mirror?: string;
-  sources?: string[];
+  /** the stream this one mirrors, with its lag once data flows */
+  mirror?: StreamSource;
+  /** the streams this one sources from */
+  sources?: StreamSource[];
+  /** which other streams mirror or source from this one; only the listing knows this */
+  sourcedBy?: { name: string; kind: 'mirror' | 'source' }[];
+}
+
+/** One replication relation of a stream. */
+export interface StreamSource {
+  name: string;
+  /** messages this side is behind; only meaningful while there is traffic */
+  lag?: number;
+  /** milliseconds since the last activity; -1 before anything happened */
+  active?: number;
+  filterSubject?: string;
 }
 
 /** Fields accepted by POST/PUT /api/streams. Omitted fields keep their value. */
@@ -94,6 +108,19 @@ export interface StreamMessagesPage {
   pageEnd: number;
 }
 
+/** GET /api/streams/{name}/series: a numeric JSON field over a stream's last messages, downsampled. */
+export interface StreamSeries {
+  stream: string;
+  field: string;
+  subject?: string;
+  /** [timestamp ms, value] in time order; every bucket keeps its min and max */
+  points: [number, number][];
+  samples: number;
+  scanned: number;
+  fromSeq: number;
+  toSeq: number;
+}
+
 export type DeliverPolicy = 'all' | 'last' | 'new' | 'by_start_sequence' | 'last_per_subject';
 export type AckPolicy = 'none' | 'all' | 'explicit';
 export type ReplayPolicy = 'instant' | 'original';
@@ -132,6 +159,16 @@ export interface ConsumerInfo {
   numWaiting: number;
   numPending: number;
   push: boolean;
+}
+
+/** PUT /api/streams/{stream}/consumers/{name}: the fields JetStream lets you change after creation. */
+export interface ConsumerUpdateInput {
+  description?: string;
+  /** nanoseconds */
+  ackWait?: number;
+  maxDeliver?: number;
+  maxAckPending?: number;
+  filterSubject?: string;
 }
 
 export interface ConsumerCreateInput {

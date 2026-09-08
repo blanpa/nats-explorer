@@ -10,7 +10,11 @@ import { IconButton } from '../ui/Button';
 import { Badge, EmptyState, ErrorState, KeyValueGrid, LoadingState, PaneHeader, SectionTitle, StatStrip, StatTile, Tabs } from '../ui/misc';
 
 function ServerCard({ conn }: { conn: ConnectionStatus }) {
-  const { data, error, loading, initial, reload } = useAsync<ServerInfo>(() => (conn.connected ? api.getServerInfo(conn.id) : null), [conn.id, conn.connected], { key: `server:${conn.id}`, interval: 10_000 });
+  const { data, error, loading, initial, reload } = useAsync<ServerInfo>(
+    () => (conn.connected ? api.getServerInfo(conn.id) : null),
+    [conn.id, conn.connected],
+    { key: `server:${conn.id}`, interval: 10_000 },
+  );
 
   return (
     <div className="card overflow-hidden">
@@ -18,7 +22,9 @@ function ServerCard({ conn }: { conn: ConnectionStatus }) {
         <span className="font-semibold">{conn.name}</span>
         {data && <span className="text-xs text-muted font-mono">v{data.version}</span>}
         {data?.cluster && <Badge tone="accent">cluster {data.cluster}</Badge>}
-        <Badge tone={conn.connected ? 'ok' : conn.reconnecting ? 'warn' : 'danger'}>{conn.connected ? 'connected' : conn.reconnecting ? 'reconnecting' : 'disconnected'}</Badge>
+        <Badge tone={conn.connected ? 'ok' : conn.reconnecting ? 'warn' : 'danger'}>
+          {conn.connected ? 'connected' : conn.reconnecting ? 'reconnecting' : 'disconnected'}
+        </Badge>
         <span className="ml-auto">
           <IconButton label="Refresh" size="xs" loading={loading && !initial} onClick={reload}>
             <RefreshCw size={13} />
@@ -37,7 +43,12 @@ function ServerCard({ conn }: { conn: ConnectionStatus }) {
           <StatStrip>
             <StatTile label="RTT" value={formatDurationMs(data.rttMs)} />
             <StatTile label="Max payload" value={formatBytes(data.maxPayload)} />
-            <StatTile label="JetStream" value={data.jetstream ? 'enabled' : 'off'} tone={data.jetstream ? 'ok' : undefined} sub={data.jetstreamErr && !data.jetstream ? data.jetstreamErr : undefined} />
+            <StatTile
+              label="JetStream"
+              value={data.jetstream ? 'enabled' : 'off'}
+              tone={data.jetstream ? 'ok' : undefined}
+              sub={data.jetstreamErr && !data.jetstream ? data.jetstreamErr : undefined}
+            />
             <StatTile label="Msgs in / out" value={`${formatNumber(data.stats.inMsgs)} / ${formatNumber(data.stats.outMsgs)}`} sub="this client" />
             <StatTile label="Bytes in / out" value={`${formatBytes(data.stats.inBytes)} / ${formatBytes(data.stats.outBytes)}`} sub="this client" />
             <StatTile label="Reconnects" value={data.stats.reconnects} tone={data.stats.reconnects > 0 ? 'warn' : undefined} />
@@ -81,8 +92,14 @@ function ServerCard({ conn }: { conn: ConnectionStatus }) {
                     columns={1}
                     items={[
                       { label: 'Streams / consumers', value: `${formatNumber(data.jsAccount.streams)} / ${formatNumber(data.jsAccount.consumers)}` },
-                      { label: 'Memory', value: `${formatBytes(data.jsAccount.memory)} / ${data.jsAccount.maxMemory < 0 ? '∞' : formatBytes(data.jsAccount.maxMemory)}` },
-                      { label: 'Storage', value: `${formatBytes(data.jsAccount.storage)} / ${data.jsAccount.maxStorage < 0 ? '∞' : formatBytes(data.jsAccount.maxStorage)}` },
+                      {
+                        label: 'Memory',
+                        value: `${formatBytes(data.jsAccount.memory)} / ${data.jsAccount.maxMemory < 0 ? '∞' : formatBytes(data.jsAccount.maxMemory)}`,
+                      },
+                      {
+                        label: 'Storage',
+                        value: `${formatBytes(data.jsAccount.storage)} / ${data.jsAccount.maxStorage < 0 ? '∞' : formatBytes(data.jsAccount.maxStorage)}`,
+                      },
                       ...(data.jsAccount.domain ? [{ label: 'Domain', value: data.jsAccount.domain, mono: true }] : []),
                     ]}
                   />
@@ -134,7 +151,11 @@ export default function ClusterView() {
         ]}
       />
       {tab === 'cluster' ? (
-        activeConnId ? <ClusterOverview connId={activeConnId} /> : <EmptyState title="Select a connection" />
+        activeConnId ? (
+          <ClusterOverview connId={activeConnId} />
+        ) : (
+          <EmptyState title="Select a connection" />
+        )
       ) : (
         <div className="flex-1 min-h-0 overflow-auto p-4 flex flex-col gap-4">
           {connections.map(c => (

@@ -9,15 +9,17 @@ export interface NatsMessage {
   timestamp: number;
   reply?: string;
   size: number;
+  /** arrival number on its connection; unique per connection, used to merge feed and history */
   sequence?: number;
-  /** Set client-side to remember which connection delivered the message. */
+  /** connection that delivered the message; set by the history API, added client-side for the live feed */
   connId?: string;
 }
 
 /**
- * One subject in the tree feed. The server sends a flat list and the browser
- * rebuilds the hierarchy. Keys are short because large trees are re-sent
- * every few hundred milliseconds.
+ * One node of the subject tree. The server keeps the hierarchy and sends a
+ * tab only the nodes visible in its view (expanded branches, or the paths of
+ * filter matches); the browser merges them across connections. Keys are
+ * short because the feed is the largest thing on the socket.
  */
 export interface SubjectEntry {
   /** full subject */
@@ -26,6 +28,12 @@ export interface SubjectEntry {
   n: number;
   /** messages per second over the last 10 s */
   r: number;
+  /** messages in the whole subtree, this node included */
+  t: number;
+  /** rate of the whole subtree */
+  tr: number;
+  /** number of children on the server; a collapsed branch shows a chevron from this */
+  c?: number;
   /** preview of the last payload, truncated server-side; absent for binary */
   p?: string;
   pt?: PayloadType;
@@ -35,10 +43,47 @@ export interface SubjectEntry {
   sz?: number;
 }
 
+/** Counters of one connection's subscription, pushed once a second as a `stats` event. */
 export interface SubscriptionStats {
+  /** messages received on the server side since connect */
   received: number;
-  dropped: number;
+  /** messages of a focused subject that did not fit the tab's feed budget; they are still in the history */
+  throttled: number;
   subjects: number;
+  /** messages per second received, averaged over the last seconds */
+  rate: number;
+  /** size of the server-side message history for this connection, and of the SQLite copy when enabled */
+  history: {
+    messages: number;
+    bytes: number;
+    subjects: number;
+    db?: { path: string; messages: number; bytes: number; oldest: number; dropped: number; retention: string };
+  };
+  /** counters per subscribed pattern */
+  patterns?: { pattern: string; received: number; subjects: number; rate: number }[];
+}
+
+/** GET /api/history/series: a numeric JSON field over the recorded history, downsampled. */
+export interface HistorySeries {
+  subject: string;
+  field: string;
+  /** [timestamp ms, value] in time order; every bucket keeps its min and max */
+  points: [number, number][];
+  /** messages that carried the field */
+  samples: number;
+  /** sequence of the newest message considered; live messages after it can be appended */
+  last: number;
+  /** "rollup" when the points are minute aggregates instead of messages */
+  source?: 'rollup';
+}
+
+/** GET /api/history: what the server recorded for a subject and the branch below it. */
+export interface HistoryResponse {
+  subject: string;
+  /** messages on exactly the subject, oldest first; each carries its connId */
+  messages: NatsMessage[];
+  /** newest messages on subjects below it, newest first */
+  branch: NatsMessage[];
 }
 
 export interface PublishInput {
@@ -86,7 +131,16 @@ export interface RunResult {
   errors: number;
   durationMs: number;
   perSecond: number;
-  latency?: { min: number; avg: number; p50: number; p95: number; max: number };
+  latency?: {
+    min: number;
+    avg: number;
+    p50: number;
+    p95: number;
+    p99: number;
+    max: number;
+    /** replies per bucket; `le` is the upper bound in ms, 0 means slower than the last bound */
+    histogram?: { le: number; count: number }[];
+  };
   replies: RunReply[];
   errorSamples: { i: number; error: string }[];
   errorCounts: Record<string, number>;

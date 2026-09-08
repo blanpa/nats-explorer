@@ -3,6 +3,7 @@ import { useStore } from '../../store';
 
 export default function ResizeHandle() {
   const setWidth = useStore(s => s.setExplorerWidth);
+  const width = useStore(s => s.explorerWidth);
   const [active, setActive] = useState(false);
   const start = useRef<{ x: number; width: number } | null>(null);
 
@@ -31,6 +32,9 @@ export default function ResizeHandle() {
       role="separator"
       aria-orientation="vertical"
       aria-label="Resize explorer"
+      aria-valuenow={width}
+      aria-valuemin={220}
+      aria-valuemax={800}
       className="resize-handle"
       data-active={active}
       onPointerDown={onPointerDown}

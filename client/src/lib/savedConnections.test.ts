@@ -3,7 +3,9 @@ import { migrateLegacy, newSavedConnection, toConnectionConfig } from './savedCo
 
 describe('savedConnections', () => {
   it('migrates the legacy host/port format and keeps credentials', () => {
-    const [m] = migrateLegacy([{ name: 'Old', host: 'nats.local', port: '4333', authMethod: 'token', token: 't', subscriptions: [], sysTopics: { sys: true } }]);
+    const [m] = migrateLegacy([
+      { name: 'Old', host: 'nats.local', port: '4333', authMethod: 'token', token: 't', subscriptions: [], sysTopics: { sys: true } },
+    ]);
     expect(m.id).toMatch(/[0-9a-f-]{36}/);
     expect(m.servers).toEqual(['nats://nats.local:4333']);
     expect(m.subscriptions).toEqual(['>']);
@@ -35,7 +37,15 @@ describe('savedConnections', () => {
   });
 
   it('sends system-account credentials only for the chosen method', () => {
-    const base = { servers: ['nats://a:4222'], authMethod: 'none' as const, subscriptions: ['>'], sysTopics: {}, sysUser: 'sys', sysPass: 'pw', sysToken: 'tok' };
+    const base = {
+      servers: ['nats://a:4222'],
+      authMethod: 'none' as const,
+      subscriptions: ['>'],
+      sysTopics: {},
+      sysUser: 'sys',
+      sysPass: 'pw',
+      sysToken: 'tok',
+    };
     expect(toConnectionConfig(newSavedConnection({ ...base })).sysAuthMethod).toBeUndefined();
     const cfg = toConnectionConfig(newSavedConnection({ ...base, sysAuthMethod: 'userpass' }));
     expect(cfg).toMatchObject({ sysAuthMethod: 'userpass', sysUser: 'sys', sysPass: 'pw' });
@@ -43,7 +53,16 @@ describe('savedConnections', () => {
   });
 
   it('sends TLS material only when TLS is on', () => {
-    const base = { servers: ['tls://a:4222'], authMethod: 'none' as const, subscriptions: ['>'], sysTopics: {}, tlsCa: 'CA', tlsCert: 'CERT', tlsKey: 'KEY', tlsInsecure: true };
+    const base = {
+      servers: ['tls://a:4222'],
+      authMethod: 'none' as const,
+      subscriptions: ['>'],
+      sysTopics: {},
+      tlsCa: 'CA',
+      tlsCert: 'CERT',
+      tlsKey: 'KEY',
+      tlsInsecure: true,
+    };
     expect(toConnectionConfig(newSavedConnection({ ...base, tls: false })).tlsCa).toBeUndefined();
     const on = toConnectionConfig(newSavedConnection({ ...base, tls: true }));
     expect(on).toMatchObject({ tls: true, tlsCa: 'CA', tlsCert: 'CERT', tlsKey: 'KEY', tlsInsecure: true });

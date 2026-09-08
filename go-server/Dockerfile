@@ -1,26 +1,22 @@
-# Stage 1: Build client
-FROM node:22-alpine AS client-builder
-
-# pnpm version comes from the packageManager field in package.json (same as CI)
-COPY package.json /tmp/package.json
-RUN corepack enable && cd /tmp && corepack prepare --activate
+# Stage 1: Build client (Bun installs the workspace and runs the build scripts)
+FROM oven/bun:1-alpine AS client-builder
 
 WORKDIR /app
 
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY package.json bun.lock ./
 COPY shared/package.json shared/
 COPY client/package.json client/
 COPY dev/package.json dev/
 COPY e2e/package.json e2e/
 
-RUN pnpm install --frozen-lockfile --filter shared --filter client
+RUN bun install --frozen-lockfile
 
 COPY tsconfig.base.json ./
 COPY shared/ shared/
 COPY client/ client/
 
-RUN pnpm --filter shared build
-RUN pnpm --filter client build
+RUN bun run --filter shared build
+RUN bun run --filter client build
 
 # Stage 2: Build Go server
 FROM golang:1.26-alpine AS go-builder

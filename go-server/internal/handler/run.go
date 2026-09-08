@@ -16,7 +16,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 
-	"nats-explorer/internal/subscription"
+	"nats-explorer/internal/message"
 )
 
 const (
@@ -56,7 +56,41 @@ type latencyStats struct {
 	Avg float64 `json:"avg"`
 	P50 float64 `json:"p50"`
 	P95 float64 `json:"p95"`
+	P99 float64 `json:"p99"`
 	Max float64 `json:"max"`
+	// Histogram counts the replies per bucket, so the shape of the
+	// distribution survives the summary. Le is the upper bound in ms; the
+	// last bucket collects everything above it.
+	Histogram []latencyBucket `json:"histogram,omitempty"`
+}
+
+// latencyBucket is one bar: how many replies were at most Le milliseconds.
+type latencyBucket struct {
+	Le    float64 `json:"le"`
+	Count int     `json:"count"`
+}
+
+// latencyBounds are log-spaced from half a millisecond to four seconds,
+// which covers a local reply and a timing out service in twelve bars.
+var latencyBounds = []float64{0.5, 1, 2, 5, 10, 20, 50, 100, 250, 500, 1000, 4000}
+
+// histogram buckets sorted latencies; the final bucket has Le 0 and means
+// "slower than the last bound".
+func histogram(sorted []float64) []latencyBucket {
+	out := make([]latencyBucket, 0, len(latencyBounds)+1)
+	i := 0
+	for _, le := range latencyBounds {
+		n := 0
+		for i < len(sorted) && sorted[i] <= le {
+			n++
+			i++
+		}
+		out = append(out, latencyBucket{Le: le, Count: n})
+	}
+	if rest := len(sorted) - i; rest > 0 {
+		out = append(out, latencyBucket{Count: rest})
+	}
+	return out
 }
 
 type runResult struct {
@@ -111,6 +145,8 @@ func newUUID() string {
 	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
 }
 
+// percentile picks the value at the nearest rank, rounded down: with ten
+// samples p99 is the ninth, not an interpolation.
 func percentile(sorted []float64, p float64) float64 {
 	if len(sorted) == 0 {
 		return 0
@@ -231,7 +267,7 @@ func (h *PublishHandler) Run(w http.ResponseWriter, r *http.Request) {
 				if reply != nil {
 					latencies = append(latencies, elapsed)
 					if len(res.Replies) < runSampleReplies {
-						payload, payloadType := subscription.EncodePayload(reply.Data)
+						payload, payloadType := message.EncodePayload(reply.Data)
 						res.Replies = append(res.Replies, runReply{I: i, Subject: reply.Subject, Payload: payload, PayloadType: payloadType, Size: len(reply.Data), DurationMs: elapsed})
 					}
 				}
@@ -271,7 +307,15 @@ feed:
 		for _, l := range latencies {
 			sum += l
 		}
-		res.Latency = &latencyStats{Min: latencies[0], Avg: sum / float64(len(latencies)), P50: percentile(latencies, 0.5), P95: percentile(latencies, 0.95), Max: latencies[len(latencies)-1]}
+		res.Latency = &latencyStats{
+			Min:       latencies[0],
+			Avg:       sum / float64(len(latencies)),
+			P50:       percentile(latencies, 0.5),
+			P95:       percentile(latencies, 0.95),
+			P99:       percentile(latencies, 0.99),
+			Max:       latencies[len(latencies)-1],
+			Histogram: histogram(latencies),
+		}
 	}
 	writeJSON(w, res)
 }

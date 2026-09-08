@@ -5,4 +5,5 @@ export * from './kv.js';
 export * from './objectstore.js';
 export * from './services.js';
 export * from './monitoring.js';
+export * from './alerts.js';
 export * from './ws-events.js';

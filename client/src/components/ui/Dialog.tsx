@@ -24,11 +24,11 @@ export function Dialog({ open, onOpenChange, title, description, children, foote
   return (
     <RadixDialog.Root open={open} onOpenChange={onOpenChange}>
       <RadixDialog.Portal>
-        <RadixDialog.Overlay className="fixed inset-0 z-40 bg-black/55 backdrop-blur-[1px] data-[state=open]:animate-fade-in" />
+        <RadixDialog.Overlay className="fixed inset-0 z-40 bg-black/55 backdrop-blur-[1px] data-[state=open]:animate-fade" />
         <RadixDialog.Content
           className={cn(
             'fixed z-50 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100vw-32px)] max-h-[calc(100vh-40px)]',
-            'flex flex-col rounded-lg border border-line bg-panel shadow-pop outline-none data-[state=open]:animate-fade-in',
+            'flex flex-col rounded-lg border border-line bg-panel shadow-pop outline-none data-[state=open]:animate-dialog-in',
             widths[width],
             className,
           )}

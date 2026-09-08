@@ -1,11 +1,12 @@
-import { useMemo } from 'react';
 import { create } from 'zustand';
-import type { ConnectionStatus, NatsMessage, SubjectEntry, SubscriptionStats } from 'shared';
+import type { ConnectionStatus, HistoryResponse, NatsMessage, SubscriptionStats } from 'shared';
 import { applyTheme, readTheme, type Theme } from '../lib/theme';
 import { readSetting, writeSetting } from '../lib/utils';
+import { byArrival, messageKey } from '../lib/messages';
 import { clearAsyncCache } from '../lib/useAsync';
+import { ancestorsOf, type FlatNode } from '../components/subjects/tree';
 
-export type Module = 'subjects' | 'jetstream' | 'kv' | 'objects' | 'services' | 'requests' | 'monitor' | 'cluster';
+export type Module = 'subjects' | 'jetstream' | 'kv' | 'objects' | 'services' | 'requests' | 'monitor' | 'cluster' | 'alerts' | 'audit';
 
 export const MODULES: { id: Module; label: string; hasExplorer: boolean }[] = [
   { id: 'subjects', label: 'Subjects', hasExplorer: true },
@@ -16,9 +17,38 @@ export const MODULES: { id: Module; label: string; hasExplorer: boolean }[] = [
   { id: 'requests', label: 'Requests', hasExplorer: true },
   { id: 'monitor', label: 'Monitoring', hasExplorer: false },
   { id: 'cluster', label: 'Cluster', hasExplorer: false },
+  { id: 'alerts', label: 'Alerts', hasExplorer: false },
+  { id: 'audit', label: 'Audit log', hasExplorer: false },
 ];
 
-const MAX_MESSAGES_PER_SUBJECT = 500;
+/** How many messages of the selected subject the browser keeps (history + live). */
+export const MAX_SUBJECT_MESSAGES = 1000;
+/** How many messages below a selected branch the browser keeps, newest first. */
+export const MAX_BRANCH_MESSAGES = 200;
+
+/**
+ * What the user looks at: the selected subject, what the server recorded for
+ * it, and what arrived on the feed since. The only messages the browser holds.
+ */
+export interface LiveView {
+  subject: string;
+  /** messages on exactly the subject, oldest first */
+  messages: NatsMessage[];
+  /** newest messages on subjects below it, newest first */
+  branch: NatsMessage[];
+  /** history request in flight */
+  loading: boolean;
+  error: string | null;
+}
+
+function countSubjects(stats: Map<string, SubscriptionStats>): number {
+  let c = 0;
+  for (const st of stats.values()) c += st.subjects;
+  return c;
+}
+
+const emptyView = (subject: string): LiveView => ({ subject, messages: [], branch: [], loading: true, error: null });
+
 const EXPLORER_WIDTH_KEY = 'ne.explorerWidth';
 
 function readExplorerWidth(): number {
@@ -55,31 +85,52 @@ export interface AppState {
   setWsOnline: (b: boolean) => void;
 
   // Subjects / live feed
-  /** flat subject index per connection; mutated in place, treeVersion drives re-renders */
-  subjectIndex: Map<string, Map<string, SubjectEntry>>;
-  treeVersion: number;
-  applySubjectTree: (connId: string, full: boolean, entries: SubjectEntry[]) => void;
+  /** rows of the subject tree as laid out by the feed worker for the current view */
+  treeRows: FlatNode[];
+  /** system roots ($…, _INBOX) the server knows of, shown or hidden */
+  systemCount: number;
+  setTreeRows: (rows: FlatNode[], systemCount: number) => void;
   subjectFilter: string;
   setSubjectFilter: (f: string) => void;
+  /** CEL expression over the payload; narrows the tree and the history queries */
+  subjectExpr: string;
+  setSubjectExpr: (e: string) => void;
+  /** why the payload filter did not compile, from the server */
+  filterError: string | null;
+  setFilterError: (e: string) => void;
   /** hide _INBOX and $-prefixed roots (JetStream API, KV/object internals, system events) */
   hideSystemSubjects: boolean;
   setHideSystemSubjects: (b: boolean) => void;
+  /** subjects watched at once (Ctrl/Cmd-click in the tree); the last one is `selectedSubject` */
+  selectedSubjects: string[];
   selectedSubject: string | null;
+  /** replaces the selection */
   setSelectedSubject: (s: string | null) => void;
+  /** Selects a subject and opens the branches above it, so it is visible in the tree. */
+  revealSubject: (s: string) => void;
+  /** adds or removes a subject from the selection */
+  toggleSelectedSubject: (s: string) => void;
+  /** every branch expanded; `expanded` then holds the collapsed exceptions */
+  expandAll: boolean;
   expanded: Set<string>;
+  isExpanded: (path: string) => boolean;
   toggleExpanded: (path: string) => void;
   setExpanded: (paths: Iterable<string>) => void;
-  messages: Map<string, NatsMessage[]>;
-  messageVersion: number;
-  addMessages: (connId: string, msgs: NatsMessage[]) => void;
-  clearMessages: (connId?: string) => void;
+  expandAllBranches: () => void;
+  collapseAll: () => void;
+  /** one live view per selected subject */
+  live: Map<string, LiveView>;
+  /** feed messages for the selected subjects; called once per animation frame */
+  ingestFeed: (msgs: NatsMessage[]) => void;
+  /** merge the server history into the live view; ignored when the selection moved on */
+  applyHistory: (subject: string, res: HistoryResponse) => void;
+  setLiveError: (subject: string, error: string) => void;
+  /** forget buffered messages, keep the selection */
+  resetLive: () => void;
   selectedMessage: NatsMessage | null;
   setSelectedMessage: (m: NatsMessage | null) => void;
   subscriptionStats: Map<string, SubscriptionStats>;
   setSubscriptionStats: (connId: string, stats: SubscriptionStats) => void;
-  totalMessages: number;
-  messagesPerSecond: number;
-  setMessagesPerSecond: (n: number) => void;
   totalSubjects: number;
   publishOpen: boolean;
   setPublishOpen: (b: boolean) => void;
@@ -105,12 +156,6 @@ export interface AppState {
   setJsDomainOverride: (connId: string, domain: string) => void;
 }
 
-function countSubjects(index: Map<string, Map<string, SubjectEntry>>): number {
-  let c = 0;
-  for (const m of index.values()) c += m.size;
-  return c;
-}
-
 export const useStore = create<AppState>((set, get) => ({
   // Connections ------------------------------------------------------------
   connections: [],
@@ -119,40 +164,30 @@ export const useStore = create<AppState>((set, get) => ({
   setConnections: conns => {
     const prev = get();
     const stillThere = conns.some(c => c.id === prev.activeConnId);
-    const activeConnId = stillThere ? prev.activeConnId : conns.find(c => c.connected)?.id ?? conns[0]?.id ?? null;
+    const activeConnId = stillThere ? prev.activeConnId : (conns.find(c => c.connected)?.id ?? conns[0]?.id ?? null);
 
-    // Drop trees and buffered messages that belong to connections that vanished.
+    // Drop counters and buffered messages that belong to connections that vanished.
     const live = new Set(conns.map(c => c.id));
-    let trees = prev.subjectIndex;
-    let messages = prev.messages;
     let stats = prev.subscriptionStats;
     let changed = false;
-    for (const id of trees.keys()) {
+    for (const id of stats.keys()) {
       if (!live.has(id)) {
         if (!changed) {
-          trees = new Map(trees);
           stats = new Map(stats);
-          messages = new Map(messages);
           changed = true;
         }
-        trees.delete(id);
         stats.delete(id);
-        for (const [subject, list] of messages) {
-          const kept = list.filter(m => m.connId !== id);
-          if (kept.length === 0) messages.delete(subject);
-          else if (kept.length !== list.length) messages.set(subject, kept);
-        }
       }
     }
 
     const patch: Partial<AppState> = { connections: conns, activeConnId, connectionsLoaded: true };
     if (changed) {
-      patch.subjectIndex = trees;
-      patch.treeVersion = prev.treeVersion + 1;
       patch.subscriptionStats = stats;
-      patch.messages = messages;
-      patch.messageVersion = prev.messageVersion + 1;
-      patch.totalSubjects = countSubjects(trees);
+      patch.totalSubjects = countSubjects(stats);
+      if (prev.live.size) {
+        const keep = (m: NatsMessage) => !m.connId || live.has(m.connId);
+        patch.live = new Map([...prev.live].map(([subject, v]) => [subject, { ...v, messages: v.messages.filter(keep), branch: v.branch.filter(keep) }]));
+      }
     }
     if (activeConnId !== prev.activeConnId) {
       patch.selectedStream = null;
@@ -187,30 +222,63 @@ export const useStore = create<AppState>((set, get) => ({
   setWsOnline: b => set({ wsOnline: b }),
 
   // Subjects ---------------------------------------------------------------
-  subjectIndex: new Map(),
-  treeVersion: 0,
-  applySubjectTree: (connId, full, entries) => {
-    const state = get();
-    let index = state.subjectIndex;
-    let byConn = index.get(connId);
-    if (full || !byConn) {
-      byConn = new Map();
-      index = new Map(index);
-      index.set(connId, byConn);
-    }
-    for (const e of entries) byConn.set(e.s, e);
-    set({ subjectIndex: index, treeVersion: state.treeVersion + 1, totalSubjects: countSubjects(index) });
-  },
+  treeRows: [],
+  systemCount: 0,
+  setTreeRows: (rows, systemCount) => set({ treeRows: rows, systemCount }),
   subjectFilter: '',
   setSubjectFilter: f => set({ subjectFilter: f }),
+  subjectExpr: readSetting('ne.subjectExpr', ''),
+  setSubjectExpr: e => {
+    writeSetting('ne.subjectExpr', e);
+    set({ subjectExpr: e, ...(e.trim() ? {} : { filterError: null }) });
+  },
+  filterError: null,
+  setFilterError: e => set({ filterError: e || null }),
   hideSystemSubjects: readSetting('ne.hideSystemSubjects', true),
   setHideSystemSubjects: b => {
     writeSetting('ne.hideSystemSubjects', b);
     set({ hideSystemSubjects: b });
   },
+  selectedSubjects: [],
   selectedSubject: null,
-  setSelectedSubject: subject => set({ selectedSubject: subject, selectedMessage: null }),
+  setSelectedSubject: subject =>
+    set(s => {
+      if (s.selectedSubject === subject && s.selectedSubjects.length <= 1) return {};
+      const live = new Map<string, LiveView>();
+      if (subject) live.set(subject, s.live.get(subject) ?? emptyView(subject));
+      return { selectedSubjects: subject ? [subject] : [], selectedSubject: subject, selectedMessage: null, live };
+    }),
+  revealSubject: subject => {
+    const s = get();
+    // With "expand all" the set holds the collapsed exceptions, so revealing
+    // means removing the ancestors from it instead of adding them.
+    const next = new Set(s.expanded);
+    for (const path of ancestorsOf(subject)) {
+      if (s.expandAll) next.delete(path);
+      else next.add(path);
+    }
+    set({ expanded: next });
+    s.setSelectedSubject(subject);
+  },
+  toggleSelectedSubject: subject =>
+    set(s => {
+      const live = new Map(s.live);
+      let selectedSubjects: string[];
+      if (s.selectedSubjects.includes(subject)) {
+        selectedSubjects = s.selectedSubjects.filter(x => x !== subject);
+        live.delete(subject);
+      } else {
+        selectedSubjects = [...s.selectedSubjects, subject];
+        live.set(subject, emptyView(subject));
+      }
+      return { selectedSubjects, selectedSubject: selectedSubjects[selectedSubjects.length - 1] ?? null, selectedMessage: null, live };
+    }),
+  expandAll: false,
   expanded: new Set(),
+  isExpanded: path => {
+    const s = get();
+    return s.expandAll ? !s.expanded.has(path) : s.expanded.has(path);
+  },
   toggleExpanded: path =>
     set(s => {
       const next = new Set(s.expanded);
@@ -218,38 +286,67 @@ export const useStore = create<AppState>((set, get) => ({
       else next.add(path);
       return { expanded: next };
     }),
-  setExpanded: paths => set({ expanded: new Set(paths) }),
+  setExpanded: paths => set({ expandAll: false, expanded: new Set(paths) }),
+  expandAllBranches: () => set({ expandAll: true, expanded: new Set() }),
+  collapseAll: () => set({ expandAll: false, expanded: new Set() }),
 
-  messages: new Map(),
-  messageVersion: 0,
-  addMessages: (connId, msgs) => {
-    if (msgs.length === 0) return;
-    const state = get();
-    // The map is mutated in place for throughput; messageVersion drives re-renders.
-    for (const msg of msgs) {
-      const tagged: NatsMessage = { ...msg, connId };
-      const list = state.messages.get(msg.subject);
-      if (list) {
-        list.push(tagged);
-        if (list.length > MAX_MESSAGES_PER_SUBJECT) list.splice(0, list.length - MAX_MESSAGES_PER_SUBJECT);
-      } else {
-        state.messages.set(msg.subject, [tagged]);
+  live: new Map(),
+  ingestFeed: msgs => {
+    const prev = get().live;
+    if (prev.size === 0 || msgs.length === 0) return;
+    let next: Map<string, LiveView> | null = null;
+    for (const [subject, view] of prev) {
+      const prefix = `${subject}.`;
+      let exact: NatsMessage[] | null = null;
+      let below: NatsMessage[] | null = null;
+      for (const m of msgs) {
+        if (m.subject === subject) (exact ??= []).push(m);
+        else if (m.subject.startsWith(prefix)) (below ??= []).push(m);
       }
+      if (!exact && !below) continue;
+      const updated = { ...view };
+      if (exact) {
+        const merged = view.messages.concat(exact);
+        updated.messages = merged.length > MAX_SUBJECT_MESSAGES ? merged.slice(merged.length - MAX_SUBJECT_MESSAGES) : merged;
+      }
+      if (below) {
+        const merged = below.reverse().concat(view.branch);
+        updated.branch = merged.length > MAX_BRANCH_MESSAGES ? merged.slice(0, MAX_BRANCH_MESSAGES) : merged;
+      }
+      (next ??= new Map(prev)).set(subject, updated);
     }
-    set({ messageVersion: state.messageVersion + 1, totalMessages: state.totalMessages + msgs.length });
+    if (next) set({ live: next });
   },
-  clearMessages: connId => {
-    const s = get();
-    if (!connId) {
-      set({ messages: new Map(), messageVersion: s.messageVersion + 1, totalMessages: 0, selectedMessage: null });
-      return;
-    }
-    const messages = new Map<string, NatsMessage[]>();
-    for (const [subject, list] of s.messages) {
-      const kept = list.filter(m => m.connId !== connId);
-      if (kept.length) messages.set(subject, kept);
-    }
-    set({ messages, messageVersion: s.messageVersion + 1, selectedMessage: null });
+  applyHistory: (subject, res) => {
+    const view = get().live.get(subject);
+    if (!view) return;
+    // The feed may have delivered messages while the request was in flight.
+    const seen = new Set(res.messages.map(messageKey));
+    const extra = view.messages.filter(m => !seen.has(messageKey(m)));
+    let messages = res.messages.concat(extra);
+    if (extra.length) messages.sort(byArrival);
+    if (messages.length > MAX_SUBJECT_MESSAGES) messages = messages.slice(messages.length - MAX_SUBJECT_MESSAGES);
+
+    const seenBranch = new Set(res.branch.map(messageKey));
+    let branch = view.branch.filter(m => !seenBranch.has(messageKey(m))).concat(res.branch);
+    if (branch.length !== res.branch.length) branch.sort((a, b) => byArrival(b, a));
+    if (branch.length > MAX_BRANCH_MESSAGES) branch = branch.slice(0, MAX_BRANCH_MESSAGES);
+
+    const live = new Map(get().live);
+    live.set(subject, { subject, messages, branch, loading: false, error: null });
+    set({ live });
+  },
+  setLiveError: (subject, error) => {
+    const view = get().live.get(subject);
+    if (!view) return;
+    const live = new Map(get().live);
+    live.set(subject, { ...view, loading: false, error });
+    set({ live });
+  },
+  resetLive: () => {
+    const live = new Map<string, LiveView>();
+    for (const [subject, v] of get().live) live.set(subject, { ...v, messages: [], branch: [] });
+    set({ live, selectedMessage: null });
   },
   selectedMessage: null,
   setSelectedMessage: m => set({ selectedMessage: m }),
@@ -257,11 +354,8 @@ export const useStore = create<AppState>((set, get) => ({
   setSubscriptionStats: (connId, stats) => {
     const next = new Map(get().subscriptionStats);
     next.set(connId, stats);
-    set({ subscriptionStats: next });
+    set({ subscriptionStats: next, totalSubjects: countSubjects(next) });
   },
-  totalMessages: 0,
-  messagesPerSecond: 0,
-  setMessagesPerSecond: n => set({ messagesPerSecond: n }),
   totalSubjects: 0,
   publishOpen: false,
   setPublishOpen: b => set({ publishOpen: b }),
@@ -296,37 +390,15 @@ export const useJsDomainOverride = (connId: string | null) => useStore(s => (con
 
 /* Convenience selectors ---------------------------------------------------- */
 
-export const useActiveConnection = () =>
-  useStore(s => s.connections.find(c => c.id === s.activeConnId) ?? null);
+export const useActiveConnection = () => useStore(s => s.connections.find(c => c.id === s.activeConnId) ?? null);
 
-/**
- * Messages for the selected subject. The underlying array is mutated in place
- * for throughput, so a fresh copy is handed out per batch to keep memo/effect
- * dependencies honest.
- */
-export function useSubjectMessages(subject: string | null): NatsMessage[] {
-  const version = useStore(s => s.messageVersion);
-  const messages = useStore(s => s.messages);
-  return useMemo(() => (subject ? (messages.get(subject) ?? EMPTY).slice() : EMPTY), [messages, subject, version]);
-}
 const EMPTY: NatsMessage[] = [];
 
-/**
- * Recent messages from every subject below a branch (prefix match on
- * `branch.`), newest first. Used when a non-leaf tree node is selected.
- */
-export function useBranchMessages(branch: string | null, limit = 200): NatsMessage[] {
-  const version = useStore(s => s.messageVersion);
-  const messages = useStore(s => s.messages);
-  return useMemo(() => {
-    if (!branch) return EMPTY;
-    const prefix = `${branch}.`;
-    const out: NatsMessage[] = [];
-    for (const [subject, list] of messages) {
-      if (subject.startsWith(prefix)) for (const m of list) out.push(m);
-    }
-    out.sort((a, b) => b.timestamp - a.timestamp);
-    return out.length > limit ? out.slice(0, limit) : out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, branch, limit, version]);
-}
+/** Messages on exactly a selected subject, oldest first. */
+export const useSubjectMessages = (subject: string | null): NatsMessage[] => useStore(s => (subject ? s.live.get(subject)?.messages : undefined) ?? EMPTY);
+
+/** Newest messages below a selected subject, newest first. */
+export const useBranchMessages = (subject: string | null): NatsMessage[] => useStore(s => (subject ? s.live.get(subject)?.branch : undefined) ?? EMPTY);
+
+/** The live view of a selected subject, if any. */
+export const useLiveView = (subject: string | null): LiveView | undefined => useStore(s => (subject ? s.live.get(subject) : undefined));

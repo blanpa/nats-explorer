@@ -15,16 +15,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 20
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter shared build
-      - run: pnpm --filter client typecheck
-      - run: pnpm --filter client test
-      - run: pnpm --filter client build
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run --filter shared build
+      - run: bun run --filter client typecheck
+      - run: bun run --filter client test
+      - run: bun run --filter client build
       - uses: actions/upload-artifact@v4
         with:
           name: client-dist
@@ -39,6 +38,8 @@ jobs:
           go-version-file: go-server/go.mod
           cache-dependency-path: go-server/go.sum
       - run: cd go-server && test -z "$(gofmt -l .)"
+      # Catches dependencies that a removed feature left behind in go.mod.
+      - run: cd go-server && go mod tidy && git diff --exit-code go.mod go.sum
       - run: cd go-server && go vet ./...
       - run: cd go-server && go test -race -count=1 ./...
       - run: cd go-server && CGO_ENABLED=0 go build -o ../dist/nats-explorer .
@@ -52,12 +53,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 20
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          bun-version: latest
+      - run: bun install --frozen-lockfile
       - uses: actions/download-artifact@v4
         with:
           name: client-dist
@@ -71,10 +70,10 @@ jobs:
       - name: Start NATS Explorer
         run: |
           chmod +x dist/nats-explorer
-          PORT=3002 PUBLIC_PATH=$PWD/client/dist nohup dist/nats-explorer > server.log 2>&1 &
+          PORT=3002 PUBLIC_PATH=$PWD/client/dist HISTORY_DB=$PWD/history.db nohup dist/nats-explorer > server.log 2>&1 &
           for i in $(seq 1 30); do curl -sf localhost:3002/api/auth && break; sleep 1; done
-      - run: pnpm --filter e2e exec playwright install --with-deps chromium
-      - run: pnpm --filter e2e test
+      - run: cd e2e && bunx playwright install --with-deps chromium
+      - run: bun run --filter e2e test
         env:
           CI: 'true'
           NE_URL: http://localhost:3002
@@ -86,6 +85,20 @@ jobs:
         with:
           name: playwright-report
           path: e2e/playwright-report
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Front matter, {% link %} targets, images and anchors. Cheap, and it
+      # names the broken thing instead of failing somewhere in a Liquid trace.
+      - run: scripts/check-docs.sh
+      # The real Pages build, so a Liquid or YAML error fails here and not on
+      # the deployment after the merge.
+      - uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./docs
+          destination: ./_site
 
   desktop-linux:
     needs: [client]

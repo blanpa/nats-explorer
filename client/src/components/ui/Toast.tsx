@@ -62,7 +62,7 @@ export function Toaster() {
               <div className="text-sm font-medium text-fg break-words">{item.title}</div>
               {item.detail && <div className="text-xs text-muted mt-0.5 break-words font-mono">{item.detail}</div>}
             </div>
-            <button className="text-faint hover:text-fg shrink-0" onClick={() => dismiss(item.id)} aria-label="Dismiss">
+            <button type="button" className="text-faint hover:text-fg shrink-0" onClick={() => dismiss(item.id)} aria-label="Dismiss">
               <X size={13} />
             </button>
           </div>

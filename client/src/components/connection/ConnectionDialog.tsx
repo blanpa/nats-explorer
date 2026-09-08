@@ -1,65 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Plug, Plus, Trash2, Unplug, Upload } from 'lucide-react';
-import type { AuthMethod } from 'shared';
+import { useEffect, useMemo, useState } from 'react';
+import { Plug, Trash2, Unplug } from 'lucide-react';
+import { newSavedConnection, serverLabel, type SavedConnection } from '../../lib/savedConnections';
+import { appInfo } from '../../lib/storage';
 import { useStore } from '../../store';
 import { useSavedConnections } from '../../store/savedConnections';
-import { newSavedConnection, serverLabel, SYSTEM_TOPICS, type SavedConnection } from '../../lib/savedConnections';
-import { cn, parseList } from '../../lib/utils';
-import { appInfo } from '../../lib/storage';
 import { Button } from '../ui/Button';
-import { Checkbox, Field, Input, Select, Textarea } from '../ui/Input';
 import { confirm, Dialog } from '../ui/Dialog';
-import { Badge } from '../ui/misc';
+import ConnectionForm from './ConnectionForm';
+import SavedConnectionList from './SavedConnectionList';
 
-const AUTH_OPTIONS: { value: AuthMethod; label: string }[] = [
-  { value: 'none', label: 'None' },
-  { value: 'token', label: 'Token' },
-  { value: 'userpass', label: 'Username / Password' },
-  { value: 'nkey', label: 'NKey seed' },
-  { value: 'jwt', label: 'Credentials file (JWT)' },
-];
-
-/** Summarises what a PEM blob contains, e.g. "1 CERTIFICATE". */
-function describePem(pem: string): string {
-  const kinds = new Map<string, number>();
-  for (const m of pem.matchAll(/-----BEGIN ([A-Z ]+)-----/g)) kinds.set(m[1], (kinds.get(m[1]) ?? 0) + 1);
-  if (kinds.size === 0) return 'no PEM block found';
-  return [...kinds].map(([k, n]) => `${n} ${k}`).join(', ');
-}
-
-function PemField({ label, hint, value, onChange, placeholder }: { label: string; hint?: string; value: string; onChange: (v: string) => void; placeholder: string }) {
-  const fileRef = useRef<HTMLInputElement>(null);
-  return (
-    <Field label={label} hint={hint}>
-      <div className="flex flex-col gap-1">
-        <Textarea rows={3} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} className="text-xs" spellCheck={false} />
-        <div className="flex items-center gap-1 text-xs">
-          <Button size="xs" variant="ghost" icon={<Upload size={12} />} onClick={() => fileRef.current?.click()}>
-            Load file…
-          </Button>
-          {value.trim() && (
-            <Button size="xs" variant="ghost" onClick={() => onChange('')}>
-              Clear
-            </Button>
-          )}
-          {value.trim() && <span className={cn('ml-auto truncate', /BEGIN/.test(value) ? 'text-faint' : 'text-warn')}>{describePem(value)}</span>}
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".pem,.crt,.cer,.key,.txt,application/x-pem-file,application/x-x509-ca-cert"
-            className="hidden"
-            onChange={async e => {
-              const f = e.target.files?.[0];
-              if (f) onChange(await f.text());
-              e.target.value = '';
-            }}
-          />
-        </div>
-      </div>
-    </Field>
-  );
-}
-
+/** Manage saved connections: pick one, edit it, connect or disconnect. */
 export default function ConnectionDialog() {
   const { open, editId } = useStore(s => s.connectionsDialog);
   const close = useStore(s => s.closeConnectionsDialog);
@@ -76,6 +26,7 @@ export default function ConnectionDialog() {
   const [dirty, setDirty] = useState(false);
 
   // Pick the initial selection whenever the dialog opens.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the dialog picks its selection when it opens, not when the saved list changes
   useEffect(() => {
     if (!open) return;
     const initial = editId ?? useStore.getState().activeConnId ?? saved[0]?.id ?? null;
@@ -89,21 +40,28 @@ export default function ConnectionDialog() {
       setDraft(fresh);
     }
     setDirty(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editId]);
 
   const liveById = useMemo(() => new Map(connections.map(c => [c.id, c])), [connections]);
   const isNew = !!draft && !saved.some(s => s.id === draft.id);
 
   const select = async (item: SavedConnection) => {
-    if (dirty && !(await confirm({ title: 'Discard changes?', message: 'You have unsaved changes to the current connection.', confirmLabel: 'Discard', danger: true }))) return;
+    if (
+      dirty &&
+      !(await confirm({ title: 'Discard changes?', message: 'You have unsaved changes to the current connection.', confirmLabel: 'Discard', danger: true }))
+    )
+      return;
     setSelectedId(item.id);
     setDraft({ ...item });
     setDirty(false);
   };
 
   const addNew = async () => {
-    if (dirty && !(await confirm({ title: 'Discard changes?', message: 'You have unsaved changes to the current connection.', confirmLabel: 'Discard', danger: true }))) return;
+    if (
+      dirty &&
+      !(await confirm({ title: 'Discard changes?', message: 'You have unsaved changes to the current connection.', confirmLabel: 'Discard', danger: true }))
+    )
+      return;
     const fresh = newSavedConnection();
     setSelectedId(fresh.id);
     setDraft(fresh);
@@ -119,7 +77,12 @@ export default function ConnectionDialog() {
     if (!draft) return null;
     const servers = draft.servers.map(s => s.trim()).filter(Boolean);
     if (servers.length === 0) return null;
-    return { ...draft, servers, name: draft.name.trim() || servers[0].replace(/^nats:\/\//, ''), subscriptions: draft.subscriptions.length ? draft.subscriptions : ['>'] };
+    return {
+      ...draft,
+      servers,
+      name: draft.name.trim() || servers[0].replace(/^nats:\/\//, ''),
+      subscriptions: draft.subscriptions.length ? draft.subscriptions : ['>'],
+    };
   };
 
   const save = () => {
@@ -138,7 +101,15 @@ export default function ConnectionDialog() {
 
   const del = async () => {
     if (!draft) return;
-    if (!(await confirm({ title: `Delete "${draft.name || serverLabel(draft)}"?`, message: 'The saved connection and its credentials are removed from this browser.', confirmLabel: 'Delete', danger: true }))) return;
+    if (
+      !(await confirm({
+        title: `Delete "${draft.name || serverLabel(draft)}"?`,
+        message: 'The saved connection and its credentials are removed from this browser.',
+        confirmLabel: 'Delete',
+        danger: true,
+      }))
+    )
+      return;
     if (liveById.has(draft.id)) await disconnect(draft.id);
     remove(draft.id);
     const next = saved.find(s => s.id !== draft.id) ?? null;
@@ -162,7 +133,11 @@ export default function ConnectionDialog() {
       open={open}
       onOpenChange={o => !o && close()}
       title="Connections"
-      description={appInfo.storage === 'file' ? 'Saved connections live in the app settings on this computer.' : 'Saved connections live in this browser. Credentials are stored unencrypted in local storage.'}
+      description={
+        appInfo.storage === 'file'
+          ? 'Saved connections live in the app settings on this computer.'
+          : 'Saved connections live in this browser. Credentials are stored unencrypted in local storage.'
+      }
       width="xl"
       flush
       className="h-[640px]"
@@ -192,215 +167,8 @@ export default function ConnectionDialog() {
       }
     >
       <div className="flex h-full min-h-0">
-        {/* Saved list */}
-        <div className="w-60 shrink-0 border-r border-line flex flex-col min-h-0">
-          <div className="flex items-center justify-between px-3 h-10 border-b border-line">
-            <span className="pane-title">Saved</span>
-            <Button size="xs" variant="ghost" icon={<Plus size={12} />} onClick={addNew}>
-              New
-            </Button>
-          </div>
-          <div className="flex-1 overflow-auto py-1">
-            {saved.map(item => {
-              const l = liveById.get(item.id);
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => select(item)}
-                  className={cn('list-row w-full text-left', selectedId === item.id && 'list-row-active')}
-                >
-                  <span className="status-dot" style={{ background: l?.connected ? l.color : l ? 'rgb(var(--warn))' : 'rgb(var(--fg-faint))' }} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate">{item.name || serverLabel(item)}</span>
-                    <span className="block truncate text-xs text-muted font-mono">{serverLabel(item)}</span>
-                  </span>
-                </button>
-              );
-            })}
-            {isNew && draft && (
-              <div className="list-row list-row-active">
-                <span className="status-dot bg-faint" />
-                <span className="min-w-0 flex-1 truncate italic text-muted">{draft.name || 'New connection'}</span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Form */}
-        {draft && (
-          <form
-            className="flex-1 min-w-0 overflow-auto px-5 py-4 flex flex-col gap-4"
-            onSubmit={e => {
-              e.preventDefault();
-              saveAndConnect();
-            }}
-          >
-            {live && (
-              <div className="flex items-center gap-2 text-sm">
-                <Badge tone={live.connected ? 'ok' : 'warn'}>{live.connected ? 'Connected' : live.reconnecting ? 'Reconnecting' : 'Disconnected'}</Badge>
-                {live.server && <span className="text-xs text-muted font-mono">{live.server}</span>}
-                {live.lastError && <span className="text-xs text-danger font-mono truncate">{live.lastError}</span>}
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field label="Name">
-                <Input value={draft.name} onChange={e => patch({ name: e.target.value })} placeholder="Production cluster" autoFocus={isNew} />
-              </Field>
-              <Field label="Authentication">
-                <Select value={draft.authMethod} onChange={e => patch({ authMethod: e.target.value as AuthMethod })}>
-                  {AUTH_OPTIONS.map(o => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            </div>
-
-            <Field label="Servers" hint="One URL per line or comma separated. Scheme defaults to nats://." required>
-              <Textarea rows={2} value={draft.servers.join('\n')} onChange={e => patch({ servers: e.target.value.split('\n') })} placeholder="nats://localhost:4222" />
-            </Field>
-
-            {draft.authMethod === 'token' && (
-              <Field label="Token">
-                <Input type="password" mono value={draft.token ?? ''} onChange={e => patch({ token: e.target.value })} autoComplete="off" />
-              </Field>
-            )}
-            {draft.authMethod === 'userpass' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Field label="Username">
-                  <Input value={draft.user ?? ''} onChange={e => patch({ user: e.target.value })} autoComplete="off" />
-                </Field>
-                <Field label="Password">
-                  <Input type="password" value={draft.pass ?? ''} onChange={e => patch({ pass: e.target.value })} autoComplete="new-password" />
-                </Field>
-              </div>
-            )}
-            {draft.authMethod === 'nkey' && (
-              <Field label="NKey seed" hint="User seed starting with SU…">
-                <Input type="password" mono value={draft.nkeySeed ?? ''} onChange={e => patch({ nkeySeed: e.target.value })} placeholder="SUA…" autoComplete="off" />
-              </Field>
-            )}
-            {draft.authMethod === 'jwt' && (
-              <Field label="Credentials file content" hint="Paste the full .creds file including the JWT and the seed.">
-                <Textarea rows={5} value={draft.creds ?? ''} onChange={e => patch({ creds: e.target.value })} placeholder="-----BEGIN NATS USER JWT-----" />
-              </Field>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field label="Subscriptions" hint="Subjects the explorer subscribes to. Use > for everything.">
-                <Input mono value={draft.subscriptions.join(', ')} onChange={e => patch({ subscriptions: parseList(e.target.value) })} placeholder=">" />
-              </Field>
-              <Field label="Monitoring URL" hint="Optional. Defaults to http://<host>:8222 of the first server.">
-                <Input mono value={draft.monitoringUrl ?? ''} onChange={e => patch({ monitoringUrl: e.target.value })} placeholder="http://localhost:8222" />
-              </Field>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field label="JetStream domain" hint="Optional. Streams, KV and objects of this domain, e.g. a leaf node reached through the hub. Can be switched per module later.">
-                <Input mono value={draft.jsDomain ?? ''} onChange={e => patch({ jsDomain: e.target.value })} placeholder="leaf-a" />
-              </Field>
-              <Field label="JetStream API prefix" hint="Optional, for imported JetStream APIs. Takes precedence over the domain.">
-                <Input mono value={draft.jsApiPrefix ?? ''} onChange={e => patch({ jsApiPrefix: e.target.value })} placeholder="$JS.leaf-a.API" />
-              </Field>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex flex-col gap-2">
-                <span className="text-xs font-medium text-muted">Transport</span>
-                <Checkbox label="Use TLS" description="Required for tls:// servers with certificates." checked={!!draft.tls} onChange={e => patch({ tls: e.target.checked })} />
-              </div>
-              <div className="flex flex-col gap-2">
-                <span className="text-xs font-medium text-muted">System subjects</span>
-                {SYSTEM_TOPICS.map(st => (
-                  <Checkbox
-                    key={st.key}
-                    label={
-                      <span className="font-mono">
-                        {st.subject}
-                      </span>
-                    }
-                    description={st.description}
-                    checked={!!draft.sysTopics?.[st.key]}
-                    onChange={e => patch({ sysTopics: { ...draft.sysTopics, [st.key]: e.target.checked } })}
-                  />
-                ))}
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3 rounded border border-line p-3">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Field label="System account" hint="Optional. Credentials for the $SYS account enable the Cluster module: every node, the JetStream meta cluster and stream placement, including leaf nodes.">
-                  <Select value={draft.sysAuthMethod ?? 'none'} onChange={e => patch({ sysAuthMethod: e.target.value as AuthMethod })}>
-                    {AUTH_OPTIONS.map(o => (
-                      <option key={o.value} value={o.value}>
-                        {o.value === 'none' ? 'Not configured' : o.label}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                {draft.sysAuthMethod === 'token' && (
-                  <Field label="System token">
-                    <Input type="password" mono value={draft.sysToken ?? ''} onChange={e => patch({ sysToken: e.target.value })} autoComplete="off" />
-                  </Field>
-                )}
-                {draft.sysAuthMethod === 'userpass' && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="System user">
-                      <Input mono value={draft.sysUser ?? ''} onChange={e => patch({ sysUser: e.target.value })} autoComplete="off" />
-                    </Field>
-                    <Field label="System password">
-                      <Input type="password" mono value={draft.sysPass ?? ''} onChange={e => patch({ sysPass: e.target.value })} autoComplete="off" />
-                    </Field>
-                  </div>
-                )}
-                {draft.sysAuthMethod === 'nkey' && (
-                  <Field label="System NKey seed">
-                    <Input type="password" mono value={draft.sysNkeySeed ?? ''} onChange={e => patch({ sysNkeySeed: e.target.value })} placeholder="SUA…" autoComplete="off" />
-                  </Field>
-                )}
-                {draft.sysAuthMethod === 'jwt' && (
-                  <Field label="System credentials file content">
-                    <Textarea rows={4} value={draft.sysCreds ?? ''} onChange={e => patch({ sysCreds: e.target.value })} placeholder="-----BEGIN NATS USER JWT-----" />
-                  </Field>
-                )}
-              </div>
-              {live?.sysError && <span className="text-xs text-danger">System account: {live.sysError}</span>}
-              {live?.sysAccount && <span className="text-xs text-ok">System account connected.</span>}
-            </div>
-
-            {draft.tls && (
-              <div className="flex flex-col gap-3 rounded border border-line p-3">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <PemField label="CA certificate" hint="Trust this CA instead of the system store." value={draft.tlsCa ?? ''} onChange={v => patch({ tlsCa: v })} placeholder="-----BEGIN CERTIFICATE-----" />
-                  <PemField label="Client certificate" hint="For mutual TLS; needs the key as well." value={draft.tlsCert ?? ''} onChange={v => patch({ tlsCert: v })} placeholder="-----BEGIN CERTIFICATE-----" />
-                  <PemField label="Client key" value={draft.tlsKey ?? ''} onChange={v => patch({ tlsKey: v })} placeholder="-----BEGIN PRIVATE KEY-----" />
-                </div>
-                <Checkbox
-                  label="Skip server certificate verification"
-                  description="Insecure: accepts any server certificate. Only for test environments."
-                  checked={!!draft.tlsInsecure}
-                  onChange={e => patch({ tlsInsecure: e.target.checked })}
-                />
-              </div>
-            )}
-
-            <div className="flex items-start gap-2 text-xs text-muted rounded border border-warn/30 bg-warn/5 px-3 py-2 mt-auto">
-              <AlertTriangle size={13} className="text-warn shrink-0 mt-0.5" />
-              <span>
-                {appInfo.storage === 'file' ? (
-                  <>
-                    Connections are stored in <span className="font-mono">{appInfo.configDir}</span>. Tokens, passwords, seeds and TLS keys go to{' '}
-                    {appInfo.secrets === 'keyring' ? 'the system keyring' : <>a separate <span className="font-mono">secrets.json</span> readable only by your user account</>}.
-                  </>
-                ) : (
-                  <>Tokens, passwords, seeds and TLS keys are saved in this browser&apos;s local storage without encryption and sent to the NATS Explorer backend on connect. Do not use this on a shared machine with production credentials.</>
-                )}
-              </span>
-            </div>
-          </form>
-        )}
+        <SavedConnectionList items={saved} live={liveById} selectedId={selectedId} draft={isNew ? draft : null} onSelect={select} onNew={addNew} />
+        {draft && <ConnectionForm draft={draft} isNew={isNew} live={live} patch={patch} onSubmit={saveAndConnect} />}
       </div>
     </Dialog>
   );

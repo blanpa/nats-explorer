@@ -53,6 +53,8 @@ export interface ConnectionStatus {
   sysError?: string;
   lastError?: string;
   reconnects: number;
+  /** an imported support bundle: recorded messages, nothing can be sent */
+  bundle?: boolean;
   connectedAt?: number;
 }
 

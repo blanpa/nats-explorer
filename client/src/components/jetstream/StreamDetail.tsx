@@ -12,10 +12,13 @@ import { toast } from '../ui/Toast';
 import StreamDialog from './StreamDialog';
 import StreamMessages from './StreamMessages';
 import ConsumerList from './ConsumerList';
+import Replication from './Replication';
+import { useCanWrite } from '../../lib/auth';
 
 type Tab = 'overview' | 'messages' | 'consumers';
 
 export default function StreamDetail() {
+  const canWrite = useCanWrite();
   const connId = useStore(s => s.activeConnId);
   const name = useStore(s => s.selectedStream);
   const setSelected = useStore(s => s.setSelectedStream);
@@ -23,19 +26,30 @@ export default function StreamDetail() {
   const [tab, setTab] = useState<Tab>('overview');
   const [editing, setEditing] = useState(false);
 
-  const { data: stream, error, loading, initial, reload, setData } = useAsync<StreamInfo>(
-    () => (connId && name ? api.getStream(connId, name) : null),
-    [connId, name],
-    { key: `stream:${connId}:${name}`, interval: 5000 },
-  );
+  const {
+    data: stream,
+    error,
+    loading,
+    initial,
+    reload,
+    setData,
+  } = useAsync<StreamInfo>(() => (connId && name ? api.getStream(connId, name) : null), [connId, name], { key: `stream:${connId}:${name}`, interval: 5000 });
 
-  if (!name) return <EmptyState icon={Layers} title="Select a stream" description="Streams persist messages for the subjects they capture. Pick one to inspect its state, messages and consumers." />;
+  if (!name) return <EmptyState icon={Layers} title="Select a stream" description="State, messages and consumers of a stream." />;
   if (initial && loading) return <LoadingState />;
   if (error && !stream) return <ErrorState title={`Cannot load stream ${name}`} message={error} action={<Button onClick={reload}>Retry</Button>} />;
   if (!stream || !connId) return null;
 
   const purge = async () => {
-    if (!(await confirm({ title: `Purge ${stream.name}?`, message: 'All messages in this stream are deleted. Consumers keep their configuration.', confirmLabel: 'Purge', danger: true }))) return;
+    if (
+      !(await confirm({
+        title: `Purge ${stream.name}?`,
+        message: 'All messages in this stream are deleted. Consumers keep their configuration.',
+        confirmLabel: 'Purge',
+        danger: true,
+      }))
+    )
+      return;
     try {
       await api.purgeStream(connId, stream.name);
       reload();
@@ -45,7 +59,15 @@ export default function StreamDetail() {
   };
 
   const del = async () => {
-    if (!(await confirm({ title: `Delete stream ${stream.name}?`, message: 'The stream, its messages and all consumers are removed permanently.', confirmLabel: 'Delete stream', danger: true }))) return;
+    if (
+      !(await confirm({
+        title: `Delete stream ${stream.name}?`,
+        message: 'The stream, its messages and all consumers are removed permanently.',
+        confirmLabel: 'Delete stream',
+        danger: true,
+      }))
+    )
+      return;
     try {
       await api.deleteStream(connId, stream.name);
       setSelected(null);
@@ -66,15 +88,19 @@ export default function StreamDetail() {
             <IconButton label="Refresh" loading={loading} onClick={reload}>
               <RefreshCw size={14} />
             </IconButton>
-            <Button variant="outline" icon={<Pencil size={13} />} onClick={() => setEditing(true)}>
-              Edit
-            </Button>
-            <Button variant="outline" icon={<Eraser size={13} />} onClick={purge} disabled={stream.denyPurge}>
-              Purge
-            </Button>
-            <Button variant="danger" icon={<Trash2 size={13} />} onClick={del}>
-              Delete
-            </Button>
+            {canWrite && (
+              <>
+                <Button variant="outline" icon={<Pencil size={13} />} onClick={() => setEditing(true)}>
+                  Edit
+                </Button>
+                <Button variant="outline" icon={<Eraser size={13} />} onClick={purge} disabled={stream.denyPurge}>
+                  Purge
+                </Button>
+                <Button variant="danger" icon={<Trash2 size={13} />} onClick={del}>
+                  Delete
+                </Button>
+              </>
+            )}
           </>
         }
       >
@@ -110,8 +136,17 @@ export default function StreamDetail() {
               <StatTile label="Size" value={formatBytes(st.bytes)} />
               <StatTile label="Subjects" value={formatNumber(st.numSubjects)} />
               <StatTile label="Consumers" value={st.consumerCount} />
-              <StatTile label="Sequence" value={`${formatNumber(st.firstSeq)} – ${formatNumber(st.lastSeq)}`} sub={st.numDeleted ? `${formatNumber(st.numDeleted)} deleted` : undefined} />
-              <StatTile label="Last message" value={st.messages ? formatDateTime(st.lastTs) : '–'} sub={st.messages ? `first ${formatDateTime(st.firstTs)}` : undefined} className="[&>div:nth-child(2)]:text-sm" />
+              <StatTile
+                label="Sequence"
+                value={`${formatNumber(st.firstSeq)} – ${formatNumber(st.lastSeq)}`}
+                sub={st.numDeleted ? `${formatNumber(st.numDeleted)} deleted` : undefined}
+              />
+              <StatTile
+                label="Last message"
+                value={st.messages ? formatDateTime(st.lastTs) : '–'}
+                sub={st.messages ? `first ${formatDateTime(st.firstTs)}` : undefined}
+                className="[&>div:nth-child(2)]:text-sm"
+              />
             </StatStrip>
 
             <div>
@@ -156,12 +191,12 @@ export default function StreamDetail() {
                     { label: 'Allow roll-up', value: stream.allowRollup ? 'yes' : 'no' },
                     { label: 'Deny delete / purge', value: `${stream.denyDelete ? 'yes' : 'no'} / ${stream.denyPurge ? 'yes' : 'no'}` },
                     { label: 'No ack', value: stream.noAck ? 'yes' : 'no' },
-                    ...(stream.mirror ? [{ label: 'Mirror of', value: stream.mirror, mono: true }] : []),
-                    ...(stream.sources?.length ? [{ label: 'Sources', value: stream.sources.join(', '), mono: true }] : []),
                   ]}
                 />
               </div>
             </div>
+
+            <Replication stream={stream} />
 
             {stream.cluster && (
               <div>
@@ -191,7 +226,15 @@ export default function StreamDetail() {
                         <tr key={r.name}>
                           <td className="font-mono">{r.name}</td>
                           <td>replica</td>
-                          <td>{r.offline ? <Badge tone="danger">offline</Badge> : r.current ? <Badge tone="ok">current</Badge> : <Badge tone="warn">catching up</Badge>}</td>
+                          <td>
+                            {r.offline ? (
+                              <Badge tone="danger">offline</Badge>
+                            ) : r.current ? (
+                              <Badge tone="ok">current</Badge>
+                            ) : (
+                              <Badge tone="warn">catching up</Badge>
+                            )}
+                          </td>
                           <td className="num">{formatNumber(r.lag)}</td>
                         </tr>
                       ))}
@@ -203,7 +246,7 @@ export default function StreamDetail() {
           </div>
         )}
         {tab === 'messages' && <StreamMessages connId={connId} stream={stream} onChanged={reload} />}
-        {tab === 'consumers' && <ConsumerList connId={connId} stream={stream.name} onChanged={reload} />}
+        {tab === 'consumers' && <ConsumerList connId={connId} stream={stream.name} streamLastSeq={stream.state.lastSeq} onChanged={reload} />}
       </div>
 
       {editing && (

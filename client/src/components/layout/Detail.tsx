@@ -10,6 +10,8 @@ import ObjStoreView from '../objectstore/ObjStoreView';
 import ServiceDetail from '../services/ServiceDetail';
 import MonitoringDashboard from '../monitoring/MonitoringDashboard';
 import ClusterView from '../cluster/ClusterView';
+import AlertsView from '../alerts/AlertsView';
+import AuditView from '../audit/AuditView';
 import TemplateEditor from '../requests/TemplateEditor';
 
 function NoConnection() {
@@ -23,7 +25,7 @@ function NoConnection() {
     <EmptyState
       icon={Cable}
       title="Not connected"
-      description="Connect to a NATS server to browse subjects, JetStream, Key-Value and Object stores."
+      description="Connect to a server to get started."
       action={
         <div className="flex items-center gap-2">
           {first && (
@@ -49,6 +51,10 @@ export default function Detail() {
     <main className="flex-1 min-w-0 min-h-0 flex flex-col bg-canvas">
       {module === 'requests' ? (
         <TemplateEditor />
+      ) : module === 'alerts' ? (
+        <AlertsView />
+      ) : module === 'audit' ? (
+        <AuditView />
       ) : !loaded ? null : !hasConnection ? (
         <NoConnection />
       ) : (

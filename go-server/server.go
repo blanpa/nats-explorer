@@ -8,13 +8,18 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/gorilla/websocket"
 
+	"nats-explorer/internal/auth"
 	"nats-explorer/internal/connection"
+	"nats-explorer/internal/filter"
 	"nats-explorer/internal/handler"
+	"nats-explorer/internal/history"
+	"nats-explorer/internal/message"
 	"nats-explorer/internal/settings"
 	"nats-explorer/internal/subscription"
 	"nats-explorer/internal/ws"
@@ -50,34 +55,87 @@ var upgrader = websocket.Upgrader{
 // app and tests.
 type serverConfig struct {
 	authToken string
+	// accounts for the users mode; empty keeps token or no auth
+	users []auth.User
 	// "server" or "desktop"; shown to the UI
 	mode string
 	// file-backed UI settings; nil keeps everything in the browser
 	settings *settings.Store
+	// memory budget for the message history; 0 picks the default (256 MB)
+	historyBytes int
+	// expose /debug/pprof
+	pprof bool
+	// SQLite file for persistent history; empty keeps history in memory only
+	historyDB        string
+	historyRetention time.Duration
+	// open the saved connections flagged for it when the server starts
+	autoConnect bool
 }
 
 // createServer builds the chi router with the REST API, the websocket feed
 // and (optionally) the static UI from staticFS.
-func createServer(staticFS fs.FS, cfg serverConfig) http.Handler {
-	authToken := cfg.authToken
+// appServer is the router together with everything that has to be shut down
+// with it: the subscription managers and their NATS connections, the
+// persistent history and whatever the features started. Without a Close the
+// goroutines outlive the server that owns them, which shows up as leaks in
+// tests and as an unflushed history on exit.
+type appServer struct {
+	http.Handler
+	once  sync.Once
+	close func()
+}
+
+// Close stops everything the server started. Safe to call more than once.
+func (s *appServer) Close() {
+	s.once.Do(s.close)
+}
+
+func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
+	authSvc := auth.New(cfg.authToken, cfg.users)
 	if cfg.mode == "" {
 		cfg.mode = "server"
 	}
 	hub := ws.NewHub()
+	var hist history.Store = history.NewMemStore(cfg.historyBytes, 0)
+	var histDB *history.DB
+	if cfg.historyDB != "" {
+		db, err := history.OpenDB(cfg.historyDB, cfg.historyRetention)
+		if err != nil {
+			log.Fatalf("history db %s: %v", cfg.historyDB, err)
+		}
+		log.Printf("Persistent history in %s (retention %s)", cfg.historyDB, cfg.historyRetention)
+		histDB = db
+		hist = &history.Tee{MemStore: hist.(*history.MemStore), DB: db}
+	}
 
 	var subMu sync.RWMutex
 	subManagers := make(map[string]*subscription.Manager)
-	// Subject each browser tab is looking at; applied to every manager so the
-	// live feed spends its budget where the user is looking.
-	clientFocus := make(map[*ws.Client]string)
+	// What each browser tab looks at: the focused subject (its messages are
+	// streamed) and the tree view (which nodes are sent). Applied to every
+	// manager, including ones started later.
+	clientFocus := make(map[*ws.Client][]string)
+	clientView := make(map[*ws.Client]subscription.View)
 
 	store := connection.NewStore()
 	store.SetOnChange(func() {
-		hub.Broadcast(map[string]interface{}{
-			"type": "connections",
-			"data": store.AllStatuses(),
-		})
+		hub.Broadcast(connectionsOf(store.AllStatuses()))
 	})
+
+	d := &deps{cfg: cfg, store: store, history: hist, db: histDB, hub: hub, auth: authSvc, settings: cfg.settings}
+	d.managers = func() map[string]*subscription.Manager {
+		subMu.RLock()
+		defer subMu.RUnlock()
+		out := make(map[string]*subscription.Manager, len(subManagers))
+		for id, mgr := range subManagers {
+			out[id] = mgr
+		}
+		return out
+	}
+	d.manager = func(connID string) *subscription.Manager {
+		subMu.RLock()
+		defer subMu.RUnlock()
+		return subManagers[connID]
+	}
 
 	stopManager := func(connID string) {
 		subMu.Lock()
@@ -91,49 +149,88 @@ func createServer(staticFS fs.FS, cfg serverConfig) http.Handler {
 		}
 	}
 
+	// wireManager attaches the browser callbacks and the feature hooks.
+	wireManager := func(connID string, mgr *subscription.Manager) {
+		mgr.History = hist
+		// The feed is per browser tab: only the subject or branch it
+		// looks at, everything else waits in the history.
+		mgr.OnBatch = func(c any, cID string, msgs []message.NatsMessage) {
+			hub.SendToClient(c.(*ws.Client), messageBatchEvent{Type: "message-batch", ConnID: cID, Data: msgs})
+		}
+		mgr.OnStats = func(cID string, stats subscription.Stats) {
+			hub.Broadcast(statsEvent{Type: "stats", ConnID: cID, Data: stats})
+		}
+		mgr.OnTree = func(c any, cID string, up *subscription.TreeUpdate) {
+			hub.SendToClient(c.(*ws.Client), subjectTreeEvent{Type: "subject-tree", ConnID: cID, Full: up.Full, Data: up.Entries, Removed: up.Removed})
+		}
+		if len(d.recordHooks) > 0 {
+			hooks := d.recordHooks
+			mgr.OnRecord = func(cID string, r *message.Record) {
+				for _, h := range hooks {
+					h(cID, r)
+				}
+			}
+		}
+	}
+
+	// addManager makes a started manager visible to the tabs.
+	addManager := func(connID string, mgr *subscription.Manager) {
+		subMu.Lock()
+		subManagers[connID] = mgr
+		for c, subject := range clientFocus {
+			mgr.SetFocus(c, subject)
+		}
+		for c, view := range clientView {
+			mgr.SetView(c, view)
+		}
+		subMu.Unlock()
+	}
+	d.wireManager = wireManager
+	d.addManager = addManager
+	d.removeManager = stopManager
+
+	// startManager subscribes to the connection's patterns and feeds the
+	// browsers; used on connect and whenever the patterns change.
+	startManager := func(connID string, cfg connection.Config) {
+		nc, err := store.GetNC(connID)
+		if err != nil {
+			return
+		}
+		mgr := subscription.NewManager(connID)
+		wireManager(connID, mgr)
+		subjects := cfg.Subscriptions
+		if len(subjects) == 0 {
+			subjects = []string{">"}
+		}
+		if err := mgr.Start(nc, subjects); err != nil {
+			log.Printf("subscription manager for %s: %v", connID, err)
+			return
+		}
+		addManager(connID, mgr)
+	}
+
 	connHandler := &handler.ConnectionHandler{
-		Store: store,
-		OnConnected: func(connID string, cfg connection.Config) {
-			nc, err := store.GetNC(connID)
-			if err != nil {
-				return
-			}
-
-			mgr := subscription.NewManager(connID)
-			mgr.OnBatch = func(cID string, msgs []subscription.NatsMessage, stats subscription.Stats) {
-				hub.Broadcast(map[string]interface{}{
-					"type":   "message-batch",
-					"connId": cID,
-					"data":   msgs,
-					"stats":  stats,
-				})
-			}
-			mgr.OnTree = func(cID string, full bool, entries []subscription.SubjectEntry) {
-				hub.Broadcast(map[string]interface{}{
-					"type":   "subject-tree",
-					"connId": cID,
-					"full":   full,
-					"data":   entries,
-				})
-			}
-
-			subjects := cfg.Subscriptions
-			if len(subjects) == 0 {
-				subjects = []string{">"}
-			}
-			if err := mgr.Start(nc, subjects); err != nil {
-				log.Printf("subscription manager for %s: %v", connID, err)
-				return
-			}
-
-			subMu.Lock()
-			subManagers[connID] = mgr
-			for c, subject := range clientFocus {
-				mgr.SetFocus(c, subject)
-			}
-			subMu.Unlock()
-		},
+		Store:          store,
+		OnConnected:    startManager,
 		OnDisconnected: stopManager,
+		OnSubscriptionsChanged: func(connID string, cfg connection.Config) {
+			// Swap the patterns in place: what stays keeps its history, its
+			// counters and its place in the tree.
+			subMu.RLock()
+			mgr := subManagers[connID]
+			subMu.RUnlock()
+			nc, err := store.GetNC(connID)
+			if mgr == nil || err != nil {
+				stopManager(connID)
+				startManager(connID, cfg)
+				return
+			}
+			if err := mgr.SetSubjects(nc, cfg.Subscriptions); err != nil {
+				log.Printf("changing subscriptions of %s: %v", connID, err)
+				stopManager(connID)
+				startManager(connID, cfg)
+			}
+		},
 	}
 
 	publishHandler := &handler.PublishHandler{Store: store}
@@ -145,24 +242,67 @@ func createServer(staticFS fs.FS, cfg serverConfig) http.Handler {
 	clusterHandler := &handler.ClusterHandler{Store: store}
 	svcHandler := &handler.ServicesHandler{Store: store}
 	liveHandler := handler.NewLiveHandler(store)
+	histHandler := &handler.HistoryHandler{
+		Store:   store,
+		History: hist,
+		DB:      histDB,
+		// A cleared subject leaves the tree and the counters as well, so it
+		// starts over instead of showing numbers with no messages behind them.
+		OnCleared: func(connID string, subjects []string) {
+			subMu.RLock()
+			mgr := subManagers[connID]
+			subMu.RUnlock()
+			if mgr != nil {
+				mgr.Forget(subjects)
+			}
+		},
+	}
 
 	hub.OnMessage = func(c *ws.Client, data []byte) {
 		var cmd struct {
-			Type    string `json:"type"`
-			Subject string `json:"subject"`
+			Type string `json:"type"`
+			// focus: the subjects to stream; "subject" is the older single form.
+			Subject  string   `json:"subject"`
+			Subjects []string `json:"subjects"`
+			subscription.View
 		}
-		if json.Unmarshal(data, &cmd) == nil && cmd.Type == "focus" {
-			subMu.Lock()
-			if cmd.Subject == "" {
-				delete(clientFocus, c)
-			} else {
-				clientFocus[c] = cmd.Subject
+		if err := json.Unmarshal(data, &cmd); err == nil {
+			switch cmd.Type {
+			case "focus":
+				subjects := cmd.Subjects
+				if len(subjects) == 0 && cmd.Subject != "" {
+					subjects = []string{cmd.Subject}
+				}
+				subMu.Lock()
+				clientFocus[c] = subjects
+				for _, mgr := range subManagers {
+					mgr.SetFocus(c, subjects)
+				}
+				subMu.Unlock()
+				return
+			case "view":
+				// A broken expression must say so; an empty tree looks like
+				// "nothing matches".
+				if expr := strings.TrimSpace(cmd.View.Expr); expr != "" {
+					if _, err := filter.Compile(expr); err != nil {
+						hub.SendToClient(c, filterErrorEvent{Type: "filter-error", Error: err.Error()})
+						return
+					}
+				}
+				hub.SendToClient(c, filterErrorEvent{Type: "filter-error", Error: ""})
+				subMu.Lock()
+				clientView[c] = cmd.View
+				managers := make([]*subscription.Manager, 0, len(subManagers))
+				for _, mgr := range subManagers {
+					managers = append(managers, mgr)
+				}
+				subMu.Unlock()
+				// Outside the lock: SetView emits the delta right away.
+				for _, mgr := range managers {
+					mgr.SetView(c, cmd.View)
+				}
+				return
 			}
-			for _, mgr := range subManagers {
-				mgr.SetFocus(c, cmd.Subject)
-			}
-			subMu.Unlock()
-			return
 		}
 		liveHandler.HandleCommand(c, data, func(ev interface{}) { hub.SendToClient(c, ev) })
 	}
@@ -170,8 +310,9 @@ func createServer(staticFS fs.FS, cfg serverConfig) http.Handler {
 		liveHandler.StopAll(c)
 		subMu.Lock()
 		delete(clientFocus, c)
+		delete(clientView, c)
 		for _, mgr := range subManagers {
-			mgr.ClearFocus(c)
+			mgr.RemoveClient(c)
 		}
 		subMu.Unlock()
 	}
@@ -181,10 +322,32 @@ func createServer(staticFS fs.FS, cfg serverConfig) http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Compress(5, "application/json"))
 
-	r.Get("/api/auth", handler.AuthInfo(authToken))
+	// PPROF=1 exposes Go's profiler under /debug/pprof for load investigations.
+	if cfg.pprof {
+		r.Mount("/debug", middleware.Profiler())
+	}
+
+	r.Get("/api/auth", authSvc.Info)
+	r.Post("/api/login", authSvc.LoginHandler)
+	r.Post("/api/logout", authSvc.LogoutHandler)
+	// Prometheus exposition of the explorer's own counters (protected like the API).
+	r.With(authSvc.Require).Get("/metrics", func(w http.ResponseWriter, req *http.Request) {
+		subMu.RLock()
+		managers := make(map[string]*subscription.Manager, len(subManagers))
+		for id, mgr := range subManagers {
+			managers[id] = mgr
+		}
+		subMu.RUnlock()
+		writeMetrics(w, store.AllStatuses(), managers, hub.ClientCount(), histDB)
+	})
 	// What kind of installation this is, so the UI knows where state lives.
 	r.Get("/api/app", func(w http.ResponseWriter, req *http.Request) {
-		info := map[string]interface{}{"mode": cfg.mode, "storage": "browser", "version": version}
+		// `source` is the AGPL offer of source for what is running here; a
+		// modified build points SOURCE_URL at its own repository.
+		info := map[string]interface{}{"mode": cfg.mode, "storage": "browser", "version": version, "commit": commit, "source": sourceURL(), "historyDb": histDB != nil}
+		if histDB != nil {
+			info["historyRetention"] = cfg.historyRetention.String()
+		}
 		if cfg.settings != nil {
 			info["storage"] = "file"
 			info["configDir"] = cfg.settings.Dir()
@@ -194,34 +357,42 @@ func createServer(staticFS fs.FS, cfg serverConfig) http.Handler {
 		json.NewEncoder(w).Encode(info)
 	})
 
-	r.With(handler.RequireToken(authToken)).Get("/ws", func(w http.ResponseWriter, req *http.Request) {
+	r.With(authSvc.Require).Get("/ws", func(w http.ResponseWriter, req *http.Request) {
 		conn, err := upgrader.Upgrade(w, req, nil)
 		if err != nil {
 			log.Printf("websocket upgrade: %v", err)
 			return
 		}
 
-		client := hub.AddClient(conn)
+		// ?enc=msgpack switches the tab to MessagePack frames.
+		client := hub.AddClient(conn, req.URL.Query().Get("enc") == "msgpack")
 
-		hub.SendToClient(client, map[string]interface{}{
-			"type": "connections",
-			"data": store.AllStatuses(),
-		})
-
-		subMu.RLock()
-		for connID, mgr := range subManagers {
-			hub.SendToClient(client, map[string]interface{}{
-				"type":   "subject-tree",
-				"connId": connID,
-				"full":   true,
-				"data":   mgr.Snapshot(),
-			})
-		}
-		subMu.RUnlock()
+		// The tree follows once the tab sends its view.
+		hub.SendToClient(client, connectionsOf(store.AllStatuses()))
 	})
 
+	for _, f := range features {
+		if f.root != nil {
+			f.root(r, d)
+		}
+	}
+
 	r.Route("/api", func(r chi.Router) {
-		r.Use(handler.RequireToken(authToken))
+		// Identify first, then the features, then the role check: a refused
+		// write must still reach the audit log. chi wants every middleware
+		// before the first route.
+		r.Use(authSvc.Require)
+		for _, f := range features {
+			if f.apiMiddleware != nil {
+				r.Use(f.apiMiddleware(d))
+			}
+		}
+		r.Use(authSvc.AdminForWrites)
+		for _, f := range features {
+			if f.api != nil {
+				f.api(r, d)
+			}
+		}
 		r.Post("/connect", connHandler.Connect)
 		r.Post("/disconnect", connHandler.Disconnect)
 		r.Post("/disconnect-all", func(w http.ResponseWriter, req *http.Request) {
@@ -235,10 +406,18 @@ func createServer(staticFS fs.FS, cfg serverConfig) http.Handler {
 			connHandler.DisconnectAll(w, req)
 		})
 		r.Get("/connections", connHandler.ListConnections)
+		r.Put("/connections/{connId}/subscriptions", connHandler.SetSubscriptions)
 		r.Get("/status", connHandler.Status)
 		r.Get("/cluster/{connId}", connHandler.ServerInfo)
 		r.Get("/cluster/{connId}/overview", clusterHandler.Overview)
 		r.Get("/server/{connId}", connHandler.ServerInfo)
+
+		r.Get("/history", histHandler.Get)
+		r.Get("/history/series", histHandler.Series)
+		r.Get("/history/fields", histHandler.Fields)
+		r.Get("/history/search", histHandler.Search)
+		r.Get("/history/range", histHandler.Range)
+		r.Delete("/history", histHandler.Clear)
 
 		r.Post("/publish", publishHandler.Publish)
 		r.Post("/request", publishHandler.Request)
@@ -258,11 +437,14 @@ func createServer(staticFS fs.FS, cfg serverConfig) http.Handler {
 		r.Delete("/streams/{name}", streamsHandler.Delete)
 		r.Post("/streams/{name}/purge", streamsHandler.Purge)
 		r.Get("/streams/{name}/messages", streamsHandler.GetMessages)
+		r.Get("/streams/{name}/series", streamsHandler.Series)
+		r.Get("/streams/{name}/seq", streamsHandler.SeqAtTime)
 		r.Delete("/streams/{name}/messages/{seq}", streamsHandler.DeleteMessage)
 
 		r.Get("/streams/{stream}/consumers", consumersHandler.List)
 		r.Post("/streams/{stream}/consumers", consumersHandler.Create)
 		r.Get("/streams/{stream}/consumers/{consumer}", consumersHandler.Get)
+		r.Put("/streams/{stream}/consumers/{consumer}", consumersHandler.Update)
 		r.Delete("/streams/{stream}/consumers/{consumer}", consumersHandler.Delete)
 
 		r.Get("/kv", kvHandler.ListBuckets)
@@ -298,6 +480,17 @@ func createServer(staticFS fs.FS, cfg serverConfig) http.Handler {
 		})
 	})
 
+	// Saved connections open after the features attached their hooks.
+	if cfg.settings != nil && cfg.autoConnect {
+		go autoConnectSaved(cfg.settings, func(c connection.Config) error {
+			if _, err := store.Connect(c); err != nil {
+				return err
+			}
+			startManager(c.ID, c)
+			return nil
+		})
+	}
+
 	if staticFS != nil {
 		fileServer := http.FileServer(http.FS(staticFS))
 		r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
@@ -318,5 +511,22 @@ func createServer(staticFS fs.FS, cfg serverConfig) http.Handler {
 		})
 	}
 
-	return r
+	return &appServer{Handler: r, close: func() {
+		subMu.Lock()
+		managers := subManagers
+		subManagers = make(map[string]*subscription.Manager)
+		subMu.Unlock()
+		for _, mgr := range managers {
+			mgr.Stop()
+		}
+		store.DisconnectAll()
+		// Features stop in reverse order, so one that builds on another is
+		// gone before what it uses.
+		for i := len(d.shutdownHooks) - 1; i >= 0; i-- {
+			d.shutdownHooks[i]()
+		}
+		if histDB != nil {
+			histDB.Close()
+		}
+	}}
 }

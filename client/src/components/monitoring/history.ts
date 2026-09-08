@@ -64,7 +64,8 @@ export function rateSeries(samples: Sample[], pick: (s: Sample) => number): { ti
   return { times, values };
 }
 
-/** Plain gauge series (connections, cpu …). */
+/** Plain gauge series (connections, cpu …); starts with the second sample so every chart shares one time window. */
 export function gaugeSeries(samples: Sample[], pick: (s: Sample) => number): { times: number[]; values: number[] } {
-  return { times: samples.map(s => s.t), values: samples.map(pick) };
+  const rest = samples.slice(1);
+  return { times: rest.map(s => s.t), values: rest.map(pick) };
 }

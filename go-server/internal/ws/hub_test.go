@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 func newTestServer(t *testing.T, hub *Hub) (*httptest.Server, string) {
@@ -21,7 +23,7 @@ func newTestServer(t *testing.T, hub *Hub) (*httptest.Server, string) {
 		if err != nil {
 			return
 		}
-		hub.AddClient(c)
+		hub.AddClient(c, r.URL.Query().Get("enc") == "msgpack")
 	}))
 	t.Cleanup(srv.Close)
 	return srv, "ws" + strings.TrimPrefix(srv.URL, "http")
@@ -147,4 +149,49 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("condition not met in time")
+}
+
+type wireMsg struct {
+	Subject string `json:"subject"`
+	Payload string `json:"payload"`
+	Empty   string `json:"empty,omitempty"`
+	Size    int    `json:"size"`
+}
+
+// A client that asked for MessagePack gets binary frames with the same
+// field names as the JSON encoding; both formats coexist in one broadcast.
+func TestMsgpackClientsGetBinaryFrames(t *testing.T) {
+	hub := NewHub()
+	_, url := newTestServer(t, hub)
+	jsonC := dial(t, url)
+	defer jsonC.Close()
+	binC := dial(t, url+"?enc=msgpack")
+	defer binC.Close()
+	waitFor(t, func() bool { return hub.ClientCount() == 2 })
+
+	hub.Broadcast(map[string]interface{}{"type": "message-batch", "data": []wireMsg{{Subject: "a.b", Payload: "hi", Size: 2}}})
+
+	binC.SetReadDeadline(time.Now().Add(2 * time.Second))
+	mt, raw, err := binC.ReadMessage()
+	if err != nil || mt != websocket.BinaryMessage {
+		t.Fatalf("binary client: type %d err %v", mt, err)
+	}
+	var ev struct {
+		Type string    `json:"type"`
+		Data []wireMsg `json:"data"`
+	}
+	dec := msgpack.NewDecoder(bytes.NewReader(raw))
+	dec.SetCustomStructTag("json")
+	if err := dec.Decode(&ev); err != nil || ev.Type != "message-batch" || len(ev.Data) != 1 || ev.Data[0].Subject != "a.b" || ev.Data[0].Size != 2 {
+		t.Fatalf("decoded %+v (%v)", ev, err)
+	}
+	if bytes.Contains(raw, []byte("empty")) {
+		t.Error("omitempty must apply to MessagePack too")
+	}
+
+	jsonC.SetReadDeadline(time.Now().Add(2 * time.Second))
+	mt, raw, err = jsonC.ReadMessage()
+	if err != nil || mt != websocket.TextMessage || !json.Valid(raw) {
+		t.Fatalf("json client: type %d valid %v err %v", mt, json.Valid(raw), err)
+	}
 }

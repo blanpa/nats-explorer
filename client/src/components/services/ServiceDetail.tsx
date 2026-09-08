@@ -13,7 +13,7 @@ export default function ServiceDetail() {
   const { services, stats, loading, refresh } = useServices();
 
   const svc = services.find(s => s.id === selectedId);
-  if (!svc) return <EmptyState icon={Radio} title="Select a service" description="Services built with the NATS micro framework expose info, statistics and endpoints for discovery." />;
+  if (!svc) return <EmptyState icon={Radio} title="Select a service" description="Info, statistics and endpoints of NATS micro services." />;
 
   const st = stats.find(s => s.id === svc.id);
   const totalReq = st?.endpoints?.reduce((n, e) => n + (e.num_requests || 0), 0) ?? 0;
@@ -45,7 +45,12 @@ export default function ServiceDetail() {
           <StatTile label="Requests" value={formatNumber(totalReq)} />
           <StatTile label="Errors" value={formatNumber(totalErr)} tone={totalErr > 0 ? 'danger' : undefined} />
           <StatTile label="Avg processing" value={avgNs ? formatDurationMs(avgNs / 1e6) : '–'} />
-          <StatTile label="Started" value={st ? formatRelative(st.started) : '–'} sub={st ? formatDateTime(st.started) : undefined} className="[&>div:nth-child(2)]:text-sm" />
+          <StatTile
+            label="Started"
+            value={st ? formatRelative(st.started) : '–'}
+            sub={st ? formatDateTime(st.started) : undefined}
+            className="[&>div:nth-child(2)]:text-sm"
+          />
         </StatStrip>
 
         <div>
@@ -114,7 +119,14 @@ export default function ServiceDetail() {
 
         <div className="text-xs text-faint flex items-center gap-2">
           <Badge tone="neutral">{svc.type}</Badge>
-          <Button size="xs" variant="ghost" onClick={() => { prefillPublish({ subject: `$SRV.PING.${svc.name}` }); setModule('subjects'); }}>
+          <Button
+            size="xs"
+            variant="ghost"
+            onClick={() => {
+              prefillPublish({ subject: `$SRV.PING.${svc.name}` });
+              setModule('subjects');
+            }}
+          >
             Ping via request
           </Button>
         </div>

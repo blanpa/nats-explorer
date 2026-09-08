@@ -4,7 +4,11 @@ import type {
   ConnectionStatus,
   ConnectResponse,
   ConsumerCreateInput,
+  ConsumerUpdateInput,
   ConsumerInfo,
+  HistoryResponse,
+  HistorySeries,
+  NatsMessage,
   KvBucketConfig,
   KvBucketInfo,
   KvEntry,
@@ -23,28 +27,30 @@ import type {
   StreamConfigInput,
   StreamInfo,
   StreamMessagesPage,
+  StreamSeries,
 } from 'shared';
-import { useAuth, withToken } from './auth';
+import { type AuthInfo, useAuth } from './auth';
 import { useStore } from '../store';
 
 const BASE_URL = '/api';
 
 export class ApiError extends Error {
-  constructor(message: string, public status: number) {
+  constructor(
+    message: string,
+    public status: number,
+  ) {
     super(message);
     this.name = 'ApiError';
   }
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   let res: Response;
-  const token = useAuth.getState().token;
   try {
     res = await fetch(`${BASE_URL}${path}`, {
       ...options,
       headers: {
         ...(options.body && typeof options.body === 'string' ? { 'Content-Type': 'application/json' } : {}),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(options.headers || {}),
       },
     });
@@ -55,6 +61,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     useAuth.getState().setRequired(true);
     throw new ApiError('Authentication required', 401);
   }
+  if (res.status === 403) throw new ApiError('Read-only account: this needs the admin role', 403);
 
   const text = await res.text();
   let data: unknown = null;
@@ -91,6 +98,9 @@ export const api = {
   disconnect: (connId: string) => request<{ success: boolean }>('/disconnect', { method: 'POST', ...json({ connId }) }),
   disconnectAll: () => request<{ success: boolean }>('/disconnect-all', { method: 'POST' }),
   getConnections: () => request<ConnectionStatus[]>('/connections'),
+  /** Switch a live connection to new subject patterns; the feed and history start over. */
+  setSubscriptions: (connId: string, subscriptions: string[]) =>
+    request<{ success: boolean; status: ConnectionStatus }>(`/connections/${enc(connId)}/subscriptions`, { method: 'PUT', ...json({ subscriptions }) }),
   getServerInfo: (connId: string) => request<ServerInfo>(`/server/${enc(connId)}`),
   clusterOverview: (connId: string) => request<ClusterOverview>(`/cluster/${enc(connId)}/overview`),
 
@@ -100,6 +110,45 @@ export const api = {
     for (const [k, val] of Object.entries(params)) q.set(k, String(val));
     const qs = q.toString();
     return request<T>(`/monitoring/${enc(connId)}/${endpoint}${qs ? `?${qs}` : ''}`);
+  },
+
+  // Message history recorded by the backend
+  getHistory: (subject: string, opts: { connId?: string; limit?: number; branchLimit?: number; before?: number; expr?: string } = {}) => {
+    const q = new URLSearchParams({ subject });
+    for (const [k, val] of Object.entries(opts)) if (val !== undefined) q.set(k, String(val));
+    return request<HistoryResponse>(`/history?${q.toString()}`);
+  },
+  /** Persisted messages of a subject (or below it) in a time range, newest first. */
+  getHistoryRange: (subject: string, opts: { from: number; to?: number; branch?: boolean; limit?: number; connId?: string; expr?: string }) => {
+    const p = new URLSearchParams({ subject, from: String(opts.from) });
+    if (opts.to) p.set('to', String(opts.to));
+    if (opts.branch) p.set('branch', '1');
+    if (opts.limit) p.set('limit', String(opts.limit));
+    if (opts.connId) p.set('connId', opts.connId);
+    if (opts.expr) p.set('expr', opts.expr);
+    return request<{ subject: string; from: number; to: number; messages: NatsMessage[] }>(`/history/range?${p.toString()}`);
+  },
+  /** Newest recorded messages on a subject or below it whose subject or payload contains q. */
+  searchHistory: (subject: string, q: string, opts: { connId?: string; limit?: number; from?: number; to?: number; expr?: string } = {}) => {
+    const p = new URLSearchParams({ subject, q });
+    for (const [k, val] of Object.entries(opts)) if (val !== undefined) p.set(k, String(val));
+    return request<{ subject: string; q: string; messages: NatsMessage[] }>(`/history/search?${p.toString()}`);
+  },
+  getSeries: (subject: string, field: string, opts: { connId?: string; points?: number; from?: number; to?: number; expr?: string } = {}) => {
+    const q = new URLSearchParams({ subject, field });
+    for (const [k, val] of Object.entries(opts)) if (val !== undefined) q.set(k, String(val));
+    return request<HistorySeries>(`/history/series?${q.toString()}`);
+  },
+  /** Numeric fields known from the minute aggregates, for charts over long ranges. */
+  getHistoryFields: (subject: string, connId?: string) =>
+    request<{ subject: string; fields: string[] }>(`/history/fields?subject=${enc(subject)}${connId ? `&connId=${enc(connId)}` : ''}`),
+  clearHistory: (connId?: string) => request<{ success: boolean }>(`/history${connId ? `?connId=${enc(connId)}` : ''}`, { method: 'DELETE' }),
+  /** Forgets the recorded messages of one subject, with `branch` also of everything below it. */
+  clearSubjectHistory: (subject: string, opts: { branch?: boolean; connId?: string } = {}) => {
+    const p = new URLSearchParams({ subject });
+    if (opts.branch) p.set('branch', '1');
+    if (opts.connId) p.set('connId', opts.connId);
+    return request<{ success: boolean; cleared: number }>(`/history?${p.toString()}`, { method: 'DELETE' });
   },
 
   // Publish / request
@@ -118,6 +167,11 @@ export const api = {
     request<{ success: boolean }>(withConn(`/streams/${enc(name)}/purge`, connId, { subject }), { method: 'POST' }),
   getStreamMessages: (connId: string, name: string, opts: { startSeq?: number; limit?: number } = {}) =>
     request<StreamMessagesPage>(withConn(`/streams/${enc(name)}/messages`, connId, opts)),
+  /** The first stream sequence stored at or after a point in time. */
+  getStreamSeqAt: (connId: string, name: string, timeMs: number) =>
+    request<{ seq: number; timestamp: number; firstSeq: number; lastSeq: number }>(withConn(`/streams/${enc(name)}/seq`, connId, { time: timeMs })),
+  getStreamSeries: (connId: string, name: string, opts: { field: string; subject?: string; last?: number; points?: number }) =>
+    request<StreamSeries>(withConn(`/streams/${enc(name)}/series`, connId, opts)),
   deleteStreamMessage: (connId: string, stream: string, seq: number) =>
     request<{ success: boolean }>(withConn(`/streams/${enc(stream)}/messages/${seq}`, connId), { method: 'DELETE' }),
 
@@ -127,6 +181,8 @@ export const api = {
     request<ConsumerInfo>(withConn(`/streams/${enc(stream)}/consumers/${enc(consumer)}`, connId)),
   createConsumer: (connId: string, stream: string, config: ConsumerCreateInput) =>
     request<ConsumerInfo>(withConn(`/streams/${enc(stream)}/consumers`, connId), { method: 'POST', ...json(config) }),
+  updateConsumer: (connId: string, stream: string, consumer: string, config: ConsumerUpdateInput) =>
+    request<ConsumerInfo>(withConn(`/streams/${enc(stream)}/consumers/${enc(consumer)}`, connId), { method: 'PUT', ...json(config) }),
   deleteConsumer: (connId: string, stream: string, consumer: string) =>
     request<{ success: boolean }>(withConn(`/streams/${enc(stream)}/consumers/${enc(consumer)}`, connId), { method: 'DELETE' }),
 
@@ -147,14 +203,13 @@ export const api = {
   listObjectStores: (connId: string) => request<ObjStoreInfo[]>(withConn('/objectstore', connId)),
   createObjectStore: (connId: string, config: ObjStoreConfig) =>
     request<{ success: boolean }>(withConn('/objectstore', connId), { method: 'POST', ...json(config) }),
-  deleteObjectStore: (connId: string, store: string) =>
-    request<{ success: boolean }>(withConn(`/objectstore/${enc(store)}`, connId), { method: 'DELETE' }),
+  deleteObjectStore: (connId: string, store: string) => request<{ success: boolean }>(withConn(`/objectstore/${enc(store)}`, connId), { method: 'DELETE' }),
   listObjects: (connId: string, store: string) => request<ObjInfo[]>(withConn(`/objectstore/${enc(store)}`, connId)),
   deleteObject: (connId: string, store: string, name: string) =>
     request<{ success: boolean }>(withConn(`/objectstore/${enc(store)}/${enc(name)}`, connId), { method: 'DELETE' }),
-  /** Direct download link; carries the token as a query parameter because anchors cannot set headers. */
-  getObjectUrl: (connId: string, store: string, name: string) => withToken(`${BASE_URL}${withConn(`/objectstore/${enc(store)}/${enc(name)}`, connId)}`),
-  authInfo: () => request<{ required: boolean }>('/auth'),
+  /** Direct download link; the session cookie authenticates it. */
+  getObjectUrl: (connId: string, store: string, name: string) => `${BASE_URL}${withConn(`/objectstore/${enc(store)}/${enc(name)}`, connId)}`,
+  authInfo: () => request<AuthInfo>('/auth'),
   /** Streams the file body directly; no base64 round-trip. */
   putObject: (connId: string, store: string, file: File, description?: string) =>
     request<{ success: boolean; size: number; chunks: number }>(withConn(`/objectstore/${enc(store)}/${enc(file.name)}`, connId, { description }), {

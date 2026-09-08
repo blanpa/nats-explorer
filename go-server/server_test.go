@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"nats-explorer/internal/auth"
 	"nats-explorer/internal/settings"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +19,7 @@ import (
 	"github.com/gorilla/websocket"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // startNATS boots an embedded nats-server with JetStream on a random port.
@@ -44,9 +48,12 @@ func startNATS(t *testing.T) *natsserver.Server {
 }
 
 type apiClient struct {
-	t     *testing.T
-	base  string
-	token string
+	t      *testing.T
+	base   string
+	token  string
+	cookie *http.Cookie
+	// basic is "user:password" for HTTP basic auth
+	basic string
 }
 
 func (c *apiClient) do(method, path string, body interface{}, out interface{}) int {
@@ -62,6 +69,13 @@ func (c *apiClient) do(method, path string, body interface{}, out interface{}) i
 	}
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	if c.cookie != nil {
+		req.AddCookie(c.cookie)
+	}
+	if c.basic != "" {
+		user, pass, _ := strings.Cut(c.basic, ":")
+		req.SetBasicAuth(user, pass)
 	}
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -80,10 +94,23 @@ func (c *apiClient) do(method, path string, body interface{}, out interface{}) i
 	return res.StatusCode
 }
 
+// newTestServer starts the API on a random port and shuts the whole server
+// down with the test: the listener, the subscription managers with their NATS
+// connections, the persistent history and what the features started.
+func newTestServer(t *testing.T, cfg serverConfig) *httptest.Server {
+	t.Helper()
+	app := createServer(nil, cfg)
+	srv := httptest.NewServer(app)
+	t.Cleanup(func() {
+		srv.Close()
+		app.Close()
+	})
+	return srv
+}
+
 func TestServerEndToEnd(t *testing.T) {
 	ns := startNATS(t)
-	srv := httptest.NewServer(createServer(nil, serverConfig{}))
-	defer srv.Close()
+	srv := newTestServer(t, serverConfig{})
 	api := &apiClient{t: t, base: srv.URL}
 
 	// Connect
@@ -142,6 +169,43 @@ func TestServerEndToEnd(t *testing.T) {
 		t.Errorf("last message = %+v", page.Messages[49])
 	}
 
+	// The sequence at a point in time: before everything, and after the end.
+	var at struct {
+		Seq      uint64 `json:"seq"`
+		FirstSeq uint64 `json:"firstSeq"`
+		LastSeq  uint64 `json:"lastSeq"`
+	}
+	if st := api.do("GET", "/api/streams/T/seq"+q+"&time=0", nil, &at); st != 200 || at.Seq != at.FirstSeq {
+		t.Fatalf("seq at time 0 = %d %+v", st, at)
+	}
+	if st := api.do("GET", "/api/streams/T/seq"+q+fmt.Sprintf("&time=%d", time.Now().Add(time.Hour).UnixMilli()), nil, &at); st != 200 || at.Seq != at.LastSeq+1 {
+		t.Fatalf("seq past the end = %d %+v", st, at)
+	}
+	if st := api.do("GET", "/api/streams/T/seq"+q, nil, nil); st != 400 {
+		t.Errorf("seq without time must be 400, got %d", st)
+	}
+
+	// Consumers can be edited after creation, but not their policies.
+	if st := api.do("POST", "/api/streams/T/consumers"+q, map[string]interface{}{"name": "edit-me", "description": "before", "ackWait": 5e9}, nil); st != 200 {
+		t.Fatalf("create consumer: %d", st)
+	}
+	var cinfo struct {
+		Config struct {
+			Description string `json:"description"`
+			AckWait     int64  `json:"ackWait"`
+			MaxDeliver  int    `json:"maxDeliver"`
+		} `json:"config"`
+	}
+	if st := api.do("PUT", "/api/streams/T/consumers/edit-me"+q, map[string]interface{}{"description": "after", "maxDeliver": 7, "ackWait": 9e9}, &cinfo); st != 200 || cinfo.Config.Description != "after" || cinfo.Config.MaxDeliver != 7 || cinfo.Config.AckWait != 9e9 {
+		t.Fatalf("update consumer = %d %+v", st, cinfo)
+	}
+	if st := api.do("PUT", "/api/streams/T/consumers/edit-me"+q, map[string]interface{}{"ackPolicy": "none"}, nil); st != 400 {
+		t.Errorf("changing the ack policy must be rejected, got %d", st)
+	}
+	if st := api.do("DELETE", "/api/streams/T/consumers/edit-me"+q, nil, nil); st != 200 {
+		t.Fatalf("delete consumer: %d", st)
+	}
+
 	// Delete a message in the middle and make sure the gap is skipped.
 	if st := api.do("DELETE", "/api/streams/T/messages/10"+q, nil, nil); st != 200 {
 		t.Fatalf("delete message: %d", st)
@@ -149,6 +213,30 @@ func TestServerEndToEnd(t *testing.T) {
 	api.do("GET", "/api/streams/T/messages"+q+"&startSeq=5&limit=10", nil, &page)
 	if len(page.Messages) != 9 || page.PageStart != 5 || page.PageEnd != 14 {
 		t.Fatalf("page after delete = %d-%d (%d msgs)", page.PageStart, page.PageEnd, len(page.Messages))
+	}
+
+	// Numeric field over the stream's messages, per subject or overall.
+	var ss struct {
+		Points  [][2]float64 `json:"points"`
+		Samples int          `json:"samples"`
+		Scanned int          `json:"scanned"`
+		FromSeq uint64       `json:"fromSeq"`
+		ToSeq   uint64       `json:"toSeq"`
+	}
+	if st := api.do("GET", "/api/streams/T/series"+q+"&field=i&last=50&points=10", nil, &ss); st != 200 {
+		t.Fatalf("stream series: %d", st)
+	}
+	if ss.FromSeq != 71 || ss.ToSeq != 120 || ss.Scanned != 50 || ss.Samples != 50 || len(ss.Points) < 10 || len(ss.Points) > 20 {
+		t.Fatalf("stream series = %+v", ss)
+	}
+	if ss.Points[len(ss.Points)-1][1] != 120 {
+		t.Errorf("last point must be i=120, got %v", ss.Points[len(ss.Points)-1])
+	}
+	if st := api.do("GET", "/api/streams/T/series"+q+"&field=i&subject=t.1&last=1000", nil, &ss); st != 200 || ss.Samples != 39 {
+		t.Fatalf("stream series for t.1 = %d %+v (seq 10 was deleted)", st, ss)
+	}
+	if st := api.do("GET", "/api/streams/T/series"+q, nil, nil); st != 400 {
+		t.Errorf("series without field must be 400, got %d", st)
 	}
 
 	// KV: PUT must work (it used to be POST-only and 405 from the UI).
@@ -206,24 +294,54 @@ func TestServerEndToEnd(t *testing.T) {
 		t.Fatalf("connections event = %v", ev)
 	}
 
-	// A new browser gets a full, flat tree snapshot with compact entries.
-	ev = readEvent(t, ws, "subject-tree")
-	if ev["full"] != true {
-		t.Fatalf("first subject-tree must be a full snapshot, got %v", ev)
+	// The tree follows the tab's view: with everything expanded every node
+	// arrives, branches carry their subtree totals and child counts.
+	ws.WriteJSON(map[string]interface{}{"type": "view", "all": true})
+	entries := map[string]map[string]interface{}{}
+	deadline = time.Now().Add(5 * time.Second)
+	for entries["t.1"] == nil && time.Now().Before(deadline) {
+		ev = readEvent(t, ws, "subject-tree")
+		for _, e := range ev["data"].([]interface{}) {
+			em := e.(map[string]interface{})
+			entries[em["s"].(string)] = em
+		}
 	}
-	var sawT1 bool
-	for _, e := range ev["data"].([]interface{}) {
-		em := e.(map[string]interface{})
-		if em["s"] == "t.1" {
-			sawT1 = true
-			if em["n"].(float64) < 1 || em["pt"] != "json" || em["p"] == "" {
-				t.Errorf("snapshot entry t.1 = %v", em)
+	if e := entries["t.1"]; e == nil || e["n"].(float64) < 1 || e["pt"] != "json" || e["p"] == "" {
+		t.Fatalf("tree entry t.1 = %v", entries["t.1"])
+	}
+	if e := entries["t"]; e == nil || e["c"].(float64) < 3 || e["t"].(float64) < 120 || e["n"] != nil && e["n"].(float64) != 0 {
+		t.Fatalf("branch entry t = %v", entries["t"])
+	}
+	// Collapsing everything removes the children again.
+	ws.WriteJSON(map[string]interface{}{"type": "view", "all": false, "paths": []string{}})
+	removed := map[string]bool{}
+	deadline = time.Now().Add(5 * time.Second)
+	for !removed["t.1"] && time.Now().Before(deadline) {
+		ev = readEvent(t, ws, "subject-tree")
+		if list, ok := ev["removed"].([]interface{}); ok {
+			for _, r := range list {
+				removed[r.(string)] = true
 			}
 		}
 	}
-	if !sawT1 {
-		t.Fatalf("snapshot lacks subject t.1: %v", ev["data"])
+	if !removed["t.1"] || removed["t"] {
+		t.Fatalf("collapse: removed = %v", removed)
 	}
+	// A filter shows the paths of matching subjects regardless of expansion.
+	ws.WriteJSON(map[string]interface{}{"type": "view", "filter": "T.2"})
+	entries = map[string]map[string]interface{}{}
+	deadline = time.Now().Add(5 * time.Second)
+	for entries["t.2"] == nil && time.Now().Before(deadline) {
+		ev = readEvent(t, ws, "subject-tree")
+		for _, e := range ev["data"].([]interface{}) {
+			em := e.(map[string]interface{})
+			entries[em["s"].(string)] = em
+		}
+	}
+	if entries["t.2"] == nil || entries["t.1"] != nil {
+		t.Fatalf("filter: entries = %v", entries)
+	}
+	ws.WriteJSON(map[string]interface{}{"type": "view", "all": true})
 
 	// KV watch over the websocket.
 	ws.WriteJSON(map[string]string{"type": "kv-watch", "connId": "t1", "bucket": "cfg"})
@@ -245,8 +363,100 @@ func TestServerEndToEnd(t *testing.T) {
 		t.Fatalf("stream-msg = %v", ev)
 	}
 
+	// Recorded history: exact subject oldest first, branch newest first.
+	// (Subjects of the stream T are also re-delivered by the JetStream
+	// consumers used above, so use fresh ones here.)
+	for i := 1; i <= 12; i++ {
+		api.do("POST", "/api/publish"+q, map[string]interface{}{"subject": fmt.Sprintf("h.%d", i%2), "payload": fmt.Sprintf("%d", i)}, nil)
+	}
+	var hist struct {
+		Messages []map[string]interface{} `json:"messages"`
+		Branch   []map[string]interface{} `json:"branch"`
+	}
+	// Wait for both subjects: the search below expects the newest message of
+	// all twelve, which is the last one on h.0.
+	var even struct {
+		Messages []map[string]interface{} `json:"messages"`
+	}
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if st := api.do("GET", "/api/history"+q+"&subject=h.1&limit=4&branchLimit=5", nil, &hist); st != 200 {
+			t.Fatalf("history: %d", st)
+		}
+		api.do("GET", "/api/history"+q+"&subject=h.0&limit=1", nil, &even)
+		if len(hist.Messages) == 4 && hist.Messages[3]["payload"] == "11" && len(even.Messages) == 1 && even.Messages[0]["payload"] == "12" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(hist.Messages) != 4 || hist.Messages[0]["payload"] != "5" || hist.Messages[3]["payload"] != "11" {
+		t.Fatalf("subject history = %v", hist.Messages)
+	}
+	if hist.Messages[0]["connId"] != "t1" || hist.Messages[0]["sequence"].(float64) <= 0 {
+		t.Errorf("history message lacks connId or sequence: %v", hist.Messages[0])
+	}
+	if len(hist.Branch) != 0 {
+		t.Errorf("h.1 has no subjects below it, got %d", len(hist.Branch))
+	}
+	// Search over the recorded messages: subject or payload, newest first.
+	var found struct {
+		Messages []map[string]interface{} `json:"messages"`
+	}
+	if st := api.do("GET", "/api/history/search"+q+"&subject=h&q=1&limit=3", nil, &found); st != 200 || len(found.Messages) != 3 || found.Messages[0]["payload"] != "12" {
+		t.Fatalf("history search = %d %v", st, found.Messages)
+	}
+	if st := api.do("GET", "/api/history/search"+q+"&subject=h.0&q=zzz", nil, &found); st != 200 || len(found.Messages) != 0 {
+		t.Fatalf("search without hits = %d %v", st, found.Messages)
+	}
+
+	// Numeric series over the history, downsampled to min/max buckets.
+	for i := 0; i < 40; i++ {
+		api.do("POST", "/api/publish"+q, map[string]interface{}{"subject": "series.x", "payload": fmt.Sprintf(`{"m":{"v":%d}}`, (i*7)%40)}, nil)
+	}
+	var series struct {
+		Points  [][2]float64 `json:"points"`
+		Samples int          `json:"samples"`
+		Last    uint64       `json:"last"`
+	}
+	deadline = time.Now().Add(2 * time.Second)
+	for series.Samples < 40 && time.Now().Before(deadline) {
+		api.do("GET", "/api/history/series"+q+"&subject=series.x&field=m.v&points=10", nil, &series)
+		time.Sleep(20 * time.Millisecond)
+	}
+	if series.Samples != 40 || len(series.Points) < 10 || len(series.Points) > 20 || series.Last == 0 {
+		t.Fatalf("series = %d samples, %d points, last %d", series.Samples, len(series.Points), series.Last)
+	}
+	maxV := 0.0
+	for _, p := range series.Points {
+		maxV = max(maxV, p[1])
+	}
+	if maxV != 39 {
+		t.Errorf("downsampling must keep the peaks, max = %v", maxV)
+	}
+	if st := api.do("GET", "/api/history/series"+q+"&subject=series.x", nil, nil); st != 400 {
+		t.Errorf("series without field must be 400, got %d", st)
+	}
+	if st := api.do("GET", "/api/history?subject=h&branchLimit=5", nil, &hist); st != 200 || len(hist.Branch) != 5 || hist.Branch[0]["payload"] != "12" || hist.Branch[4]["payload"] != "8" {
+		t.Fatalf("branch history across connections: %d %v", st, hist.Branch)
+	}
+	if before := hist.Branch[4]["sequence"].(float64); before > 0 {
+		api.do("GET", "/api/history"+q+fmt.Sprintf("&subject=h.0&limit=2&before=%d", int(before)), nil, &hist)
+		if len(hist.Messages) != 2 || hist.Messages[1]["payload"] != "6" {
+			t.Fatalf("paging before seq %v = %v", before, hist.Messages)
+		}
+	}
+
+	// Counters arrive once a second and include the history size.
+	ev = readEvent(t, ws, "stats")
+	if stats := ev["data"].(map[string]interface{}); stats["received"].(float64) < 121 || stats["history"].(map[string]interface{})["messages"].(float64) < 121 {
+		t.Fatalf("stats = %v", stats)
+	}
+
 	// Binary message in the live subject feed (published with a raw client:
-	// the JSON publish API cannot carry invalid UTF-8).
+	// the JSON publish API cannot carry invalid UTF-8). The feed only carries
+	// the focused subject, so focus first.
+	ws.WriteJSON(map[string]interface{}{"type": "focus", "subjects": []string{"bin", "also.this"}})
+	time.Sleep(100 * time.Millisecond)
 	nc, err := nats.Connect(ns.ClientURL())
 	if err != nil {
 		t.Fatal(err)
@@ -269,6 +479,42 @@ func TestServerEndToEnd(t *testing.T) {
 	}
 	if binMsg["payloadType"] != "binary" || binMsg["payload"] != "//4A" || binMsg["size"].(float64) != 3 {
 		t.Errorf("binary payload = %v", binMsg)
+	}
+	// Every focused subject is streamed; unfocused ones stay out of the feed
+	// but land in the history.
+	nc.Publish("also.this", []byte("second"))
+	nc.Publish("elsewhere.y", []byte("quiet"))
+	nc.Flush()
+	var second map[string]interface{}
+	deadline = time.Now().Add(5 * time.Second)
+	for second == nil && time.Now().Before(deadline) {
+		ev = readEvent(t, ws, "message-batch")
+		for _, m := range ev["data"].([]interface{}) {
+			if mm := m.(map[string]interface{}); mm["subject"] == "also.this" {
+				second = mm
+			}
+		}
+	}
+	if second == nil || second["payload"] != "second" {
+		t.Fatalf("second focused subject not streamed: %v", second)
+	}
+	deadline = time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		api.do("GET", "/api/history"+q+"&subject=elsewhere.y", nil, &hist)
+		if len(hist.Messages) == 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(hist.Messages) != 1 || hist.Messages[0]["payload"] != "quiet" {
+		t.Fatalf("unfocused message missing from history: %v", hist.Messages)
+	}
+	if st := api.do("DELETE", "/api/history"+q, nil, nil); st != 200 {
+		t.Fatalf("clear history: %d", st)
+	}
+	api.do("GET", "/api/history"+q+"&subject=elsewhere.y", nil, &hist)
+	if len(hist.Messages) != 0 {
+		t.Fatalf("history not cleared: %v", hist.Messages)
 	}
 
 	// Repeated request run with template variables against an echo responder.
@@ -329,6 +575,61 @@ func TestServerEndToEnd(t *testing.T) {
 	}
 	api.do("POST", "/api/disconnect", map[string]string{"connId": "t2"}, nil)
 
+	// Subscriptions can be changed on a live connection: the feed restarts
+	// with the new patterns, the status reports them, history starts over.
+	var subResp struct {
+		Status struct {
+			Subscriptions []string `json:"subscriptions"`
+		} `json:"status"`
+	}
+	if st := api.do("PUT", "/api/connections/t1/subscriptions", map[string]interface{}{"subscriptions": []string{" only.> ", "only.>", "also.here"}}, &subResp); st != 200 {
+		t.Fatalf("set subscriptions: %d", st)
+	}
+	if got := subResp.Status.Subscriptions; len(got) != 2 || got[0] != "only.>" || got[1] != "also.here" {
+		t.Fatalf("subscriptions after change = %v", got)
+	}
+	if st := api.do("PUT", "/api/connections/t1/subscriptions", map[string]interface{}{"subscriptions": []string{"bad subject"}}, nil); st != 400 {
+		t.Fatalf("whitespace in a subject must be rejected, got %d", st)
+	}
+	if st := api.do("PUT", "/api/connections/nope/subscriptions", map[string]interface{}{"subscriptions": []string{">"}}, nil); st != 404 {
+		t.Fatalf("unknown connection must be 404, got %d", st)
+	}
+	// The tab's tree starts over: a full update arrives without the old subjects.
+	ev = readEvent(t, ws, "subject-tree")
+	deadline = time.Now().Add(5 * time.Second)
+	for ev["full"] != true && time.Now().Before(deadline) {
+		ev = readEvent(t, ws, "subject-tree")
+	}
+	if ev["full"] != true {
+		t.Fatalf("no full tree update after the subscription change: %v", ev)
+	}
+	if list, _ := ev["data"].([]interface{}); len(list) != 0 {
+		t.Fatalf("full update after restart must be empty, got %v", list)
+	}
+	time.Sleep(100 * time.Millisecond) // let the new subscriptions settle
+	nc.Publish("only.a", []byte("in"))
+	nc.Publish("elsewhere.z", []byte("out"))
+	nc.Flush()
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		api.do("GET", "/api/history"+q+"&subject=only.a", nil, &hist)
+		if len(hist.Messages) == 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(hist.Messages) != 1 {
+		t.Fatalf("message on the new pattern not recorded: %v", hist.Messages)
+	}
+	api.do("GET", "/api/history"+q+"&subject=elsewhere.z", nil, &hist)
+	if len(hist.Messages) != 0 {
+		t.Fatalf("message outside the patterns was recorded: %v", hist.Messages)
+	}
+	api.do("GET", "/api/history"+q+"&subject=h.1", nil, &hist)
+	if len(hist.Messages) != 0 {
+		t.Fatal("history must start over when the patterns change")
+	}
+
 	// Server info probe
 	var srvInfo struct {
 		JetStream bool    `json:"jetstream"`
@@ -349,9 +650,111 @@ func TestServerEndToEnd(t *testing.T) {
 	}
 }
 
+// With HISTORY_DB the history reaches the database: time ranges, search
+// and series over a range read from SQLite.
+func TestServerPersistentHistory(t *testing.T) {
+	ns := startNATS(t)
+	dbPath := filepath.Join(t.TempDir(), "history.db")
+	srv := newTestServer(t, serverConfig{historyDB: dbPath, historyRetention: time.Hour})
+	api := &apiClient{t: t, base: srv.URL}
+	var app struct {
+		HistoryDb        bool   `json:"historyDb"`
+		HistoryRetention string `json:"historyRetention"`
+	}
+	api.do("GET", "/api/app", nil, &app)
+	if !app.HistoryDb || app.HistoryRetention != "1h0m0s" {
+		t.Fatalf("app info = %+v", app)
+	}
+	if st := api.do("POST", "/api/connect", map[string]interface{}{"id": "p1", "name": "p", "servers": []string{ns.ClientURL()}, "authMethod": "none"}, nil); st != 200 {
+		t.Fatalf("connect: %d", st)
+	}
+	q := "?connId=p1"
+	start := time.Now().UnixMilli() - 1000
+	for i := 1; i <= 6; i++ {
+		api.do("POST", "/api/publish"+q, map[string]interface{}{"subject": fmt.Sprintf("db.%d", i%2), "payload": fmt.Sprintf(`{"v":%d}`, i)}, nil)
+	}
+	var rng struct {
+		Messages []map[string]interface{} `json:"messages"`
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for len(rng.Messages) < 6 && time.Now().Before(deadline) {
+		api.do("GET", "/api/history/range"+q+fmt.Sprintf("&subject=db&branch=1&from=%d", start), nil, &rng)
+		time.Sleep(100 * time.Millisecond)
+	}
+	if len(rng.Messages) != 6 || rng.Messages[0]["payload"] != `{"v":6}` {
+		t.Fatalf("range = %v", rng.Messages)
+	}
+	if st := api.do("GET", "/api/history/range"+q+fmt.Sprintf("&subject=db.1&from=%d", start), nil, &rng); st != 200 || len(rng.Messages) != 3 {
+		t.Fatalf("exact range = %d %v", st, rng.Messages)
+	}
+	if st := api.do("GET", "/api/history/search"+q+fmt.Sprintf("&subject=db&q=%%22v%%22%%3A4&from=%d", start), nil, &rng); st != 200 || len(rng.Messages) != 1 {
+		t.Fatalf("db search = %d %v", st, rng.Messages)
+	}
+	var series struct {
+		Samples int `json:"samples"`
+	}
+	if st := api.do("GET", "/api/history/series"+q+fmt.Sprintf("&subject=db.0&field=v&from=%d", start), nil, &series); st != 200 || series.Samples != 3 {
+		t.Fatalf("db series = %d %+v", st, series)
+	}
+	if st := api.do("GET", "/api/history/range"+q+"&subject=db", nil, nil); st != 400 {
+		t.Errorf("range without time must be 400, got %d", st)
+	}
+	api.do("POST", "/api/disconnect-all", nil, nil)
+}
+
+// Saved connections flagged autoConnect open when the server starts, and
+// /metrics reports them.
+func TestServerAutoConnectAndMetrics(t *testing.T) {
+	ns := startNATS(t)
+	dir := t.TempDir()
+	store, err := settings.Open(dir, settings.NewSecretStore(dir, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, _ := json.Marshal([]map[string]interface{}{
+		{"id": "auto", "name": "Auto", "servers": []string{ns.ClientURL()}, "authMethod": "none", "subscriptions": []string{"auto.>"}, "sysTopics": map[string]bool{"kv": true}, "autoConnect": true},
+		{"id": "manual", "name": "Manual", "servers": []string{ns.ClientURL()}, "authMethod": "none"},
+	})
+	if err := store.Set(settings.ConnectionsKey, saved); err != nil {
+		t.Fatal(err)
+	}
+	srv := newTestServer(t, serverConfig{mode: "server", settings: store, autoConnect: true})
+	api := &apiClient{t: t, base: srv.URL}
+
+	var conns []struct {
+		ID            string   `json:"id"`
+		Connected     bool     `json:"connected"`
+		Subscriptions []string `json:"subscriptions"`
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		api.do("GET", "/api/connections", nil, &conns)
+		if len(conns) == 1 && conns[0].Connected {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if len(conns) != 1 || conns[0].ID != "auto" || !conns[0].Connected || strings.Join(conns[0].Subscriptions, ",") != "auto.>,$KV.>" {
+		t.Fatalf("auto-connected = %+v", conns)
+	}
+
+	res, err := http.Get(srv.URL + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	text := string(body)
+	for _, want := range []string{`nats_explorer_connections{state="connected"} 1`, `nats_explorer_messages_received_total{conn="auto",name="Auto"}`, "nats_explorer_ws_clients 0", "# TYPE nats_explorer_subjects gauge"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("metrics lack %q:\n%s", want, text)
+		}
+	}
+	api.do("POST", "/api/disconnect-all", nil, nil)
+}
+
 func TestServerAuthToken(t *testing.T) {
-	srv := httptest.NewServer(createServer(nil, serverConfig{authToken: "tok"}))
-	defer srv.Close()
+	srv := newTestServer(t, serverConfig{authToken: "tok"})
 
 	var info struct {
 		Required bool `json:"required"`
@@ -374,6 +777,91 @@ func TestServerAuthToken(t *testing.T) {
 		t.Fatalf("ws with token: %v", err)
 	}
 	c.Close()
+}
+
+// In users mode a login sets a cookie that carries the API and the
+// websocket; viewers are turned away from writes.
+func TestServerUsersAndRoles(t *testing.T) {
+	adminHash, _ := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.MinCost)
+	viewerHash, _ := bcrypt.GenerateFromPassword([]byte("look"), bcrypt.MinCost)
+	users, err := auth.ParseUsers(strings.NewReader("alice:admin:" + string(adminHash) + "\nbob:viewer:" + string(viewerHash)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := newTestServer(t, serverConfig{users: users})
+
+	var info struct {
+		Mode          string `json:"mode"`
+		Authenticated bool   `json:"authenticated"`
+		Role          string `json:"role"`
+	}
+	(&apiClient{t: t, base: srv.URL}).do("GET", "/api/auth", nil, &info)
+	if info.Mode != "users" || info.Authenticated {
+		t.Fatalf("anonymous /api/auth = %+v", info)
+	}
+
+	login := func(user, pass string) *http.Cookie {
+		body, _ := json.Marshal(map[string]string{"user": user, "password": pass})
+		res, err := http.Post(srv.URL+"/api/login", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != 200 {
+			t.Fatalf("login %s: %d", user, res.StatusCode)
+		}
+		for _, c := range res.Cookies() {
+			if c.Name == auth.CookieName {
+				return c
+			}
+		}
+		t.Fatalf("login %s set no session cookie", user)
+		return nil
+	}
+	if res, _ := http.Post(srv.URL+"/api/login", "application/json", strings.NewReader(`{"user":"bob","password":"wrong"}`)); res.StatusCode != 401 {
+		t.Fatalf("wrong password: %d", res.StatusCode)
+	}
+
+	bob := &apiClient{t: t, base: srv.URL, cookie: login("bob", "look")}
+	bob.do("GET", "/api/auth", nil, &info)
+	if !info.Authenticated || info.Role != "viewer" {
+		t.Fatalf("bob /api/auth = %+v", info)
+	}
+	if st := bob.do("GET", "/api/connections", nil, nil); st != 200 {
+		t.Fatalf("viewer read: %d", st)
+	}
+	if st := bob.do("DELETE", "/api/history", nil, nil); st != 403 {
+		t.Fatalf("viewer write: %d, want 403", st)
+	}
+	alice := &apiClient{t: t, base: srv.URL, cookie: login("alice", "secret")}
+	if st := alice.do("DELETE", "/api/history", nil, nil); st != 204 && st != 200 {
+		t.Fatalf("admin write: %d", st)
+	}
+
+	// the websocket rides on the cookie, no token in the URL
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
+	if _, res, err := websocket.DefaultDialer.Dial(wsURL, nil); err == nil || res == nil || res.StatusCode != 401 {
+		t.Fatalf("ws without cookie: err=%v res=%v", err, res)
+	}
+	c, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Cookie": {bob.cookie.String()}})
+	if err != nil {
+		t.Fatalf("ws with cookie: %v", err)
+	}
+	c.Close()
+
+	// basic auth for scrapers and scripts
+	req, _ := http.NewRequest("GET", srv.URL+"/metrics", nil)
+	req.SetBasicAuth("bob", "look")
+	if res, err := http.DefaultClient.Do(req); err != nil || res.StatusCode != 200 {
+		t.Fatalf("metrics with basic auth: %v %v", err, res)
+	}
+
+	if st := bob.do("POST", "/api/logout", nil, nil); st != 204 {
+		t.Fatalf("logout: %d", st)
+	}
+	if st := bob.do("GET", "/api/connections", nil, nil); st != 401 {
+		t.Fatalf("after logout: %d, want 401", st)
+	}
 }
 
 func readEvent(t *testing.T, ws *websocket.Conn, wantType string) map[string]interface{} {
@@ -403,8 +891,7 @@ func TestServerSettingsAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(createServer(nil, serverConfig{mode: "desktop", settings: store}))
-	defer srv.Close()
+	srv := newTestServer(t, serverConfig{mode: "desktop", settings: store})
 	api := &apiClient{t: t, base: srv.URL}
 
 	var app struct {
@@ -488,8 +975,7 @@ func startNATSWithSystemAccount(t *testing.T) *natsserver.Server {
 
 func TestClusterOverview(t *testing.T) {
 	ns := startNATSWithSystemAccount(t)
-	srv := httptest.NewServer(createServer(nil, serverConfig{}))
-	defer srv.Close()
+	srv := newTestServer(t, serverConfig{})
 	api := &apiClient{t: t, base: srv.URL}
 
 	type overview struct {
@@ -508,7 +994,11 @@ func TestClusterOverview(t *testing.T) {
 	}
 
 	// Without system credentials: monitoring fallback (no HTTP monitoring here → error listed, nothing crashes).
-	if st := api.do("POST", "/api/connect", map[string]interface{}{"id": "c1", "name": "plain", "servers": []string{ns.ClientURL()}, "authMethod": "none"}, nil); st != 200 {
+	// The monitoring port is pinned to the embedded server's client port, which speaks NATS and not HTTP.
+	// Left at the default the fallback would call 127.0.0.1:8222 and pick up whatever NATS the developer
+	// happens to be running.
+	monPort := ns.Addr().(*net.TCPAddr).Port
+	if st := api.do("POST", "/api/connect", map[string]interface{}{"id": "c1", "name": "plain", "servers": []string{ns.ClientURL()}, "authMethod": "none", "monitoringPort": monPort}, nil); st != 200 {
 		t.Fatalf("connect: %d", st)
 	}
 	var ov overview

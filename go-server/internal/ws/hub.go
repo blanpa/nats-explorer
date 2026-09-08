@@ -1,12 +1,14 @@
 package ws
 
 import (
+	"bytes"
 	"encoding/json"
 	"log"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 const (
@@ -23,6 +25,26 @@ type Client struct {
 	send chan []byte
 	done chan struct{}
 	once sync.Once
+	// binary clients receive MessagePack frames instead of JSON text.
+	binary bool
+}
+
+// Binary reports whether the client negotiated MessagePack frames.
+func (c *Client) Binary() bool { return c.binary }
+
+// Encode serializes an event for the wire: JSON, or MessagePack with the
+// same field names (the json struct tags apply) when binary is set.
+func Encode(event interface{}, binary bool) ([]byte, error) {
+	if !binary {
+		return json.Marshal(event)
+	}
+	var buf bytes.Buffer
+	enc := msgpack.NewEncoder(&buf)
+	enc.SetCustomStructTag("json")
+	if err := enc.Encode(event); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func (c *Client) close() {
@@ -50,12 +72,14 @@ func NewHub() *Hub {
 
 // AddClient registers a websocket connection and starts its reader and writer
 // goroutines. The send channel is never closed; the writer exits via done so a
-// concurrent Broadcast can never hit a closed channel.
-func (h *Hub) AddClient(conn *websocket.Conn) *Client {
+// concurrent Broadcast can never hit a closed channel. binary selects
+// MessagePack frames for this client.
+func (h *Hub) AddClient(conn *websocket.Conn, binary bool) *Client {
 	client := &Client{
-		conn: conn,
-		send: make(chan []byte, sendBuffer),
-		done: make(chan struct{}),
+		conn:   conn,
+		send:   make(chan []byte, sendBuffer),
+		done:   make(chan struct{}),
+		binary: binary,
 	}
 
 	h.mu.Lock()
@@ -86,6 +110,10 @@ func (h *Hub) writePump(client *Client) {
 		ticker.Stop()
 		h.remove(client)
 	}()
+	frame := websocket.TextMessage
+	if client.binary {
+		frame = websocket.BinaryMessage
+	}
 
 	for {
 		select {
@@ -93,7 +121,7 @@ func (h *Hub) writePump(client *Client) {
 			return
 		case msg := <-client.send:
 			client.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := client.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+			if err := client.conn.WriteMessage(frame, msg); err != nil {
 				return
 			}
 		case <-ticker.C:
@@ -130,7 +158,7 @@ func (h *Hub) readPump(client *Client) {
 }
 
 func (h *Hub) SendToClient(c *Client, event interface{}) {
-	data, err := json.Marshal(event)
+	data, err := Encode(event, c.binary)
 	if err != nil {
 		return
 	}
@@ -141,20 +169,25 @@ func (h *Hub) SendToClient(c *Client, event interface{}) {
 	}
 }
 
+// Broadcast sends an event to every client, encoding it once per format.
 func (h *Hub) Broadcast(event interface{}) {
-	data, err := json.Marshal(event)
-	if err != nil {
-		return
-	}
-	h.BroadcastRaw(data)
-}
-
-func (h *Hub) BroadcastRaw(data []byte) {
+	var encoded [2][]byte
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for client := range h.clients {
+		i := 0
+		if client.binary {
+			i = 1
+		}
+		if encoded[i] == nil {
+			data, err := Encode(event, client.binary)
+			if err != nil {
+				return
+			}
+			encoded[i] = data
+		}
 		select {
-		case client.send <- data:
+		case client.send <- encoded[i]:
 		case <-client.done:
 		default:
 			// Buffer full: drop for this client rather than stall everyone.

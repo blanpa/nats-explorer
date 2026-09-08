@@ -2,7 +2,9 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"nats-explorer/internal/connection"
@@ -12,6 +14,65 @@ type ConnectionHandler struct {
 	Store          *connection.Store
 	OnConnected    func(connID string, cfg connection.Config)
 	OnDisconnected func(connID string)
+	// OnSubscriptionsChanged restarts the live feed with the new patterns.
+	OnSubscriptionsChanged func(connID string, cfg connection.Config)
+}
+
+// SetSubscriptions answers PUT /api/connections/{connId}/subscriptions with
+// {"subscriptions": [...]} and switches the live feed of a connected server
+// to the new patterns without reconnecting. An empty list means ">".
+func (h *ConnectionHandler) SetSubscriptions(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Subscriptions []string `json:"subscriptions"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	subs, err := normalizeSubjects(body.Subscriptions)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	connID := urlParam(r, "connId")
+	cfg, err := h.Store.SetSubscriptions(connID, subs)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if h.OnSubscriptionsChanged != nil {
+		h.OnSubscriptionsChanged(connID, cfg)
+	}
+	writeJSON(w, map[string]interface{}{"success": true, "status": h.Store.GetStatus(connID)})
+}
+
+// normalizeSubjects trims, de-duplicates and validates subject patterns.
+func normalizeSubjects(in []string) ([]string, error) {
+	out := make([]string, 0, len(in))
+	seen := make(map[string]bool)
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			continue
+		}
+		if strings.ContainsAny(s, " \t\r\n") {
+			return nil, fmt.Errorf("subject %q must not contain whitespace", s)
+		}
+		for _, tok := range strings.Split(s, ".") {
+			if tok == "" {
+				return nil, fmt.Errorf("subject %q has an empty token", s)
+			}
+		}
+		if i := strings.Index(s, ">"); i >= 0 && i != len(s)-1 {
+			return nil, fmt.Errorf("subject %q: > is only allowed as the last token", s)
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	if len(out) == 0 {
+		out = []string{">"}
+	}
+	return out, nil
 }
 
 func (h *ConnectionHandler) Connect(w http.ResponseWriter, r *http.Request) {

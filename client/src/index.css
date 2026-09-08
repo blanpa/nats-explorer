@@ -1,5 +1,89 @@
-@tailwind base;
-@tailwind components;
+@import 'tailwindcss';
+
+/* ==========================================================================
+   Theme (Tailwind 4 reads these instead of tailwind.config.ts)
+   Colors point at the RGB-triplet tokens below, so bg-accent/20 style alpha
+   keeps working through color-mix.
+   ========================================================================== */
+
+@theme {
+
+  --text-xs: 11px;
+  --text-xs--line-height: 15px;
+  --text-sm: 12px;
+  --text-sm--line-height: 17px;
+  --text-base: 13px;
+  --text-base--line-height: 19px;
+  --text-md: 14px;
+  --text-md--line-height: 20px;
+  --text-lg: 16px;
+  --text-lg--line-height: 22px;
+  --text-xl: 20px;
+  --text-xl--line-height: 26px;
+  --text-2xl: 26px;
+  --text-2xl--line-height: 32px;
+
+  --radius-none: 0;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-full: 9999px;
+
+  --color-canvas: rgb(var(--bg-0));
+  --color-panel: rgb(var(--bg-1));
+  --color-raised: rgb(var(--bg-2));
+  --color-field: rgb(var(--bg-3));
+  --color-line: rgb(var(--border));
+  --color-line-strong: rgb(var(--border-strong));
+  --color-fg: rgb(var(--fg));
+  --color-muted: rgb(var(--fg-muted));
+  --color-faint: rgb(var(--fg-faint));
+  --color-accent: rgb(var(--accent));
+  --color-accent-fg: rgb(var(--accent-fg));
+  --color-info: rgb(var(--info));
+  --color-ok: rgb(var(--ok));
+  --color-warn: rgb(var(--warn));
+  --color-danger: rgb(var(--danger));
+  --color-syn-key: rgb(var(--syn-key));
+  --color-syn-str: rgb(var(--syn-str));
+  --color-syn-num: rgb(var(--syn-num));
+  --color-syn-bool: rgb(var(--syn-bool));
+  --color-syn-null: rgb(var(--syn-null));
+
+  --shadow-pop: 0 8px 30px rgb(0 0 0 / 0.35), 0 1px 0 rgb(255 255 255 / 0.04) inset;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.2);
+
+  --animate-fade-in: fade-in 120ms ease-out;
+  --animate-fade: fade 120ms ease-out;
+  --animate-dialog-in: dialog-in 140ms ease-out;
+  --animate-pulse-dot: pulse-dot 1.2s ease-in-out infinite;
+
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  /* Centered dialogs: the transform must keep the -50% offsets, or the box
+     starts off-center and jumps into place when the animation ends. */
+  /* Centering uses the `translate` property (Tailwind 4), so the keyframes must not translate again. */
+  @keyframes dialog-in {
+    from { opacity: 0; transform: scale(0.98); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+}
+
+/* Tailwind 4 makes the bare `rounded` 4px; the design uses 6px there and 4px for rounded-sm. */
+@utility rounded {
+  border-radius: 6px;
+}
 
 /* ==========================================================================
    Design tokens
@@ -38,8 +122,6 @@
   --scroll-thumb: rgb(255 255 255 / 0.12);
   --scroll-thumb-hover: rgb(255 255 255 / 0.22);
 
-  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --font-mono: ui-monospace, 'JetBrains Mono', 'Cascadia Code', 'Fira Code', Menlo, Consolas, 'Liberation Mono', monospace;
 }
 
 :root[data-theme='light'] {
@@ -49,8 +131,8 @@
   --bg-1: 255 255 255;
   --bg-2: 246 248 250;
   --bg-3: 234 238 243;
-  --border: 217 223 231;
-  --border-strong: 195 204 216;
+  --border: 204 211 221;
+  --border-strong: 172 184 199;
 
   --fg: 26 32 41;
   --fg-muted: 92 105 121;
@@ -96,6 +178,7 @@
   code, pre, kbd { font-family: var(--font-mono); }
   ::selection { background: var(--selection); }
   button { font: inherit; color: inherit; }
+  button:not(:disabled), [role='button']:not(:disabled) { cursor: pointer; }
   input, textarea, select { font: inherit; color: inherit; }
   input::placeholder, textarea::placeholder { color: rgb(var(--fg-faint)); }
   a { color: rgb(var(--accent)); text-decoration: none; }
@@ -203,6 +286,8 @@
   }
   .tree-row:hover { background: rgb(var(--bg-3) / 0.7); }
   .tree-row-selected { background: rgb(var(--accent) / 0.14) !important; }
+  :root[data-theme='light'] .tree-row-selected { background: rgb(var(--accent) / 0.2) !important; }
+  :root[data-theme='light'] .list-row-active { background: rgb(var(--accent) / 0.16); }
   .tree-row-selected .tree-label { @apply text-fg font-medium; }
   .tree-guide {
     @apply absolute top-0 bottom-0 w-px;
@@ -254,4 +339,3 @@
   }
 }
 
-@tailwind utilities;

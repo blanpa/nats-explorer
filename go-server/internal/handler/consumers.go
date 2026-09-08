@@ -165,6 +165,75 @@ func (h *ConsumersHandler) Create(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, consumerInfoToMap(ci))
 }
 
+// Update answers PUT /api/streams/{stream}/consumers/{consumer}: the fields
+// JetStream allows to change on an existing consumer. Deliver and ack
+// policies are fixed at creation and rejected here.
+func (h *ConsumersHandler) Update(w http.ResponseWriter, r *http.Request) {
+	js, s, ctx, cancel, ok := h.stream(w, r)
+	if !ok {
+		return
+	}
+	defer cancel()
+	var in struct {
+		Description   *string `json:"description"`
+		AckWait       *int64  `json:"ackWait"` // nanoseconds
+		MaxDeliver    *int    `json:"maxDeliver"`
+		MaxAckPending *int    `json:"maxAckPending"`
+		FilterSubject *string `json:"filterSubject"`
+		DeliverPolicy string  `json:"deliverPolicy,omitempty"`
+		AckPolicy     string  `json:"ackPolicy,omitempty"`
+	}
+	if err := decodeBody(r, &in); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	c, err := s.Consumer(ctx, urlParam(r, "consumer"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	ci, err := c.Info(ctx)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	cfg := ci.Config
+	if in.DeliverPolicy != "" && in.DeliverPolicy != cfg.DeliverPolicy.String() {
+		writeError(w, http.StatusBadRequest, "the deliver policy cannot be changed on an existing consumer")
+		return
+	}
+	if in.AckPolicy != "" && in.AckPolicy != cfg.AckPolicy.String() {
+		writeError(w, http.StatusBadRequest, "the ack policy cannot be changed on an existing consumer")
+		return
+	}
+	if in.Description != nil {
+		cfg.Description = *in.Description
+	}
+	if in.AckWait != nil && *in.AckWait > 0 {
+		cfg.AckWait = time.Duration(*in.AckWait)
+	}
+	if in.MaxDeliver != nil {
+		cfg.MaxDeliver = *in.MaxDeliver
+	}
+	if in.MaxAckPending != nil {
+		cfg.MaxAckPending = *in.MaxAckPending
+	}
+	if in.FilterSubject != nil {
+		cfg.FilterSubject = *in.FilterSubject
+		cfg.FilterSubjects = nil
+	}
+	updated, err := js.UpdateConsumer(ctx, urlParam(r, "stream"), cfg)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if ci, err := updated.Info(ctx); err == nil {
+		writeJSON(w, consumerInfoToMap(ci))
+		return
+	}
+	writeJSON(w, map[string]interface{}{"success": true, "name": cfg.Name})
+}
+
 func (h *ConsumersHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	_, s, ctx, cancel, ok := h.stream(w, r)
 	if !ok {

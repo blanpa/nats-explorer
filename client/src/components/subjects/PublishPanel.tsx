@@ -64,11 +64,13 @@ export default function PublishPanel() {
     }
   }, [prefill, clearPrefill]);
 
-  const activeTemplate = templateId ? saved.find(s => s.id === templateId) ?? null : null;
+  const activeTemplate = templateId ? (saved.find(s => s.id === templateId) ?? null) : null;
 
   const send = () => {
     if (!effective) return;
-    setRecent(pushRecent({ mode: draft.mode, subject: draft.subject.trim(), payload: draft.payload, headers: draft.headers.filter(h => h.key.trim()), ts: Date.now() }));
+    setRecent(
+      pushRecent({ mode: draft.mode, subject: draft.subject.trim(), payload: draft.payload, headers: draft.headers.filter(h => h.key.trim()), ts: Date.now() }),
+    );
     runner.send(draft, effective);
   };
 
@@ -105,7 +107,9 @@ export default function PublishPanel() {
                     }}
                     className={cn(itemClass, t.id === templateId && 'bg-accent/10')}
                   >
-                    <span className={cn('font-mono text-xs w-8 shrink-0', t.mode === 'request' ? 'text-info' : 'text-accent')}>{t.mode === 'request' ? 'REQ' : 'PUB'}</span>
+                    <span className={cn('font-mono text-xs w-8 shrink-0', t.mode === 'request' ? 'text-info' : 'text-accent')}>
+                      {t.mode === 'request' ? 'REQ' : 'PUB'}
+                    </span>
                     <span className="flex flex-col min-w-0 flex-1">
                       <span className="truncate">{t.name}</span>
                       <span className="font-mono text-xs text-muted truncate">
@@ -197,7 +201,15 @@ export default function PublishPanel() {
           }}
         >
           <span className="text-xs text-muted">Template name</span>
-          <Input inputSize="sm" className="w-64" autoFocus value={name} onChange={e => setName(e.target.value)} placeholder={draft.subject.trim() || 'e.g. Inventory lookup'} aria-label="Template name" />
+          <Input
+            inputSize="sm"
+            className="w-64"
+            autoFocus
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder={draft.subject.trim() || 'e.g. Inventory lookup'}
+            aria-label="Template name"
+          />
           <Button size="sm" variant="primary" type="submit">
             Save
           </Button>

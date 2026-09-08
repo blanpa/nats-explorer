@@ -41,7 +41,13 @@ export const JsonTree = memo(function JsonTree({ data, depth = 0, path = '', onF
   const entries: [string, unknown][] = isArray ? (data as unknown[]).map((v, i) => [String(i), v]) : Object.entries(data as Record<string, unknown>);
   const [open, close] = isArray ? ['[', ']'] : ['{', '}'];
 
-  if (entries.length === 0) return <span className="jv-punct">{open}{close}</span>;
+  if (entries.length === 0)
+    return (
+      <span className="jv-punct">
+        {open}
+        {close}
+      </span>
+    );
 
   if (collapsed) {
     return (

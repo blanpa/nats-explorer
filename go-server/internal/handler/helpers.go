@@ -53,6 +53,12 @@ func jetStreamFor(store *connection.Store, r *http.Request) (jetstream.JetStream
 	return jetStreamForConn(store, connIDFromRequest(r), r.URL.Query().Get("domain"))
 }
 
+// JetStreamFor is jetStreamForConn for callers outside this package (the
+// support bundle), with the connection's own domain.
+func JetStreamFor(store *connection.Store, connID string) (jetstream.JetStream, error) {
+	return jetStreamForConn(store, connID, "")
+}
+
 func jetStreamForConn(store *connection.Store, connID, domainOverride string) (jetstream.JetStream, error) {
 	m, ok := store.Get(connID)
 	if !ok || m.NC == nil {

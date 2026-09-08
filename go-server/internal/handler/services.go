@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -45,6 +46,12 @@ func (h *ServicesHandler) discoverVia(w http.ResponseWriter, r *http.Request, su
 
 	inbox := nc.NewRespInbox()
 	sub, err := nc.Subscribe(inbox, func(msg *nats.Msg) {
+		// Without a responder the server answers with an empty 503 message.
+		// It carries no service, and passing it on would put a null into the
+		// list the browser reads.
+		if !isServiceReply(msg) {
+			return
+		}
 		mu.Lock()
 		defer mu.Unlock()
 		if len(results) < maxDiscoverResults {
@@ -75,6 +82,16 @@ func (h *ServicesHandler) discoverVia(w http.ResponseWriter, r *http.Request, su
 	mu.Unlock()
 
 	writeJSON(w, out)
+}
+
+// isServiceReply reports whether a reply carries a service description: a
+// JSON object, not a status message and not empty.
+func isServiceReply(msg *nats.Msg) bool {
+	if msg.Header.Get("Status") != "" {
+		return false
+	}
+	data := bytes.TrimSpace(msg.Data)
+	return len(data) > 0 && data[0] == '{' && json.Valid(data)
 }
 
 func (h *ServicesHandler) Discover(w http.ResponseWriter, r *http.Request) {

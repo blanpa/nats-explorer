@@ -5,7 +5,7 @@ const jc = JSONCodec();
 
 async function main() {
   console.log('Connecting to NATS...');
-  const nc = await connect({ servers: 'nats://localhost:4230' });
+  const nc = await connect({ servers: process.env.NATS_URL ?? 'nats://localhost:4230' });
   const jsm = await nc.jetstreamManager();
   const js = nc.jetstream();
 
@@ -23,7 +23,9 @@ async function main() {
       description: 'Unified Namespace - ISA-95 hierarchy for all plant data',
     });
     console.log('Created stream: UNS (uns.>)');
-  } catch (e) { console.log('Stream UNS:', e.message); }
+  } catch (e) {
+    console.log('Stream UNS:', e.message);
+  }
 
   // 2. Events Stream
   try {
@@ -37,7 +39,9 @@ async function main() {
       description: 'Machine events, alarms, and notifications',
     });
     console.log('Created stream: EVENTS (events.>)');
-  } catch (e) { console.log('Stream EVENTS:', e.message); }
+  } catch (e) {
+    console.log('Stream EVENTS:', e.message);
+  }
 
   // 3. Commands Stream
   try {
@@ -50,7 +54,9 @@ async function main() {
       description: 'Command queue for machine control',
     });
     console.log('Created stream: COMMANDS (cmd.>)');
-  } catch (e) { console.log('Stream COMMANDS:', e.message); }
+  } catch (e) {
+    console.log('Stream COMMANDS:', e.message);
+  }
 
   // 4. Metrics Stream
   try {
@@ -64,7 +70,9 @@ async function main() {
       description: 'Aggregated metrics and KPIs',
     });
     console.log('Created stream: METRICS (metrics.>)');
-  } catch (e) { console.log('Stream METRICS:', e.message); }
+  } catch (e) {
+    console.log('Stream METRICS:', e.message);
+  }
 
   // 5. Audit Stream
   try {
@@ -78,7 +86,9 @@ async function main() {
       description: 'Audit log for compliance and traceability',
     });
     console.log('Created stream: AUDIT (audit.>)');
-  } catch (e) { console.log('Stream AUDIT:', e.message); }
+  } catch (e) {
+    console.log('Stream AUDIT:', e.message);
+  }
 
   // Create consumers
   console.log('\n=== Creating Consumers ===\n');
@@ -92,7 +102,9 @@ async function main() {
       filter_subject: 'uns.>',
     });
     console.log('Created consumer: UNS/historian');
-  } catch (e) { console.log('Consumer historian:', e.message); }
+  } catch (e) {
+    console.log('Consumer historian:', e.message);
+  }
 
   try {
     await jsm.consumers.add('UNS', {
@@ -102,7 +114,9 @@ async function main() {
       ack_policy: 'none',
     });
     console.log('Created consumer: UNS/dashboard');
-  } catch (e) { console.log('Consumer dashboard:', e.message); }
+  } catch (e) {
+    console.log('Consumer dashboard:', e.message);
+  }
 
   try {
     await jsm.consumers.add('EVENTS', {
@@ -113,7 +127,9 @@ async function main() {
       filter_subject: 'events.alarm.>',
     });
     console.log('Created consumer: EVENTS/alert-service');
-  } catch (e) { console.log('Consumer alert-service:', e.message); }
+  } catch (e) {
+    console.log('Consumer alert-service:', e.message);
+  }
 
   try {
     await jsm.consumers.add('COMMANDS', {
@@ -124,7 +140,9 @@ async function main() {
       max_deliver: 3,
     });
     console.log('Created consumer: COMMANDS/plc-gateway');
-  } catch (e) { console.log('Consumer plc-gateway:', e.message); }
+  } catch (e) {
+    console.log('Consumer plc-gateway:', e.message);
+  }
 
   // KV Buckets
   console.log('\n=== Creating KV Buckets ===\n');
@@ -138,16 +156,113 @@ async function main() {
   console.log('Created KV: device-registry');
 
   const devices = {
-    'robot-01': { type: 'robot', manufacturer: 'KUKA', model: 'KR 16-2', serial: 'KR16-2024-0451', firmware: 'v8.3.12', location: 'line-1.cell-a', status: 'running', installDate: '2023-06-15', lastMaintenance: '2024-11-20' },
-    'robot-02': { type: 'robot', manufacturer: 'ABB', model: 'IRB 6700', serial: 'IRB67-2024-0892', firmware: 'v7.1.4', location: 'line-1.cell-b', status: 'running', installDate: '2023-08-22', lastMaintenance: '2024-12-05' },
-    'cnc-01': { type: 'cnc', manufacturer: 'DMG MORI', model: 'NLX 2500', serial: 'NLX25-2023-1123', firmware: 'v4.2.1', location: 'line-2.station-1', status: 'running', installDate: '2022-03-10', lastMaintenance: '2025-01-15' },
-    'cnc-02': { type: 'cnc', manufacturer: 'Haas', model: 'ST-20Y', serial: 'ST20Y-2024-0334', firmware: 'v3.8.7', location: 'line-2.station-2', status: 'maintenance', installDate: '2024-01-20', lastMaintenance: '2025-03-10' },
-    'conveyor-01': { type: 'conveyor', manufacturer: 'Siemens', model: 'S120', serial: 'S120-2023-5567', firmware: 'v5.6.2', location: 'line-1.transport', status: 'running', installDate: '2023-04-01', lastMaintenance: '2024-10-30' },
-    'sensor-temp-01': { type: 'sensor', manufacturer: 'Endress+Hauser', model: 'iTHERM TM411', serial: 'TM411-0891', firmware: 'v2.1.0', location: 'line-1.cell-a.ambient', status: 'running', installDate: '2023-06-15' },
-    'sensor-temp-02': { type: 'sensor', manufacturer: 'Endress+Hauser', model: 'iTHERM TM411', serial: 'TM411-0892', firmware: 'v2.1.0', location: 'line-2.station-1.coolant', status: 'running', installDate: '2023-06-15' },
-    'plc-01': { type: 'plc', manufacturer: 'Siemens', model: 'S7-1500', serial: 'S7-2023-7789', firmware: 'v2.9.4', location: 'line-1.control', status: 'running', installDate: '2022-11-05', lastMaintenance: '2024-08-20' },
-    'plc-02': { type: 'plc', manufacturer: 'Beckhoff', model: 'CX5130', serial: 'CX51-2024-1234', firmware: 'v3.1.4088', location: 'line-2.control', status: 'running', installDate: '2024-02-14' },
-    'agv-01': { type: 'agv', manufacturer: 'MiR', model: 'MiR250', serial: 'MIR250-2024-0223', firmware: 'v3.0.1', location: 'warehouse.zone-a', status: 'running', installDate: '2024-05-10', battery: 78 },
+    'robot-01': {
+      type: 'robot',
+      manufacturer: 'KUKA',
+      model: 'KR 16-2',
+      serial: 'KR16-2024-0451',
+      firmware: 'v8.3.12',
+      location: 'line-1.cell-a',
+      status: 'running',
+      installDate: '2023-06-15',
+      lastMaintenance: '2024-11-20',
+    },
+    'robot-02': {
+      type: 'robot',
+      manufacturer: 'ABB',
+      model: 'IRB 6700',
+      serial: 'IRB67-2024-0892',
+      firmware: 'v7.1.4',
+      location: 'line-1.cell-b',
+      status: 'running',
+      installDate: '2023-08-22',
+      lastMaintenance: '2024-12-05',
+    },
+    'cnc-01': {
+      type: 'cnc',
+      manufacturer: 'DMG MORI',
+      model: 'NLX 2500',
+      serial: 'NLX25-2023-1123',
+      firmware: 'v4.2.1',
+      location: 'line-2.station-1',
+      status: 'running',
+      installDate: '2022-03-10',
+      lastMaintenance: '2025-01-15',
+    },
+    'cnc-02': {
+      type: 'cnc',
+      manufacturer: 'Haas',
+      model: 'ST-20Y',
+      serial: 'ST20Y-2024-0334',
+      firmware: 'v3.8.7',
+      location: 'line-2.station-2',
+      status: 'maintenance',
+      installDate: '2024-01-20',
+      lastMaintenance: '2025-03-10',
+    },
+    'conveyor-01': {
+      type: 'conveyor',
+      manufacturer: 'Siemens',
+      model: 'S120',
+      serial: 'S120-2023-5567',
+      firmware: 'v5.6.2',
+      location: 'line-1.transport',
+      status: 'running',
+      installDate: '2023-04-01',
+      lastMaintenance: '2024-10-30',
+    },
+    'sensor-temp-01': {
+      type: 'sensor',
+      manufacturer: 'Endress+Hauser',
+      model: 'iTHERM TM411',
+      serial: 'TM411-0891',
+      firmware: 'v2.1.0',
+      location: 'line-1.cell-a.ambient',
+      status: 'running',
+      installDate: '2023-06-15',
+    },
+    'sensor-temp-02': {
+      type: 'sensor',
+      manufacturer: 'Endress+Hauser',
+      model: 'iTHERM TM411',
+      serial: 'TM411-0892',
+      firmware: 'v2.1.0',
+      location: 'line-2.station-1.coolant',
+      status: 'running',
+      installDate: '2023-06-15',
+    },
+    'plc-01': {
+      type: 'plc',
+      manufacturer: 'Siemens',
+      model: 'S7-1500',
+      serial: 'S7-2023-7789',
+      firmware: 'v2.9.4',
+      location: 'line-1.control',
+      status: 'running',
+      installDate: '2022-11-05',
+      lastMaintenance: '2024-08-20',
+    },
+    'plc-02': {
+      type: 'plc',
+      manufacturer: 'Beckhoff',
+      model: 'CX5130',
+      serial: 'CX51-2024-1234',
+      firmware: 'v3.1.4088',
+      location: 'line-2.control',
+      status: 'running',
+      installDate: '2024-02-14',
+    },
+    'agv-01': {
+      type: 'agv',
+      manufacturer: 'MiR',
+      model: 'MiR250',
+      serial: 'MIR250-2024-0223',
+      firmware: 'v3.0.1',
+      location: 'warehouse.zone-a',
+      status: 'running',
+      installDate: '2024-05-10',
+      battery: 78,
+    },
   };
 
   for (const [id, meta] of Object.entries(devices)) {
@@ -214,36 +329,63 @@ async function main() {
 
   // Create some sample report objects
   const reports = [
-    { name: 'shift-report-2025-03-16-morning.json', content: JSON.stringify({
-      date: '2025-03-16', shift: 'morning', operator: 'Mueller',
-      line1: { produced: 892, rejected: 12, oee: 87.3 },
-      line2: { produced: 634, rejected: 5, oee: 92.1 },
-      notes: 'CNC-02 scheduled for maintenance next shift',
-    }, null, 2)},
-    { name: 'shift-report-2025-03-15-afternoon.json', content: JSON.stringify({
-      date: '2025-03-15', shift: 'afternoon', operator: 'Schmidt',
-      line1: { produced: 910, rejected: 8, oee: 89.5 },
-      line2: { produced: 645, rejected: 3, oee: 93.8 },
-      notes: 'All systems nominal',
-    }, null, 2)},
-    { name: 'maintenance-log-2025-03.csv', content:
-`Date,Device,Type,Duration_min,Technician,Notes
+    {
+      name: 'shift-report-2025-03-16-morning.json',
+      content: JSON.stringify(
+        {
+          date: '2025-03-16',
+          shift: 'morning',
+          operator: 'Mueller',
+          line1: { produced: 892, rejected: 12, oee: 87.3 },
+          line2: { produced: 634, rejected: 5, oee: 92.1 },
+          notes: 'CNC-02 scheduled for maintenance next shift',
+        },
+        null,
+        2,
+      ),
+    },
+    {
+      name: 'shift-report-2025-03-15-afternoon.json',
+      content: JSON.stringify(
+        {
+          date: '2025-03-15',
+          shift: 'afternoon',
+          operator: 'Schmidt',
+          line1: { produced: 910, rejected: 8, oee: 89.5 },
+          line2: { produced: 645, rejected: 3, oee: 93.8 },
+          notes: 'All systems nominal',
+        },
+        null,
+        2,
+      ),
+    },
+    {
+      name: 'maintenance-log-2025-03.csv',
+      content: `Date,Device,Type,Duration_min,Technician,Notes
 2025-03-01,cnc-01,preventive,120,Weber,Spindle bearing replaced
 2025-03-05,robot-01,corrective,45,Fischer,Gripper recalibrated
 2025-03-10,cnc-02,preventive,180,Weber,Full service - coolant system flushed
 2025-03-12,conveyor-01,corrective,30,Braun,Belt tension adjusted
-2025-03-15,plc-01,preventive,60,Fischer,Firmware update to v2.9.4`
+2025-03-15,plc-01,preventive,60,Fischer,Firmware update to v2.9.4`,
     },
-    { name: 'quality-report-week-11.json', content: JSON.stringify({
-      week: 11, year: 2025,
-      overall_quality: 98.7,
-      by_line: { 'line-1': 98.2, 'line-2': 99.1 },
-      top_defects: [
-        { type: 'surface_scratch', count: 14, line: 'line-1' },
-        { type: 'dimension_out_of_spec', count: 8, line: 'line-1' },
-        { type: 'surface_scratch', count: 3, line: 'line-2' },
-      ],
-    }, null, 2)},
+    {
+      name: 'quality-report-week-11.json',
+      content: JSON.stringify(
+        {
+          week: 11,
+          year: 2025,
+          overall_quality: 98.7,
+          by_line: { 'line-1': 98.2, 'line-2': 99.1 },
+          top_defects: [
+            { type: 'surface_scratch', count: 14, line: 'line-1' },
+            { type: 'dimension_out_of_spec', count: 8, line: 'line-1' },
+            { type: 'surface_scratch', count: 3, line: 'line-2' },
+          ],
+        },
+        null,
+        2,
+      ),
+    },
   ];
 
   for (const report of reports) {
@@ -267,17 +409,32 @@ async function main() {
     ['uns.acme.factory-berlin.machining.line-2.cnc-01.spindle', { rpm: 8500, load: 62, temperature: 48.3, vibration: 1.2 }],
     ['uns.acme.factory-berlin.machining.line-2.cnc-01.status', { state: 'running', mode: 'auto', program: 'OP-4523', parts_completed: 234, tool_wear: 67 }],
     ['uns.acme.factory-berlin.machining.line-2.cnc-01.coolant', { flow: 14.8, temperature: 21.3, level: 78, unit: 'l/min | celsius | percent' }],
-    ['uns.acme.factory-berlin.machining.line-2.cnc-02.status', { state: 'maintenance', mode: 'manual', program: null, parts_completed: 0, reason: 'Scheduled preventive maintenance' }],
+    [
+      'uns.acme.factory-berlin.machining.line-2.cnc-02.status',
+      { state: 'maintenance', mode: 'manual', program: null, parts_completed: 0, reason: 'Scheduled preventive maintenance' },
+    ],
     ['uns.acme.factory-berlin.machining.line-2.sensor-temp-02.value', { value: 21.3, unit: 'celsius', quality: 'good' }],
     ['uns.acme.factory-berlin.machining.line-2.plc-02.status', { state: 'run', scan_time_ms: 1.8, memory_usage: 38, io_errors: 0 }],
     ['uns.acme.factory-berlin.logistics.warehouse.agv-01.position', { x: 12.4, y: 8.7, floor: 1, zone: 'A', heading: 127.5 }],
-    ['uns.acme.factory-berlin.logistics.warehouse.agv-01.status', { state: 'delivering', battery: 78, speed: 0.8, payload_kg: 45, destination: 'line-1.input' }],
-    ['uns.acme.factory-berlin.energy.main-meter.power', { active_kw: 342.5, reactive_kvar: 87.3, power_factor: 0.97, voltage_v: [400.1, 399.8, 400.3], current_a: [495.2, 498.1, 492.7] }],
+    [
+      'uns.acme.factory-berlin.logistics.warehouse.agv-01.status',
+      { state: 'delivering', battery: 78, speed: 0.8, payload_kg: 45, destination: 'line-1.input' },
+    ],
+    [
+      'uns.acme.factory-berlin.energy.main-meter.power',
+      { active_kw: 342.5, reactive_kvar: 87.3, power_factor: 0.97, voltage_v: [400.1, 399.8, 400.3], current_a: [495.2, 498.1, 492.7] },
+    ],
     ['uns.acme.factory-berlin.energy.main-meter.consumption', { today_kwh: 2845.7, month_kwh: 48923.4, year_kwh: 289345.1 }],
     ['uns.acme.factory-berlin.environment.hvac.temperature', { indoor: 22.4, outdoor: 8.3, setpoint: 22.0, unit: 'celsius' }],
     ['uns.acme.factory-berlin.environment.hvac.humidity', { indoor: 45.2, outdoor: 78.1, setpoint: 45.0, unit: 'percent' }],
-    ['uns.acme.factory-berlin.quality.line-1.current-batch', { batch_id: 'B-2025-0316-001', product: 'Assembly-A', started: '2025-03-16T06:00:00Z', produced: 892, rejected: 12, quality: 98.7 }],
-    ['uns.acme.factory-berlin.quality.line-2.current-batch', { batch_id: 'B-2025-0316-002', product: 'Part-X7', started: '2025-03-16T06:00:00Z', produced: 634, rejected: 5, quality: 99.2 }],
+    [
+      'uns.acme.factory-berlin.quality.line-1.current-batch',
+      { batch_id: 'B-2025-0316-001', product: 'Assembly-A', started: '2025-03-16T06:00:00Z', produced: 892, rejected: 12, quality: 98.7 },
+    ],
+    [
+      'uns.acme.factory-berlin.quality.line-2.current-batch',
+      { batch_id: 'B-2025-0316-002', product: 'Part-X7', started: '2025-03-16T06:00:00Z', produced: 634, rejected: 5, quality: 99.2 },
+    ],
   ];
 
   for (const [subject, data] of unsMessages) {
@@ -287,7 +444,10 @@ async function main() {
 
   // Some events
   const events = [
-    ['events.alarm.line-1.robot-01', { alarm_id: 'ALM-004', severity: 'warning', message: 'Vibration level 3.8 mm/s approaching threshold', value: 3.8, threshold: 4.5, timestamp: now }],
+    [
+      'events.alarm.line-1.robot-01',
+      { alarm_id: 'ALM-004', severity: 'warning', message: 'Vibration level 3.8 mm/s approaching threshold', value: 3.8, threshold: 4.5, timestamp: now },
+    ],
     ['events.production.line-1.batch-start', { batch_id: 'B-2025-0316-001', product: 'Assembly-A', target: 1000, timestamp: now }],
     ['events.maintenance.cnc-02.started', { type: 'preventive', technician: 'Weber', estimated_duration_min: 180, timestamp: now }],
     ['events.system.nats-explorer.connected', { user: 'dev', source: 'seed-script', timestamp: now }],
@@ -302,7 +462,7 @@ async function main() {
   const metrics = [
     ['metrics.oee.line-1', { oee: 87.3, availability: 95.2, performance: 91.8, quality: 99.8, timestamp: now }],
     ['metrics.oee.line-2', { oee: 92.1, availability: 97.5, performance: 94.5, quality: 99.9, timestamp: now }],
-    ['metrics.energy.factory', { consumption_kw: 342.5, cost_eur_h: 41.10, co2_kg_h: 137.0, timestamp: now }],
+    ['metrics.energy.factory', { consumption_kw: 342.5, cost_eur_h: 41.1, co2_kg_h: 137.0, timestamp: now }],
     ['metrics.production.line-1', { rate: 112, target: 120, efficiency: 93.3, timestamp: now }],
     ['metrics.production.line-2', { rate: 82, target: 85, efficiency: 96.5, timestamp: now }],
   ];
@@ -322,7 +482,7 @@ function readableFromString(str) {
     start(controller) {
       controller.enqueue(new TextEncoder().encode(str));
       controller.close();
-    }
+    },
   });
 }
 

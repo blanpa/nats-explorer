@@ -6,17 +6,21 @@
 #   scripts/build-server.sh linux/amd64     # one platform (GOOS/GOARCH)
 #   scripts/build-server.sh current         # this machine, unpackaged, into dist/nats-explorer
 #
-# Expects client/dist to exist (pnpm --filter client build). VERSION defaults
+# Expects client/dist to exist (bun run --filter client build). VERSION defaults
 # to the last git tag.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="${VERSION:-$(git -C "$ROOT" describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo 0.0.0)}"
 VERSION="${VERSION#v}"
+# Stamped so the "source" link in the UI points at the commit this was built
+# from, which is what the AGPL asks a network deployment to offer.
+COMMIT="${COMMIT:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo "")}"
+LDFLAGS="-s -w -X main.version=$VERSION -X main.commit=$COMMIT"
 OUT="$ROOT/dist/server"
-[ -d "$ROOT/client/dist" ] || { echo "client/dist missing: run pnpm --filter client build first" >&2; exit 1; }
+[ -d "$ROOT/client/dist" ] || { echo "client/dist missing: run bun run --filter client build first" >&2; exit 1; }
 
 if [ "${1:-}" = current ]; then
-  (cd "$ROOT/go-server" && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$ROOT/dist/nats-explorer" .)
+  (cd "$ROOT/go-server" && CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS" -o "$ROOT/dist/nats-explorer" .)
   echo "built dist/nats-explorer (serves client/dist)"
   exit 0
 fi
@@ -33,7 +37,7 @@ for t in $targets; do
   ext=""; [ "$goos" = windows ] && ext=.exe
   pkg="nats-explorer-server-$VERSION-$name"
   rm -rf "$OUT/$pkg"; mkdir -p "$OUT/$pkg"
-  (cd "$ROOT/go-server" && CGO_ENABLED=0 GOOS=$goos GOARCH=$goarch go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$OUT/$pkg/nats-explorer$ext" .)
+  (cd "$ROOT/go-server" && CGO_ENABLED=0 GOOS=$goos GOARCH=$goarch go build -trimpath -ldflags "$LDFLAGS" -o "$OUT/$pkg/nats-explorer$ext" .)
   cp -r "$ROOT/client/dist" "$OUT/$pkg/public"
   cat > "$OUT/$pkg/README.txt" <<TXT
 NATS Explorer $VERSION, server build for $name.

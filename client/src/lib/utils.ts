@@ -18,8 +18,15 @@ export function formatBytes(bytes: number | undefined | null): string {
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
   const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
-  const value = bytes / Math.pow(k, i);
+  const value = bytes / k ** i;
   return `${value >= 100 || i === 0 ? Math.round(value) : value.toFixed(1)} ${sizes[i]}`;
+}
+
+const COUNT = new Intl.NumberFormat('en-US');
+
+/** Plain count with thousands separators; the same format regardless of the browser locale. */
+export function formatCount(n: number): string {
+  return COUNT.format(n);
 }
 
 export function formatNumber(n: number | undefined | null): string {
@@ -28,7 +35,7 @@ export function formatNumber(n: number | undefined | null): string {
   if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 10_000) return `${(n / 1000).toFixed(1)}K`;
-  return n.toLocaleString();
+  return formatCount(n);
 }
 
 /** Formats a nanosecond duration such as JetStream max_age. */
@@ -76,10 +83,6 @@ export function formatRelative(ts: number | string | Date): string {
 
 export function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max)}…` : s;
-}
-
-export function pluralize(n: number, one: string, many = `${one}s`): string {
-  return `${n.toLocaleString()} ${n === 1 ? one : many}`;
 }
 
 /* ---------------------------------------------------------------------------

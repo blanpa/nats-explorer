@@ -2,44 +2,68 @@
 
 A NATS management tool and message explorer inspired by MQTT Explorer, available as a desktop app for Windows, macOS and Linux and as a web UI served by a single Go binary or Docker image. Browse subjects as a live tree, manage JetStream streams, Key-Value and Object Stores, run and repeat requests, and watch servers, clusters and leaf nodes -- with dark and light themes.
 
+Documentation: **[blanpa.github.io/nats-explorer](https://blanpa.github.io/nats-explorer/)** --
+[installation](https://blanpa.github.io/nats-explorer/installation.html),
+[features](https://blanpa.github.io/nats-explorer/features.html),
+[deployment](https://blanpa.github.io/nats-explorer/deployment.html),
+[architecture and API](https://blanpa.github.io/nats-explorer/architecture.html).
 See the [changelog](CHANGELOG.md) for what changed in each release.
 
-![Subject explorer](docs/screenshots/subjects-dark.png)
+![The subject tree with the history, the value chart and the payload of a subject](docs/screenshots/subjects-dark.png)
 
 <details>
 <summary>More screenshots</summary>
 
-![JetStream, light theme](docs/screenshots/jetstream-light.png)
-![Monitoring](docs/screenshots/monitoring-dark.png)
-![Connections](docs/screenshots/connections-dark.png)
+![A stream with its limits, configuration and placement, light theme](docs/screenshots/jetstream-light.png)
+![Alerts: what is firing, the rules behind it and the log](docs/screenshots/alerts-dark.png)
+![Server monitoring with the throughput history](docs/screenshots/monitoring-dark.png)
+![A repeated request with latency percentiles and the histogram of the replies](docs/screenshots/requests-dark.png)
+![A Key-Value bucket with a key, its value and its revisions](docs/screenshots/kv-dark.png)
+![Several NATS servers in the connection switcher](docs/screenshots/connections-dark.png)
 
 </details>
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Documentation](https://img.shields.io/badge/docs-blanpa.github.io-2ea44f.svg)](https://blanpa.github.io/nats-explorer/)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 ![Go](https://img.shields.io/badge/go-1.26%2B-00ADD8.svg)
 ![NATS](https://img.shields.io/badge/NATS-2.10%2B-purple.svg)
 [![Sponsor](https://img.shields.io/github/sponsors/blanpa?label=Sponsor&logo=githubsponsors&logoColor=white&color=EA4AAA)](https://github.com/sponsors/blanpa)
 
 ---
 
-## Install
+## Download
 
-Every release on the [Releases page](https://github.com/blanpa/nats-explorer/releases) ships the desktop app for all three platforms plus headless server builds and a Docker image.
+The links below always resolve to the newest release. The [Releases page](https://github.com/blanpa/nats-explorer/releases) has the same files with the version in their name, the release notes and every older build.
 
-| Platform | File | Notes |
+### Desktop app
+
+| Platform | Download | Notes |
 |---|---|---|
-| Windows 10/11 | `nats-explorer-desktop-<version>-windows-x64-setup.exe` | Per-user installer, no admin rights needed; creates Start-menu entry and uninstaller. `…-windows-x64.zip` is the portable variant. Uses the Edge WebView2 runtime (present on Windows 11; downloaded on first start otherwise). The installer is not code-signed: SmartScreen shows "unknown publisher", choose *More info → Run anyway*. |
-| macOS 11+ (Intel and Apple Silicon) | `nats-explorer-desktop-<version>-macos-universal.dmg` | Drag *NATS Explorer* to *Applications*. The app is not notarized: on first start right-click → *Open*, or run `xattr -dr com.apple.quarantine "/Applications/NATS Explorer.app"`. |
-| Linux | `…-linux-x64.AppImage`, `…-linux-x64.deb`, `…-linux-x64.tar.gz` | AppImage: `chmod +x` and run. Debian/Ubuntu: `sudo apt install ./nats-explorer-desktop-<version>-linux-x64.deb` (pulls `libwebkit2gtk-4.1-0`). |
-| Server / headless | `nats-explorer-server-<version>-<os>-<arch>.tar.gz` / `.zip` | Run the binary; it serves the UI on http://localhost:3002. Env: `PORT`, `PUBLIC_PATH`, `AUTH_TOKEN`. |
-| Docker | `ghcr.io/blanpa/nats-explorer:<version>` | `docker run -p 3002:3002 ghcr.io/blanpa/nats-explorer:latest` |
+| Windows 10/11 | [Installer (.exe)](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-windows-x64-setup.exe) · [portable (.zip)](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-windows-x64.zip) | Per-user installer, no admin rights needed; creates Start-menu entry and uninstaller. Uses the Edge WebView2 runtime (present on Windows 11; downloaded on first start otherwise). The installer is not code-signed: SmartScreen shows "unknown publisher", choose *More info → Run anyway*. |
+| macOS 11+ (Intel and Apple Silicon) | [Disk image (.dmg)](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-macos-universal.dmg) · [app bundle (.zip)](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-macos-universal.zip) | Universal build. Drag *NATS Explorer* to *Applications*. The app is not notarized: on first start right-click → *Open*, or run `xattr -dr com.apple.quarantine "/Applications/NATS Explorer.app"`. |
+| Linux x64 | [AppImage](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-linux-x64.AppImage) · [.deb](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-linux-x64.deb) · [.tar.gz](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-linux-x64.tar.gz) | AppImage: `chmod +x` and run. Debian/Ubuntu: `sudo apt install ./nats-explorer-desktop-linux-x64.deb` (pulls `libwebkit2gtk-4.1-0`). |
+
+### Server and Docker
+
+The server is one binary that serves the web UI on http://localhost:3002. Env: `PORT`, `PUBLIC_PATH`, `AUTH_TOKEN`, `HISTORY_MB`; the full list is in the [installation guide](docs/installation.md).
+
+| Target | Download |
+|---|---|
+| Linux x64 | [nats-explorer-server-linux-x64.tar.gz](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-server-linux-x64.tar.gz) |
+| Linux arm64 | [nats-explorer-server-linux-arm64.tar.gz](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-server-linux-arm64.tar.gz) |
+| macOS arm64 (Apple Silicon) | [nats-explorer-server-macos-arm64.tar.gz](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-server-macos-arm64.tar.gz) |
+| macOS x64 (Intel) | [nats-explorer-server-macos-x64.tar.gz](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-server-macos-x64.tar.gz) |
+| Windows x64 | [nats-explorer-server-windows-x64.zip](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-server-windows-x64.zip) |
+| Docker | `docker run -p 3002:3002 ghcr.io/blanpa/nats-explorer:latest` ([all tags](https://github.com/blanpa/nats-explorer/pkgs/container/nats-explorer)) |
+
+Checksums for every file: [SHA256SUMS.txt](https://github.com/blanpa/nats-explorer/releases/latest/download/SHA256SUMS.txt).
 
 The desktop app is the same Go backend plus the UI in a native window (Wails, system webview). Connections, request templates and preferences are stored in `settings.json` under the OS config directory (`~/.config/nats-explorer`, `%AppData%\nats-explorer`, `~/Library/Application Support/nats-explorer`); credentials go to the system keyring (Secret Service, Keychain, Credential Manager) or, where none is available, to a `secrets.json` readable only by your user. Back up that directory to keep your setup. The same file storage can be enabled for a personal server with `STORAGE_DIR=/path` (`NO_KEYRING=1` forces the file fallback).
 
 ### Building the installers yourself
 
 ```bash
-pnpm install && pnpm --filter shared build && pnpm --filter client build
+bun install && bun run --filter shared build && bun run --filter client build
 scripts/build-desktop.sh --docker linux     # AppImage, .deb, tar.gz  (uses scripts/desktop-builder.Dockerfile)
 scripts/build-desktop.sh --docker windows   # NSIS installer + portable zip, cross-compiled
 scripts/build-desktop.sh macos              # on a Mac: universal .app + .dmg (needs the Wails CLI)
@@ -65,6 +89,17 @@ Releases are produced by `.github/workflows/release.yml` on every `v*` tag: the 
 - **TLS with certificates** -- CA certificate, client certificate and key can be pasted or loaded from files per connection (mutual TLS), plus an insecure mode for test setups
 - **Cluster module** -- every node of the cluster with version, uptime, CPU, memory, connections and JetStream usage, the JetStream meta cluster (leader, peers, lag, offline) and the placement of every stream with its leader and replicas. Needs system-account (`$SYS`) credentials on the connection; without them the module shows the connected node only
 - **Monitoring with history** -- messages/s and bytes/s in and out, connections, subscriptions, CPU and JetStream API rates over time, cluster routes and leaf nodes with their traffic
+- **Payload filter** -- A [CEL](https://cel.dev/) expression such as `payload.temp > 80` keeps only the subjects whose last message matches, and narrows the message list, the search, time ranges and charts with it
+- **Derived schema** -- The fields of a subject's JSON payloads with types, presence, ranges and examples, read from the recorded messages, with a marker when newer messages drift from older ones
+- **Alerts** -- Rules watch a subject pattern for an expression that holds or for a subject that fell silent, with severities, an optional webhook and a dry run against the recorded messages; they run in the backend, so they keep working with no browser open
+- **Persistent history** -- `HISTORY_DB` keeps a SQLite copy of every message with retention; a range picker (15 min to 7 days) shows any period in the same view as the live feed
+- **Search** -- Over one subject and everything below it, or across every subject, answered by a full-text index when a persistent history is configured
+- **Long-range charts** -- Minute aggregates behind the scenes, so a week of data is a few hundred points
+- **Bookmarks** -- Keep a subject with a name, group and note, and get back to it even when it is filtered out
+- **Support bundle** -- Export a time range plus the server snapshot as one zip and open it again in any explorer as a read-only connection
+- **Payload decoders** -- MessagePack, Protocol Buffers and Avro decoded into the JSON tree, per subject pattern
+- **Accounts and roles** -- `AUTH_TOKEN` or a users file with `admin` and `viewer`; sessions are HttpOnly cookies, and every write is recorded in an audit log
+- **Prometheus endpoint** -- `/metrics` with the explorer's own counters
 - **Themes** -- Dark and light, follows the OS preference on first start
 
 ---
@@ -81,20 +116,23 @@ Starts NATS (port 4222) and NATS Explorer (port 3002). Open `http://localhost:30
 
 ### Standalone Binary
 
-Download a `nats-explorer-server-<version>-<os>-<arch>` archive from [Releases](https://github.com/blanpa/nats-explorer/releases); the UI is bundled as `public/` next to the binary and found automatically:
+Take a server archive from the [download table](#server-and-docker); the UI is bundled as `public/` next to the binary and found automatically:
 
 ```bash
-# Linux / macOS
-tar xzf nats-explorer-server-0.2.0-linux-x64.tar.gz
-cd nats-explorer-server-0.2.0-linux-x64
-./nats-explorer
+# Linux / macOS (swap linux-x64 for your platform)
+curl -fL -o nats-explorer-server.tar.gz \
+  https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-server-linux-x64.tar.gz
+mkdir -p nats-explorer && tar xzf nats-explorer-server.tar.gz -C nats-explorer --strip-components=1
+cd nats-explorer && ./nats-explorer
 
-# Windows: extract nats-explorer-server-0.2.0-windows-x64.zip, then run nats-explorer.exe
+# Windows: extract nats-explorer-server-windows-x64.zip, then run nats-explorer.exe
 ```
 
 Open `http://localhost:3002` and configure your NATS server in the connection dialog. `STORAGE_DIR=/path` keeps connections and templates on the server instead of in the browser (single-user setups).
 
 ### Docker (standalone, no NATS included)
+
+Runs the released image against your own NATS server, with the message history on a volume:
 
 ```bash
 docker compose -f docker-compose.standalone.yml up -d
@@ -107,19 +145,19 @@ docker compose -f docker-compose.standalone.yml up -d
 ### Prerequisites
 
 - **Go** 1.24+
-- **Node.js** 20+ with **pnpm** (`corepack enable`)
+- **Bun** 1.2+ (package manager and script runner; Node.js is not required)
 - **Docker** (for the dev NATS server)
 
 ### Setup
 
 ```bash
-pnpm install
+bun install
 
 # Start dev NATS server with sample data
-pnpm nats:dev
+bun run nats:dev
 
 # Start Go backend + Vite frontend (hot reload)
-pnpm dev
+bun run dev
 ```
 
 The Go server runs on `http://localhost:3002`, the Vite dev server on `http://localhost:5173`.
@@ -127,11 +165,11 @@ The Go server runs on `http://localhost:3002`, the Vite dev server on `http://lo
 ### Tests
 
 ```bash
-pnpm --filter client test          # vitest unit tests
+bun run --filter client test       # vitest unit tests
 cd go-server && go test -race ./... # Go unit + end-to-end tests (embedded nats-server)
-pnpm nats:dev                      # dev NATS on :4230 with seed data, then:
-pnpm --filter e2e exec playwright install chromium
-pnpm test:e2e                      # Playwright smoke suite against http://localhost:3002
+bun run nats:dev                   # dev NATS on :4230 with seed data, then:
+cd e2e && bunx playwright install chromium && cd ..
+bun run test:e2e                   # Playwright smoke suite against http://localhost:3002
 ```
 
 The e2e suite honours `NE_URL`, `NATS_URL`, `NATS_MON_URL` and `PW_CHROME=/path/to/chrome`.
@@ -143,7 +181,7 @@ The e2e suite honours `NE_URL`, `NATS_URL`, `NATS_MON_URL` and `PW_CHROME=/path/
 | Layer   | Technology                                                   |
 | ------- | ------------------------------------------------------------ |
 | Backend | Go 1.26, chi router, gorilla/websocket, nats.go             |
-| Client  | React 18, TypeScript, Vite, Tailwind CSS, Zustand, Radix UI |
+| Client  | React 19, TypeScript, Vite 8, Tailwind 4, Zustand, Radix UI, Bun, Biome |
 | Shared  | TypeScript types (workspace package)                         |
 | Build   | Docker multi-stage, Go cross-compilation                     |
 | Deploy  | Docker, standalone binaries (no runtime dependencies)        |
@@ -162,7 +200,7 @@ The e2e suite honours `NE_URL`, `NATS_URL`, `NATS_MON_URL` and `PW_CHROME=/path/
 +------------------+    +--------+----------+
 |   Browser        | WS |   Go Server       |
 |   (React SPA)    +----+   (port 3002)     |
-|                  | HTTP|                   |
+|                  |HTTP|                   |
 |   - Subject Tree +----+ - Connection Store|
 |   - JetStream    |    | - Subscription Mgr|
 |   - KV / ObjStore|    | - Subject Tree    |
@@ -184,7 +222,7 @@ See [Building the installers yourself](#building-the-installers-yourself) above 
 ```bash
 scripts/build-server.sh              # all five platforms into dist/server/ (what the release ships)
 scripts/build-server.sh linux/arm64  # one platform
-pnpm build                           # this machine only: dist/nats-explorer serving client/dist
+bun run build                        # this machine only: dist/nats-explorer serving client/dist
 ```
 
 ### Docker image
@@ -195,7 +233,9 @@ docker build -f go-server/Dockerfile -t nats-explorer .
 
 ## Security
 
-The backend has no authentication and holds NATS credentials in memory; saved connections (including tokens and passwords) live unencrypted in the browser's local storage. Bind the port to localhost or a trusted network only.
+Without `AUTH_TOKEN` or `AUTH_USERS` the backend has no authentication: bind the port to localhost or a trusted network only. With either of them every API and websocket request needs a session, obtained once through the login and kept in an HttpOnly cookie; `AUTH_USERS` adds the roles `admin` and `viewer`, where a viewer cannot publish or change anything. Every write is recorded in the audit log, which only an admin may read.
+
+NATS credentials are held in memory. Saved connections, including tokens and passwords, live unencrypted in the browser's local storage unless `STORAGE_DIR` is set; then they go to a settings file on the server and the credentials to the system keyring, or to a `secrets.json` readable only by the user running the process.
 
 See [docs/review-2026-09.md](docs/review-2026-09.md) for the findings of the September 2026 code review and redesign.
 
@@ -207,7 +247,14 @@ See [docs/review-2026-09.md](docs/review-2026-09.md) for the findings of the Sep
 | ------------- | ------- | -------------------------------- |
 | `PORT`        | `3002`  | HTTP server port                 |
 | `PUBLIC_PATH` | --      | Path to client static files      |
-| `AUTH_TOKEN`  | --      | When set, every API and websocket request must carry the token (`Authorization: Bearer`, `X-Auth-Token` or `?token=`). The UI asks for it once per tab. |
+| `AUTH_TOKEN`  | --      | When set, every API and websocket request needs the token (`Authorization: Bearer`, `X-Auth-Token` or `?token=`); the UI asks for it once and keeps a session cookie. |
+| `AUTH_USERS`  | --      | Users file (`name:role:bcrypt-hash`, roles `admin` / `viewer`); the UI shows a login, viewers are read-only. `nats-explorer hash-password` prints a hash. |
+| `HISTORY_MB`  | `256`   | Memory budget for the recorded message history the UI pulls from |
+| `HISTORY_DB`  | --      | SQLite file for a persistent copy of the history; `HISTORY_RETENTION` (default `72h`) bounds it |
+| `ROLLUP_RETENTION` | `2160h` | With `HISTORY_DB`: how long the minute aggregates behind long-range charts are kept |
+| `STORAGE_DIR` | --      | Keep connections, templates and preferences on the server instead of the browser; `NO_KEYRING=1` forces the `secrets.json` fallback |
+| `PPROF`       | --      | When set, Go's profiler is served under `/debug/pprof` |
+| `SOURCE_URL`  | this project | Where the source of this build is offered; the UI links it as "source". Set it when you deploy a modified version ([AGPL](https://blanpa.github.io/nats-explorer/license.html)) |
 
 ---
 
@@ -234,7 +281,7 @@ nats-explorer/
   e2e/                        # Playwright smoke suite
   scripts/                    # Desktop build, builder image, smoke tests
   dev/                        # Dev NATS server and simulators
-  docs/                       # Architecture notes, review log, screenshots
+  docs/                       # The published documentation site (GitHub Pages), screenshots
   .github/workflows/          # CI + Release pipelines
 ```
 
@@ -270,4 +317,12 @@ If it saves you some, consider supporting it:
 
 ## License
 
-[Apache License 2.0](LICENSE) -- Copyright 2026 blanpa
+[GNU Affero General Public License v3.0 or later](LICENSE) -- Copyright 2026 blanpa
+
+Free to use, self-host and modify. If you distribute a modified version, or offer
+it to others over a network, the users of that version have to be able to get its
+source under the same license.
+
+The name "NATS Explorer" and the project's marks are not covered by the license.
+A modified version has to carry a different name and may not imply endorsement by
+this project. For a use these terms do not fit, ask about a commercial license.

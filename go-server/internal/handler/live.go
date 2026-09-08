@@ -31,6 +31,29 @@ type watch struct {
 // Sender delivers an event to exactly one client.
 type Sender func(event interface{})
 
+// Events of the browser-initiated watches; see shared/src/ws-events.ts.
+type liveErrorEvent struct {
+	Type   string `json:"type"`
+	ConnID string `json:"connId"`
+	Bucket string `json:"bucket,omitempty"`
+	Stream string `json:"stream,omitempty"`
+	Error  string `json:"error"`
+}
+
+type kvUpdateEvent struct {
+	Type   string                 `json:"type"`
+	ConnID string                 `json:"connId"`
+	Bucket string                 `json:"bucket"`
+	Entry  map[string]interface{} `json:"entry"`
+}
+
+type streamMsgEvent struct {
+	Type    string                 `json:"type"`
+	ConnID  string                 `json:"connId"`
+	Stream  string                 `json:"stream"`
+	Message map[string]interface{} `json:"message"`
+}
+
 type liveCommand struct {
 	Type   string `json:"type"`
 	ConnID string `json:"connId"`
@@ -117,13 +140,7 @@ func (h *LiveHandler) stop(client any, key string) {
 }
 
 func (h *LiveHandler) sendError(send Sender, cmd liveCommand, err error) {
-	send(map[string]interface{}{
-		"type":   "live-error",
-		"connId": cmd.ConnID,
-		"bucket": cmd.Bucket,
-		"stream": cmd.Stream,
-		"error":  err.Error(),
-	})
+	send(liveErrorEvent{Type: "live-error", ConnID: cmd.ConnID, Bucket: cmd.Bucket, Stream: cmd.Stream, Error: err.Error()})
 }
 
 func (h *LiveHandler) watchKV(ctx context.Context, cmd liveCommand, send Sender) {
@@ -157,12 +174,7 @@ func (h *LiveHandler) watchKV(ctx context.Context, cmd liveCommand, send Sender)
 			if e == nil {
 				continue
 			}
-			send(map[string]interface{}{
-				"type":   "kv-update",
-				"connId": cmd.ConnID,
-				"bucket": cmd.Bucket,
-				"entry":  KvEntryToMap(cmd.Bucket, e),
-			})
+			send(kvUpdateEvent{Type: "kv-update", ConnID: cmd.ConnID, Bucket: cmd.Bucket, Entry: KvEntryToMap(cmd.Bucket, e)})
 		}
 	}
 }
@@ -193,12 +205,7 @@ func (h *LiveHandler) tailStream(ctx context.Context, cmd liveCommand, send Send
 
 	cc, err := oc.Consume(func(msg jetstream.Msg) {
 		item, _ := StreamMsgToMap(msg)
-		send(map[string]interface{}{
-			"type":    "stream-msg",
-			"connId":  cmd.ConnID,
-			"stream":  cmd.Stream,
-			"message": item,
-		})
+		send(streamMsgEvent{Type: "stream-msg", ConnID: cmd.ConnID, Stream: cmd.Stream, Message: item})
 	}, jetstream.ConsumeErrHandler(func(_ jetstream.ConsumeContext, err error) {
 		if ctx.Err() == nil {
 			log.Printf("stream tail %s/%s: %v", cmd.ConnID, cmd.Stream, err)

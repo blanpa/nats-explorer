@@ -45,14 +45,16 @@ func main() {
 	log.Printf("NATS Explorer %s: settings in %s (secrets: %s)", version, store.Path(), store.SecretsName())
 
 	// Start the HTTP server (API + WebSocket) on a random port
-	handler := createServer(frontendFS, serverConfig{mode: "desktop", settings: store})
+	app := createServer(frontendFS, serverConfig{mode: "desktop", settings: store, autoConnect: true})
+	// wails.Run blocks until the window is closed; the server goes with it.
+	defer app.Close()
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		log.Fatal(err)
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
-	go http.Serve(listener, handler)
+	go http.Serve(listener, app)
 
 	log.Printf("NATS Explorer %s: API running on http://127.0.0.1:%d", version, port)
 

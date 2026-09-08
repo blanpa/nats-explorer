@@ -4,12 +4,13 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
 
 	"nats-explorer/internal/connection"
-	"nats-explorer/internal/subscription"
+	"nats-explorer/internal/message"
 )
 
 type StreamsHandler struct {
@@ -127,14 +128,21 @@ func (h *StreamsHandler) List(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	sl := js.ListStreams(ctx)
-	streams := make([]map[string]interface{}, 0)
+	infos := make([]*jetstream.StreamInfo, 0)
 	for si := range sl.Info() {
-		streams = append(streams, streamInfoToMap(si))
+		infos = append(infos, si)
 	}
-	if sl.Err() != nil && len(streams) == 0 {
+	if sl.Err() != nil && len(infos) == 0 {
 		writeError(w, http.StatusBadGateway, sl.Err().Error())
 		return
 	}
+	streams := make([]map[string]interface{}, 0, len(infos))
+	for _, si := range infos {
+		streams = append(streams, streamInfoToMap(si))
+	}
+	// Only this endpoint sees every stream, so the reverse relation is
+	// computed here; GET /streams/{name} leaves it out.
+	applySourcedBy(streams, infos)
 	writeJSON(w, streams)
 }
 
@@ -198,7 +206,17 @@ func (h *StreamsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, streamInfoToMap(info))
+	out := streamInfoToMap(info)
+	// Who copies from this stream is only visible across all of them, so the
+	// detail view pays for one listing; it is opened by hand, not on a feed.
+	if names := js.ListStreams(ctx); names != nil {
+		others := make([]*jetstream.StreamInfo, 0, 8)
+		for si := range names.Info() {
+			others = append(others, si)
+		}
+		applySourcedBy([]map[string]interface{}{out}, others)
+	}
+	writeJSON(w, out)
 }
 
 func (h *StreamsHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -366,6 +384,191 @@ func (h *StreamsHandler) GetMessages(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+const (
+	defaultSeriesLast = 2000
+	maxSeriesLast     = 50000
+)
+
+// StreamSeriesResponse is the answer to GET /api/streams/{name}/series.
+type StreamSeriesResponse struct {
+	Stream  string `json:"stream"`
+	Field   string `json:"field"`
+	Subject string `json:"subject,omitempty"`
+	// Points are [timestamp ms, value] pairs in time order, downsampled to
+	// min/max buckets like the subject history series.
+	Points [][2]float64 `json:"points"`
+	// Samples is how many messages carried the field; Scanned how many of
+	// the stream's messages in the range were read.
+	Samples int    `json:"samples"`
+	Scanned int    `json:"scanned"`
+	FromSeq uint64 `json:"fromSeq"`
+	ToSeq   uint64 `json:"toSeq"`
+}
+
+// Series answers GET /api/streams/{name}/series?field=a.b&subject=...&last=2000&points=600:
+// a numeric JSON field over the last N sequences of a stream, optionally
+// only for one subject, downsampled for a chart.
+func (h *StreamsHandler) Series(w http.ResponseWriter, r *http.Request) {
+	js, err := jetStreamFor(h.Store, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	field := r.URL.Query().Get("field")
+	if field == "" {
+		writeError(w, http.StatusBadRequest, "field is required")
+		return
+	}
+	subject := r.URL.Query().Get("subject")
+	last := limitParam(r, "last", defaultSeriesLast, maxSeriesLast)
+	points := limitParam(r, "points", defaultSeriesPoints, maxSeriesPoints)
+	path := strings.Split(field, ".")
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	name := urlParam(r, "name")
+	st, err := js.Stream(ctx, name)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	info, err := st.Info(ctx)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	resp := StreamSeriesResponse{Stream: name, Field: field, Subject: subject, Points: [][2]float64{}}
+	first, end := info.State.FirstSeq, info.State.LastSeq
+	if info.State.Msgs == 0 || end == 0 {
+		writeJSON(w, resp)
+		return
+	}
+	start := first
+	if end >= uint64(last) && end-uint64(last)+1 > first {
+		start = end - uint64(last) + 1
+	}
+	resp.FromSeq, resp.ToSeq = start, end
+
+	// The subject is filtered here, not on the consumer: a filtered ordered
+	// consumer resets itself on the sequence gaps and starts over.
+	cfg := jetstream.OrderedConsumerConfig{DeliverPolicy: jetstream.DeliverByStartSequencePolicy, OptStartSeq: start, InactiveThreshold: 5 * time.Second}
+	oc, err := js.OrderedConsumer(ctx, name, cfg)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	defer func() {
+		if ci := oc.CachedInfo(); ci != nil {
+			dctx, dcancel := context.WithTimeout(context.Background(), 2*time.Second)
+			js.DeleteConsumer(dctx, name, ci.Name)
+			dcancel()
+		}
+	}()
+
+	var samples [][2]float64
+	want := int(end - start + 1)
+	// An ordered consumer may redeliver the last message after a reset
+	// between fetches; sequences only move forward here.
+	var lastSeq uint64
+	for resp.Scanned < want {
+		batch, err := oc.FetchNoWait(min(want-resp.Scanned, 1000))
+		if err != nil {
+			break
+		}
+		// A batch without a new sequence means the stream's tail was reached
+		// (deleted sequences never arrive, redeliveries repeat the last one).
+		got := 0
+		done := false
+		for msg := range batch.Messages() {
+			md, err := msg.Metadata()
+			if err != nil {
+				continue
+			}
+			if md.Sequence.Stream > end {
+				done = true
+				break
+			}
+			if md.Sequence.Stream <= lastSeq {
+				continue
+			}
+			got++
+			lastSeq = md.Sequence.Stream
+			resp.Scanned++
+			if subject != "" && msg.Subject() != subject {
+				continue
+			}
+			data := msg.Data()
+			if len(data) > 0 && (data[0] == '{' || data[0] == '[') {
+				if v, ok := numberAt(string(data), path); ok {
+					samples = append(samples, [2]float64{float64(md.Timestamp.UnixMilli()), v})
+				}
+			}
+			if md.Sequence.Stream == end {
+				done = true
+			}
+		}
+		if done || got == 0 || batch.Error() != nil || ctx.Err() != nil {
+			break
+		}
+	}
+	resp.Samples = len(samples)
+	resp.Points = downsample(samples, points)
+	writeJSON(w, resp)
+}
+
+// SeqAtTime answers GET /api/streams/{name}/seq?time=<unix ms>: the first
+// sequence stored at or after that time, or lastSeq+1 when the time is past
+// the end of the stream.
+func (h *StreamsHandler) SeqAtTime(w http.ResponseWriter, r *http.Request) {
+	js, err := jetStreamFor(h.Store, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ms, err := strconv.ParseInt(r.URL.Query().Get("time"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "time (unix ms) is required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	name := urlParam(r, "name")
+	st, err := js.Stream(ctx, name)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	info, err := st.Info(ctx)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	at := time.UnixMilli(ms)
+	oc, err := js.OrderedConsumer(ctx, name, jetstream.OrderedConsumerConfig{DeliverPolicy: jetstream.DeliverByStartTimePolicy, OptStartTime: &at, InactiveThreshold: 5 * time.Second})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	defer func() {
+		if ci := oc.CachedInfo(); ci != nil {
+			dctx, dcancel := context.WithTimeout(context.Background(), 2*time.Second)
+			js.DeleteConsumer(dctx, name, ci.Name)
+			dcancel()
+		}
+	}()
+	seq := info.State.LastSeq + 1
+	var ts int64
+	if batch, err := oc.FetchNoWait(1); err == nil {
+		for msg := range batch.Messages() {
+			if md, err := msg.Metadata(); err == nil {
+				seq = md.Sequence.Stream
+				ts = md.Timestamp.UnixMilli()
+			}
+		}
+	}
+	writeJSON(w, map[string]interface{}{"seq": seq, "timestamp": ts, "firstSeq": info.State.FirstSeq, "lastSeq": info.State.LastSeq})
+}
+
 // fetchRange reads [startSeq, end] with an ephemeral ordered consumer: one
 // round trip instead of one per sequence.
 func fetchRange(ctx context.Context, js jetstream.JetStream, stream string, startSeq, end uint64) ([]map[string]interface{}, error) {
@@ -428,7 +631,7 @@ func fetchRangeSlow(ctx context.Context, s jetstream.Stream, startSeq, end uint6
 
 // StreamMsgToMap converts a consumer-delivered message into the API shape.
 func StreamMsgToMap(msg jetstream.Msg) (map[string]interface{}, uint64) {
-	payload, payloadType := subscription.EncodePayload(msg.Data())
+	payload, payloadType := message.EncodePayload(msg.Data())
 	item := map[string]interface{}{
 		"subject":     msg.Subject(),
 		"payload":     payload,
@@ -448,7 +651,7 @@ func StreamMsgToMap(msg jetstream.Msg) (map[string]interface{}, uint64) {
 }
 
 func rawStreamMsgToMap(msg *jetstream.RawStreamMsg) map[string]interface{} {
-	payload, payloadType := subscription.EncodePayload(msg.Data)
+	payload, payloadType := message.EncodePayload(msg.Data)
 	item := map[string]interface{}{
 		"seq":         msg.Sequence,
 		"subject":     msg.Subject,
@@ -492,10 +695,15 @@ func (h *StreamsHandler) DeleteMessage(w http.ResponseWriter, r *http.Request) {
 
 func streamInfoToMap(si *jetstream.StreamInfo) map[string]interface{} {
 	c := si.Config
+	// A mirror has no subjects of its own; the browser wants a list, not null.
+	subjects := c.Subjects
+	if subjects == nil {
+		subjects = []string{}
+	}
 	out := map[string]interface{}{
 		"name":              c.Name,
 		"description":       c.Description,
-		"subjects":          c.Subjects,
+		"subjects":          subjects,
 		"retention":         c.Retention.String(),
 		"maxConsumers":      c.MaxConsumers,
 		"maxMsgs":           c.MaxMsgs,
@@ -537,15 +745,74 @@ func streamInfoToMap(si *jetstream.StreamInfo) map[string]interface{} {
 			"name": si.Cluster.Name, "leader": si.Cluster.Leader, "replicas": replicas,
 		}
 	}
+	// Replication: the config names the relation even before data flows, the
+	// info adds lag and activity once it does.
 	if c.Mirror != nil {
-		out["mirror"] = c.Mirror.Name
+		out["mirror"] = sourceMap(c.Mirror.Name, si.Mirror)
 	}
-	if len(c.Sources) > 0 {
-		names := make([]string, 0, len(c.Sources))
-		for _, src := range c.Sources {
-			names = append(names, src.Name)
+	if len(c.Sources) > 0 || len(si.Sources) > 0 {
+		byName := make(map[string]*jetstream.StreamSourceInfo, len(si.Sources))
+		for _, src := range si.Sources {
+			byName[src.Name] = src
 		}
-		out["sources"] = names
+		sources := make([]map[string]interface{}, 0, len(c.Sources))
+		seen := map[string]bool{}
+		for _, src := range c.Sources {
+			sources = append(sources, sourceMap(src.Name, byName[src.Name]))
+			seen[src.Name] = true
+		}
+		for _, src := range si.Sources {
+			if !seen[src.Name] {
+				sources = append(sources, sourceMap(src.Name, src))
+			}
+		}
+		out["sources"] = sources
 	}
 	return out
+}
+
+// sourceMap describes one replication relation. `active` is milliseconds
+// since the last activity, so the UI can say "3 s ago" without a clock.
+func sourceMap(name string, info *jetstream.StreamSourceInfo) map[string]interface{} {
+	out := map[string]interface{}{"name": name}
+	if info == nil {
+		return out
+	}
+	if info.Name != "" {
+		out["name"] = info.Name
+	}
+	out["lag"] = info.Lag
+	// Active is -1 while nothing has happened yet.
+	out["active"] = info.Active.Milliseconds()
+	if info.FilterSubject != "" {
+		out["filterSubject"] = info.FilterSubject
+	}
+	return out
+}
+
+// applySourcedBy fills the reverse relation: which of the listed streams
+// mirror or source from each stream. Only a full listing knows this.
+func applySourcedBy(streams []map[string]interface{}, infos []*jetstream.StreamInfo) {
+	type user struct{ name, kind string }
+	users := make(map[string][]user)
+	for _, si := range infos {
+		if si.Config.Mirror != nil {
+			users[si.Config.Mirror.Name] = append(users[si.Config.Mirror.Name], user{si.Config.Name, "mirror"})
+		}
+		for _, src := range si.Config.Sources {
+			users[src.Name] = append(users[src.Name], user{si.Config.Name, "source"})
+		}
+	}
+	for _, s := range streams {
+		name, _ := s["name"].(string)
+		list := users[name]
+		if len(list) == 0 {
+			continue
+		}
+		out := make([]map[string]interface{}, 0, len(list))
+		for _, u := range list {
+			out = append(out, map[string]interface{}{"name": u.name, "kind": u.kind})
+		}
+		s["sourcedBy"] = out
+	}
 }

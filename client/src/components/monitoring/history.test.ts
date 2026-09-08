@@ -12,11 +12,23 @@ describe('monitoring history', () => {
       { t: 5000, inMsgs: 600 },
       { t: 10000, inMsgs: 50 }, // restart
       { t: 12000, inMsgs: 250 },
-    ].map(x => ({ ...x, outMsgs: 0, inBytes: 0, outBytes: 0, connections: 0, subscriptions: 0, slowConsumers: 0, cpu: 0, mem: 0, jsApiTotal: 0, jsApiErrors: 0 }));
+    ].map(x => ({
+      ...x,
+      outMsgs: 0,
+      inBytes: 0,
+      outBytes: 0,
+      connections: 0,
+      subscriptions: 0,
+      slowConsumers: 0,
+      cpu: 0,
+      mem: 0,
+      jsApiTotal: 0,
+      jsApiErrors: 0,
+    }));
     const r = rateSeries(s, x => x.inMsgs);
     expect(r.times).toEqual([5000, 10000, 12000]);
     expect(r.values).toEqual([100, 0, 100]);
-    expect(gaugeSeries(s, x => x.inMsgs).values).toEqual([100, 600, 50, 250]);
+    expect(gaugeSeries(s, x => x.inMsgs)).toEqual({ times: r.times, values: [600, 50, 250] });
   });
 
   it('records samples per connection and caps the buffer', () => {

@@ -4,13 +4,15 @@ import type { ObjInfo } from 'shared';
 import { api, errorMessage } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
 import { useStore } from '../../store';
-import { cn, formatBytes, formatDateTime, formatNumber } from '../../lib/utils';
+import { cn, formatBytes, formatCount, formatDateTime, formatNumber } from '../../lib/utils';
 import { Button, IconButton } from '../ui/Button';
 import { confirm } from '../ui/Dialog';
 import { EmptyState, ErrorState, LoadingState, PaneHeader } from '../ui/misc';
 import { toast } from '../ui/Toast';
+import { useCanWrite } from '../../lib/auth';
 
 export default function ObjStoreView() {
+  const canWrite = useCanWrite();
   const connId = useStore(s => s.activeConnId);
   const store = useStore(s => s.selectedObjStore);
   const setStore = useStore(s => s.setSelectedObjStore);
@@ -19,16 +21,18 @@ export default function ObjStoreView() {
   const [uploading, setUploading] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
 
-  const { data, error, loading, initial, reload } = useAsync<ObjInfo[]>(() => (connId && store ? api.listObjects(connId, store) : null), [connId, store], { key: `objects:${connId}:${store}` });
+  const { data, error, loading, initial, reload } = useAsync<ObjInfo[]>(() => (connId && store ? api.listObjects(connId, store) : null), [connId, store], {
+    key: `objects:${connId}:${store}`,
+  });
 
-  if (!store) return <EmptyState icon={Archive} title="Select an object store" description="Object stores hold files and blobs split into chunks. Pick one to upload, download or delete objects." />;
+  if (!store) return <EmptyState icon={Archive} title="Select an object store" description="Upload, download and delete objects of a store." />;
   if (!connId) return null;
 
   const upload = async (files: FileList | File[]) => {
     for (const file of Array.from(files)) {
       setUploading(file.name);
       try {
-        const res = await api.putObject(connId, store, file);
+        await api.putObject(connId, store, file);
       } catch (err) {
         toast.error(`Upload of ${file.name} failed`, errorMessage(err));
       }
@@ -61,7 +65,15 @@ export default function ObjStoreView() {
   };
 
   const deleteStore = async () => {
-    if (!(await confirm({ title: `Delete object store ${store}?`, message: 'All objects in this store are removed permanently.', confirmLabel: 'Delete store', danger: true }))) return;
+    if (
+      !(await confirm({
+        title: `Delete object store ${store}?`,
+        message: 'All objects in this store are removed permanently.',
+        confirmLabel: 'Delete store',
+        danger: true,
+      }))
+    )
+      return;
     try {
       await api.deleteObjectStore(connId, store);
       setStore(null);
@@ -96,12 +108,16 @@ export default function ObjStoreView() {
               <RefreshCw size={14} />
             </IconButton>
             <input ref={fileInput} type="file" multiple hidden onChange={e => e.target.files && upload(e.target.files)} />
-            <Button variant="primary" icon={<Upload size={13} />} loading={!!uploading} onClick={() => fileInput.current?.click()}>
-              {uploading ? `Uploading ${uploading}` : 'Upload'}
-            </Button>
-            <Button variant="danger" icon={<Trash2 size={13} />} onClick={deleteStore}>
-              Delete store
-            </Button>
+            {canWrite && (
+              <>
+                <Button variant="primary" icon={<Upload size={13} />} loading={!!uploading} onClick={() => fileInput.current?.click()}>
+                  {uploading ? `Uploading ${uploading}` : 'Upload'}
+                </Button>
+                <Button variant="danger" icon={<Trash2 size={13} />} onClick={deleteStore}>
+                  Delete store
+                </Button>
+              </>
+            )}
           </>
         }
       >
@@ -109,7 +125,7 @@ export default function ObjStoreView() {
         <div className="min-w-0">
           <div className="text-md font-semibold truncate">{store}</div>
           <div className="text-xs text-muted">
-            {objects.length.toLocaleString()} objects · {formatBytes(totalSize)}
+            {formatCount(objects.length)} objects · {formatBytes(totalSize)}
           </div>
         </div>
       </PaneHeader>
@@ -120,7 +136,7 @@ export default function ObjStoreView() {
         ) : error ? (
           <ErrorState title="Cannot list objects" message={error} />
         ) : objects.length === 0 ? (
-          <EmptyState icon={FileIcon} title="No objects" description="Drop files here or use Upload to add objects to this store." />
+          <EmptyState icon={FileIcon} title="No objects" description="Drop files here or use Upload." />
         ) : (
           <table className="table">
             <thead>
@@ -154,9 +170,11 @@ export default function ObjStoreView() {
                       <IconButton label="Download" size="xs" onClick={() => download(o.name)}>
                         <Download size={13} />
                       </IconButton>
-                      <IconButton label="Delete" size="xs" onClick={() => del(o.name)}>
-                        <Trash2 size={13} className="text-danger" />
-                      </IconButton>
+                      {canWrite && (
+                        <IconButton label="Delete" size="xs" onClick={() => del(o.name)}>
+                          <Trash2 size={13} className="text-danger" />
+                        </IconButton>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -166,7 +184,12 @@ export default function ObjStoreView() {
         )}
       </div>
 
-      <div className={cn('absolute inset-2 rounded-lg border-2 border-dashed border-accent bg-accent/10 flex items-center justify-center text-md font-medium text-accent pointer-events-none transition-opacity', dragging ? 'opacity-100' : 'opacity-0')}>
+      <div
+        className={cn(
+          'absolute inset-2 rounded-lg border-2 border-dashed border-accent bg-accent/10 flex items-center justify-center text-md font-medium text-accent pointer-events-none transition-opacity',
+          dragging ? 'opacity-100' : 'opacity-0',
+        )}
+      >
         Drop files to upload to {store}
       </div>
     </div>

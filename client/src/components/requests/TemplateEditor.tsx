@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Copy, Save, Trash2 } from 'lucide-react';
+import { Copy, Plus, Save, Trash2 } from 'lucide-react';
 import { draftDiffers, draftFromSaved, newSavedRequest, savedFromDraft, type RequestDraft } from '../../lib/savedRequests';
 import { useStore } from '../../store';
 import { useSavedRequests } from '../../store/savedRequests';
@@ -23,6 +23,7 @@ export default function TemplateEditor() {
   const { effective } = useSendConnection(connChoice);
 
   // Reload the form when another template is picked (not on every save).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the form reloads when another template is picked, not on every save of the same one
   useEffect(() => {
     if (template) {
       setDraft(draftFromSaved(template));
@@ -31,10 +32,28 @@ export default function TemplateEditor() {
       setDraft(null);
     }
     runner.clear();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
 
-  if (!template || !draft) return <EmptyState title="Select a request" description="Pick a saved request on the left or create a new one. Templates can be run, repeated and exported as JSON." />;
+  if (!template || !draft)
+    return (
+      <EmptyState
+        title="No request selected"
+        description="Saved requests can be run, repeated and exported."
+        action={
+          <Button
+            variant="primary"
+            icon={<Plus size={13} />}
+            onClick={() => {
+              const t = newSavedRequest({ name: 'Untitled request', subject: '' });
+              upsert(t);
+              setSelected(t.id);
+            }}
+          >
+            New request
+          </Button>
+        }
+      />
+    );
 
   const dirty = name !== template.name || draftDiffers(draft, template);
 
@@ -47,7 +66,8 @@ export default function TemplateEditor() {
     setSelected(copy.id);
   };
   const del = async () => {
-    if (!(await confirm({ title: `Delete “${template.name}”?`, message: 'The template is removed from this browser.', confirmLabel: 'Delete', danger: true }))) return;
+    if (!(await confirm({ title: `Delete “${template.name}”?`, message: 'The template is removed from this browser.', confirmLabel: 'Delete', danger: true })))
+      return;
     remove(template.id);
     setSelected(null);
   };
@@ -66,7 +86,14 @@ export default function TemplateEditor() {
       }}
     >
       <PaneHeader className="h-auto py-2">
-        <Input className="max-w-[360px] font-medium" inputSize="sm" value={name} onChange={e => setName(e.target.value)} placeholder="Request name" aria-label="Request name" />
+        <Input
+          className="max-w-[360px] font-medium"
+          inputSize="sm"
+          value={name}
+          onChange={e => setName(e.target.value)}
+          placeholder="Request name"
+          aria-label="Request name"
+        />
         {dirty && <span className="text-xs text-warn">unsaved</span>}
         <div className="ml-auto flex items-center gap-1">
           <Button variant={dirty ? 'primary' : 'outline'} icon={<Save size={13} />} disabled={!dirty} onClick={save} title="Ctrl+S">
@@ -81,7 +108,16 @@ export default function TemplateEditor() {
         </div>
       </PaneHeader>
       <div className="flex-1 min-h-0 overflow-auto p-4 flex flex-col gap-4">
-        <RequestForm draft={draft} onChange={setDraft} onSend={send} busy={runner.busy} canSend={!!effective} connId={effective ?? ''} onConnChange={setConnChoice} payloadRows={8} />
+        <RequestForm
+          draft={draft}
+          onChange={setDraft}
+          onSend={send}
+          busy={runner.busy}
+          canSend={!!effective}
+          connId={effective ?? ''}
+          onConnChange={setConnChoice}
+          payloadRows={8}
+        />
         <RequestResult error={runner.error} run={runner.run} reply={runner.reply} />
       </div>
     </div>

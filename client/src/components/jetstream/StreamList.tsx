@@ -10,10 +10,12 @@ import { SearchInput } from '../ui/Input';
 import { Badge, EmptyState, ErrorState, LoadingState, PaneHeader } from '../ui/misc';
 import StreamDialog from './StreamDialog';
 import DomainSwitch from './DomainSwitch';
+import { useCanWrite } from '../../lib/auth';
 
 const isInternal = (name: string) => name.startsWith('KV_') || name.startsWith('OBJ_');
 
 export default function StreamList() {
+  const canWrite = useCanWrite();
   const connId = useStore(s => s.activeConnId);
   const domainOverride = useJsDomainOverride(connId);
   const connDomain = useStore(s => s.connections.find(c => c.id === connId)?.jsDomain);
@@ -30,7 +32,10 @@ export default function StreamList() {
     setHideInternalState(b);
   };
 
-  const { data, error, loading, initial, reload } = useAsync<StreamInfo[]>(() => (connId ? api.listStreams(connId) : null), [connId, tick], { key: `streams:${connId}`, interval: 10_000 });
+  const { data, error, loading, initial, reload } = useAsync<StreamInfo[]>(() => (connId ? api.listStreams(connId) : null), [connId, tick], {
+    key: `streams:${connId}`,
+    interval: 10_000,
+  });
 
   const internalCount = useMemo(() => (data ?? []).filter(s => isInternal(s.name)).length, [data]);
   const streams = useMemo(() => {
@@ -45,7 +50,6 @@ export default function StreamList() {
     <div className="flex flex-col h-full min-h-0">
       <PaneHeader
         title="Streams"
-        children={<DomainSwitch />}
         actions={
           <>
             <IconButton
@@ -59,12 +63,16 @@ export default function StreamList() {
             <IconButton label="Refresh" size="xs" loading={loading && !initial} onClick={reload}>
               <RefreshCw size={13} />
             </IconButton>
-            <IconButton label="Create stream" size="xs" onClick={() => setCreating(true)}>
-              <Plus size={14} />
-            </IconButton>
+            {canWrite && (
+              <IconButton label="Create stream" size="xs" onClick={() => setCreating(true)}>
+                <Plus size={14} />
+              </IconButton>
+            )}
           </>
         }
-      />
+      >
+        <DomainSwitch />
+      </PaneHeader>
       <div className="px-2 py-2 border-b border-line">
         <SearchInput value={filter} onChange={e => setFilter(e.target.value)} placeholder="Filter streams…" />
       </div>
@@ -79,11 +87,21 @@ export default function StreamList() {
             compact
             icon={Layers}
             title={filter ? 'No matching streams' : hideInternal && internalCount > 0 ? 'Only KV/Object streams' : 'No streams'}
-            description={filter ? undefined : hideInternal && internalCount > 0 ? `${internalCount} internal stream${internalCount === 1 ? '' : 's'} hidden. Use the eye icon to show them.` : 'Create a stream to start persisting messages.'}
+            description={
+              filter
+                ? undefined
+                : hideInternal && internalCount > 0
+                  ? `${internalCount} internal stream${internalCount === 1 ? '' : 's'} hidden. Use the eye icon to show them.`
+                  : 'Create a stream to start persisting messages.'
+            }
           />
         ) : (
           streams.map(s => (
-            <div key={s.name} className={cn('list-row flex-col items-stretch gap-0.5 py-2', selected === s.name && 'list-row-active')} onClick={() => setSelected(s.name)}>
+            <div
+              key={s.name}
+              className={cn('list-row flex-col items-stretch gap-0.5 py-2', selected === s.name && 'list-row-active')}
+              onClick={() => setSelected(s.name)}
+            >
               <div className="flex items-center gap-2 min-w-0">
                 <Layers size={13} className="text-accent shrink-0" />
                 <span className="font-medium truncate">{s.name}</span>
@@ -91,12 +109,15 @@ export default function StreamList() {
                   {s.storage === 'Memory' && <Badge tone="info">mem</Badge>}
                   {s.retention !== 'Limits' && <Badge tone="warn">{s.retention.toLowerCase()}</Badge>}
                   {s.mirror && <Badge tone="neutral">mirror</Badge>}
+                  {!s.mirror && s.sources?.length ? <Badge tone="neutral">sourced</Badge> : null}
                 </span>
               </div>
               <div className="flex items-center gap-3 text-xs text-muted font-mono tabular-nums pl-5">
                 <span>{formatNumber(s.state.messages)} msgs</span>
                 <span>{formatBytes(s.state.bytes)}</span>
-                <span>{s.state.consumerCount} {s.state.consumerCount === 1 ? 'consumer' : 'consumers'}</span>
+                <span>
+                  {s.state.consumerCount} {s.state.consumerCount === 1 ? 'consumer' : 'consumers'}
+                </span>
               </div>
               <div className="text-xs text-faint font-mono truncate pl-5">{s.subjects.join(', ')}</div>
             </div>

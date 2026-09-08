@@ -19,9 +19,9 @@ async function start() {
     </React.StrictMode>,
   );
   if (!hydrated) {
-    // A token was required: hydrate once the user has entered it, then re-read the stores.
+    // A login was required: hydrate once the user is in, then re-read the stores.
     const unsub = useAuth.subscribe((s, prev) => {
-      if (s.token && s.token !== prev.token) {
+      if (s.authenticated && !prev.authenticated) {
         unsub();
         bootstrapStorage().then(rehydrate);
       }
@@ -30,7 +30,17 @@ async function start() {
 }
 
 async function rehydrate() {
-  const [{ useSavedConnections }, { useSavedRequests }, { loadSavedConnections }, { loadSavedRequests }, { useStore }, { applyTheme, readTheme }, { readSetting }] = await Promise.all([
+  const [
+    { useSavedConnections },
+    { useSavedRequests },
+    { loadSavedConnections },
+    { loadSavedRequests },
+    { useStore },
+    { applyTheme, readTheme },
+    { readSetting },
+    { useDecoders },
+    { useBookmarks },
+  ] = await Promise.all([
     import('./store/savedConnections'),
     import('./store/savedRequests'),
     import('./lib/savedConnections'),
@@ -38,12 +48,20 @@ async function rehydrate() {
     import('./store'),
     import('./lib/theme'),
     import('./lib/utils'),
+    import('./lib/decoders'),
+    import('./lib/bookmarks'),
   ]);
   useSavedConnections.setState({ items: loadSavedConnections() });
   useSavedRequests.setState({ items: loadSavedRequests() });
+  useDecoders.getState().reload();
+  useBookmarks.getState().reload();
   const theme = readTheme();
   applyTheme(theme);
-  useStore.setState({ theme, hideSystemSubjects: readSetting('ne.hideSystemSubjects', true), explorerWidth: Math.max(220, Math.min(800, readSetting('ne.explorerWidth', 340))) });
+  useStore.setState({
+    theme,
+    hideSystemSubjects: readSetting('ne.hideSystemSubjects', true),
+    explorerWidth: Math.max(220, Math.min(800, readSetting('ne.explorerWidth', 340))),
+  });
 }
 
 start();

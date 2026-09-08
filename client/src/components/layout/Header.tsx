@@ -1,6 +1,8 @@
-import { Cable, WifiOff } from 'lucide-react';
+import { LogOut, ShieldCheck, WifiOff } from 'lucide-react';
+import { useAuth } from '../../lib/auth';
+import { wsClient } from '../../lib/ws';
+import { IconButton } from '../ui/Button';
 import { useStore } from '../../store';
-import { Button } from '../ui/Button';
 import { Badge } from '../ui/misc';
 import ConnectionSwitcher from '../connection/ConnectionSwitcher';
 
@@ -13,9 +15,34 @@ function Logo() {
   );
 }
 
+function UserBadge() {
+  const mode = useAuth(s => s.mode);
+  const user = useAuth(s => s.user);
+  const role = useAuth(s => s.role);
+  const authenticated = useAuth(s => s.authenticated);
+  const logout = useAuth(s => s.logout);
+  if (mode === 'none' || !authenticated) return null;
+  return (
+    <div className="flex items-center gap-1" title={role === 'admin' ? 'Admin: may publish and change things' : 'Viewer: read-only'}>
+      <Badge tone={role === 'admin' ? 'accent' : 'neutral'}>
+        <ShieldCheck size={11} /> {mode === 'users' ? `${user} · ${role}` : 'token'}
+      </Badge>
+      <IconButton
+        label="Sign out"
+        size="xs"
+        onClick={() => {
+          wsClient.disconnect();
+          logout();
+        }}
+      >
+        <LogOut size={13} />
+      </IconButton>
+    </div>
+  );
+}
+
 export default function Header() {
   const wsOnline = useStore(s => s.wsOnline);
-  const openConnections = useStore(s => s.openConnectionsDialog);
 
   return (
     <header className="h-11 shrink-0 flex items-center gap-3 px-3 bg-panel border-b border-line">
@@ -23,10 +50,6 @@ export default function Header() {
         <Logo />
         <span className="text-sm font-semibold tracking-tight">NATS Explorer</span>
       </div>
-
-      <div className="w-px h-5 bg-line" />
-
-      <ConnectionSwitcher />
 
       <div className="flex-1" />
 
@@ -36,9 +59,9 @@ export default function Header() {
         </Badge>
       )}
 
-      <Button variant="outline" size="sm" icon={<Cable size={13} />} onClick={() => openConnections()}>
-        Connections
-      </Button>
+      {/* The switcher is the one place for connections: switch, connect, disconnect, manage. */}
+      <ConnectionSwitcher />
+      <UserBadge />
     </header>
   );
 }

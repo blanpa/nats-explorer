@@ -2,23 +2,22 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from '
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Eraser, Eye, EyeOff, Network } from 'lucide-react';
 import { useStore } from '../../store';
-import { cn, previewPayload } from '../../lib/utils';
+import { clearHistory } from '../../lib/feed';
+import { errorMessage } from '../../lib/api';
+import { cn, formatCount, previewPayload } from '../../lib/utils';
+import { toast } from '../ui/Toast';
 import { IconButton } from '../ui/Button';
 import { SearchInput } from '../ui/Input';
 import { EmptyState, PaneHeader } from '../ui/misc';
-import { ancestorsOf, buildTree, collectBranchPaths, filterTree, flattenTree, isSystemRoot, type FlatNode } from './tree';
+import { toneClass } from '../ui/tone';
+import { ancestorsOf, type FlatNode } from './tree';
+import BookmarksPanel from './BookmarksPanel';
+import PayloadFilter from './PayloadFilter';
+import SubscriptionsPanel from './SubscriptionsPanel';
+import { useCanWrite } from '../../lib/auth';
 
 const ROW_HEIGHT = 24;
 const INDENT = 14;
-
-const toneClass = {
-  str: 'text-syn-str',
-  num: 'text-syn-num',
-  bool: 'text-syn-bool',
-  null: 'text-syn-null',
-  obj: 'text-muted',
-  bin: 'text-muted italic',
-} as const;
 
 const Row = memo(function Row({
   item,
@@ -32,13 +31,13 @@ const Row = memo(function Row({
   selected: boolean;
   multiConn: boolean;
   colorOf: (id: string) => string | undefined;
-  onSelect: (subject: string) => void;
+  onSelect: (subject: string, add: boolean) => void;
   onToggle: (subject: string) => void;
 }) {
-  const { node, depth, hasChildren, expanded, guides } = item;
-  const preview = node.last && !hasChildren ? previewPayload(node.last.payload, node.last.payloadType, 80) : null;
+  const { depth, hasChildren, expanded, guides } = item;
+  const preview = item.last && !hasChildren ? previewPayload(item.last.payload, item.last.payloadType, 80) : null;
   // Leaves show their own rate; branches show the aggregate so hot subtrees stand out even when collapsed.
-  const rate = hasChildren ? node.totalRate : node.rate;
+  const rate = hasChildren ? item.totalRate : item.rate;
 
   return (
     <div
@@ -48,16 +47,17 @@ const Row = memo(function Row({
       aria-selected={selected}
       className={cn('tree-row relative', selected && 'tree-row-selected')}
       style={{ paddingLeft: 8 + depth * INDENT }}
-      onClick={() => onSelect(node.fullSubject)}
-      onDoubleClick={() => hasChildren && onToggle(node.fullSubject)}
+      onClick={e => onSelect(item.subject, e.ctrlKey || e.metaKey)}
+      onDoubleClick={() => hasChildren && onToggle(item.subject)}
     >
       {guides.map((cont, i) => cont && <span key={i} className="tree-guide" style={{ left: 8 + i * INDENT + 7 }} />)}
       {hasChildren ? (
         <button
+          type="button"
           className="tree-toggle mr-1"
           onClick={e => {
             e.stopPropagation();
-            onToggle(node.fullSubject);
+            onToggle(item.subject);
           }}
           aria-label={expanded ? 'Collapse' : 'Expand'}
           tabIndex={-1}
@@ -69,9 +69,9 @@ const Row = memo(function Row({
           <span className="w-1 h-1 rounded-full bg-faint" />
         </span>
       )}
-      {multiConn && node.connIds.length === 1 && <span className="status-dot mr-1.5 !w-1.5 !h-1.5" style={{ background: colorOf(node.connIds[0]) }} />}
-      <span className="tree-label">{node.segment}</span>
-      {node.total > 0 && <span className="tree-count ml-1.5">{node.total.toLocaleString()}</span>}
+      {multiConn && item.connIds.length === 1 && <span className="status-dot mr-1.5 w-1.5! h-1.5!" style={{ background: colorOf(item.connIds[0]) }} />}
+      <span className="tree-label">{item.segment}</span>
+      {item.total > 0 && <span className="tree-count ml-1.5">{formatCount(item.total)}</span>}
       {preview && <span className={cn('tree-value ml-2', toneClass[preview.tone])}>{preview.text}</span>}
       {rate >= 0.5 && (
         <span
@@ -85,44 +85,48 @@ const Row = memo(function Row({
   );
 });
 
+/**
+ * The subject tree. Rows come laid out from the feed worker for the current
+ * view (expanded branches, filter, system toggle); the server only sends the
+ * nodes that view needs, so a huge namespace costs what is on screen.
+ */
 export default function SubjectTree() {
-  const index = useStore(s => s.subjectIndex);
-  const treeVersion = useStore(s => s.treeVersion);
+  const canWrite = useCanWrite();
+  const flat = useStore(s => s.treeRows);
+  const systemCount = useStore(s => s.systemCount);
   const filter = useStore(s => s.subjectFilter);
   const setFilter = useStore(s => s.setSubjectFilter);
   const hideSystem = useStore(s => s.hideSystemSubjects);
   const setHideSystem = useStore(s => s.setHideSystemSubjects);
   const selected = useStore(s => s.selectedSubject);
+  const selectedSubjects = useStore(s => s.selectedSubjects);
   const setSelected = useStore(s => s.setSelectedSubject);
-  const expanded = useStore(s => s.expanded);
+  const toggleSelected = useStore(s => s.toggleSelectedSubject);
+  // Ctrl/Cmd-click adds a subject to the ones being watched.
+  const onSelect = useCallback((subject: string, add: boolean) => (add ? toggleSelected(subject) : setSelected(subject)), [setSelected, toggleSelected]);
+  const expandAll = useStore(s => s.expandAll);
   const toggleExpanded = useStore(s => s.toggleExpanded);
   const setExpanded = useStore(s => s.setExpanded);
-  const clearMessages = useStore(s => s.clearMessages);
+  const expandAllBranches = useStore(s => s.expandAllBranches);
+  const collapseAll = useStore(s => s.collapseAll);
   const connections = useStore(s => s.connections);
   const parentRef = useRef<HTMLDivElement>(null);
   const autoExpandedRef = useRef(false);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const merged = useMemo(() => buildTree(index), [index, treeVersion]);
-  const filtering = filter.trim().length > 0;
-  // System roots stay hidden unless the user asks for them, or the filter clearly targets them.
-  const filterWantsSystem = /^[\s]*[$_]/.test(filter);
-  const systemCount = useMemo(() => merged.filter(n => isSystemRoot(n.segment)).length, [merged]);
-  const visible = useMemo(() => (hideSystem && !filterWantsSystem ? merged.filter(n => !isSystemRoot(n.segment)) : merged), [merged, hideSystem, filterWantsSystem]);
-  const filtered = useMemo(() => filterTree(visible, filter), [visible, filter]);
+  const expr = useStore(s => s.subjectExpr);
+  const filtering = filter.trim().length > 0 || expr.trim().length > 0;
 
-  // Expand the first level once when data first arrives.
+  // Expand the first level when data arrives, and again after the tree
+  // started over (subscription change, reconnect).
   useEffect(() => {
-    if (autoExpandedRef.current || merged.length === 0) return;
+    if (flat.length === 0) {
+      autoExpandedRef.current = false;
+      return;
+    }
+    if (autoExpandedRef.current || filtering) return;
     autoExpandedRef.current = true;
-    if (expanded.size === 0) setExpanded(merged.map(n => n.fullSubject));
-  }, [merged, expanded.size, setExpanded]);
-
-  const isExpanded = useCallback(
-    (path: string) => (filtering ? true : expanded.has(path)),
-    [expanded, filtering],
-  );
-  const flat = useMemo(() => flattenTree(filtered, isExpanded), [filtered, isExpanded]);
+    if (!expandAll) setExpanded(flat.filter(r => r.depth === 0).map(r => r.subject));
+  }, [flat, filtering, expandAll, setExpanded]);
 
   const virtualizer = useVirtualizer({
     count: flat.length,
@@ -132,25 +136,22 @@ export default function SubjectTree() {
   });
 
   // Keep the selected row visible when it changes externally.
-  const selectedIndex = useMemo(() => flat.findIndex(f => f.node.fullSubject === selected), [flat, selected]);
+  const selectedIndex = useMemo(() => flat.findIndex(f => f.subject === selected), [flat, selected]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scrolling follows the index; the virtualizer identity must not retrigger it
   useLayoutEffect(() => {
     if (selectedIndex >= 0) virtualizer.scrollToIndex(selectedIndex, { align: 'auto' });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedIndex]);
 
   const anyConnected = connections.some(c => c.connected);
   const multiConn = connections.filter(c => c.connected).length > 1;
   const colorOf = useCallback((id: string) => connections.find(c => c.id === id)?.color, [connections]);
 
-  const expandAll = () => setExpanded(collectBranchPaths(merged));
-  const collapseAll = () => setExpanded([]);
-
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (flat.length === 0) return;
     const idx = selectedIndex;
     const go = (i: number) => {
       const target = flat[Math.max(0, Math.min(flat.length - 1, i))];
-      if (target) setSelected(target.node.fullSubject);
+      if (target) setSelected(target.subject);
     };
     switch (e.key) {
       case 'ArrowDown':
@@ -173,7 +174,7 @@ export default function SubjectTree() {
         e.preventDefault();
         const cur = flat[idx];
         if (!cur) break;
-        if (cur.hasChildren && !cur.expanded) toggleExpanded(cur.node.fullSubject);
+        if (cur.hasChildren && !cur.expanded) toggleExpanded(cur.subject);
         else if (cur.hasChildren) go(idx + 1);
         break;
       }
@@ -181,9 +182,9 @@ export default function SubjectTree() {
         e.preventDefault();
         const cur = flat[idx];
         if (!cur) break;
-        if (cur.hasChildren && cur.expanded) toggleExpanded(cur.node.fullSubject);
+        if (cur.hasChildren && cur.expanded) toggleExpanded(cur.subject);
         else {
-          const parent = ancestorsOf(cur.node.fullSubject).pop();
+          const parent = ancestorsOf(cur.subject).pop();
           if (parent) setSelected(parent);
         }
         break;
@@ -193,7 +194,7 @@ export default function SubjectTree() {
         const cur = flat[idx];
         if (cur?.hasChildren) {
           e.preventDefault();
-          toggleExpanded(cur.node.fullSubject);
+          toggleExpanded(cur.subject);
         }
         break;
       }
@@ -214,30 +215,51 @@ export default function SubjectTree() {
             >
               {hideSystem ? <EyeOff size={13} /> : <Eye size={13} />}
             </IconButton>
-            <IconButton label="Expand all" size="xs" onClick={expandAll}>
+            <IconButton label="Expand all" size="xs" onClick={expandAllBranches}>
               <ChevronsUpDown size={13} />
             </IconButton>
             <IconButton label="Collapse all" size="xs" onClick={collapseAll}>
               <ChevronsDownUp size={13} />
             </IconButton>
-            <IconButton label="Clear buffered messages" size="xs" onClick={() => clearMessages()}>
-              <Eraser size={13} />
-            </IconButton>
+            {canWrite && (
+              <IconButton label="Clear message history" size="xs" onClick={() => clearHistory().catch(err => toast.error('Clear failed', errorMessage(err)))}>
+                <Eraser size={13} />
+              </IconButton>
+            )}
           </>
         }
       />
+      <SubscriptionsPanel />
+      <BookmarksPanel />
+      <PayloadFilter />
       <div className="px-2 py-2 border-b border-line">
-        <SearchInput value={filter} onChange={e => setFilter(e.target.value)} placeholder="Filter subjects…" aria-label="Filter subjects" />
+        <SearchInput
+          value={filter}
+          onChange={e => setFilter(e.target.value)}
+          placeholder="Filter subjects…  /"
+          aria-label="Filter subjects"
+          title="Press / to focus, Escape to clear"
+        />
       </div>
 
       {flat.length === 0 ? (
         <EmptyState
           compact
           icon={Network}
-          title={filtering ? 'No matching subjects' : !anyConnected ? 'Not connected' : hideSystem && systemCount > 0 ? 'Only system subjects so far' : 'Waiting for messages'}
+          title={
+            filtering
+              ? 'No matching subjects'
+              : !anyConnected
+                ? 'Not connected'
+                : hideSystem && systemCount > 0
+                  ? 'Only system subjects so far'
+                  : 'Waiting for messages'
+          }
           description={
             filtering
-              ? 'Try a shorter filter. Multiple words are combined.'
+              ? expr.trim()
+                ? 'No subject whose last message satisfies the payload filter.'
+                : 'Try a shorter filter. Multiple words are combined.'
               : !anyConnected
                 ? 'Live subjects show up here once a connection is open.'
                 : hideSystem && systemCount > 0
@@ -251,6 +273,7 @@ export default function SubjectTree() {
           role="tree"
           tabIndex={0}
           aria-label="Subject tree"
+          aria-multiselectable="true"
           onKeyDown={onKeyDown}
           className="flex-1 min-h-0 overflow-auto outline-none focus-visible:ring-1 focus-visible:ring-accent/60 py-1"
         >
@@ -258,13 +281,13 @@ export default function SubjectTree() {
             {virtualizer.getVirtualItems().map(v => {
               const item = flat[v.index];
               return (
-                <div key={item.node.fullSubject} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: v.size, transform: `translateY(${v.start}px)` }}>
+                <div key={item.subject} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: v.size, transform: `translateY(${v.start}px)` }}>
                   <Row
                     item={item}
-                    selected={selected === item.node.fullSubject}
+                    selected={selectedSubjects.includes(item.subject)}
                     multiConn={multiConn}
                     colorOf={colorOf}
-                    onSelect={setSelected}
+                    onSelect={onSelect}
                     onToggle={toggleExpanded}
                   />
                 </div>

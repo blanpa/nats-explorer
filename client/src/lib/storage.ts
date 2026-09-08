@@ -1,5 +1,3 @@
-import { useAuth } from './auth';
-
 /**
  * Where UI state lives. In the browser everything is in localStorage. The
  * desktop app (and a server started with STORAGE_DIR) keeps the same `ne.*`
@@ -13,6 +11,13 @@ export interface AppInfo {
   secrets?: 'keyring' | 'file';
   configDir?: string;
   version: string;
+  /** short commit the binary was built from, empty for an unstamped build */
+  commit?: string;
+  /** where the source of this build is offered (AGPL); resolved by the backend */
+  source?: string;
+  /** a SQLite copy of the history exists; time ranges beyond memory can be queried */
+  historyDb?: boolean;
+  historyRetention?: string;
 }
 
 export const appInfo: AppInfo = { mode: 'server', storage: 'browser', version: 'dev' };
@@ -32,7 +37,7 @@ export function collectLocal(storage: StorageLike): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (let i = 0; i < storage.length; i++) {
     const k = storage.key(i);
-    if (!k || !k.startsWith(PREFIX)) continue;
+    if (!k?.startsWith(PREFIX)) continue;
     const raw = storage.getItem(k);
     if (raw === null) continue;
     try {
@@ -65,8 +70,7 @@ export function setPersistErrorHandler(fn: (message: string) => void) {
 }
 
 function headers(): Record<string, string> {
-  const token = useAuth.getState().token;
-  return { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+  return { 'Content-Type': 'application/json' };
 }
 
 async function flush() {

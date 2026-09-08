@@ -67,6 +67,8 @@ type Status struct {
 	LastError   string `json:"lastError,omitempty"`
 	Reconnects  uint64 `json:"reconnects"`
 	ConnectedAt int64  `json:"connectedAt,omitempty"`
+	// Bundle marks an imported support bundle: recorded messages, no server.
+	Bundle bool `json:"bundle,omitempty"`
 }
 
 type Managed struct {
@@ -129,12 +131,14 @@ func (m *Managed) status() Status {
 type Store struct {
 	mu          sync.RWMutex
 	connections map[string]*Managed
-	colorIdx    int
-	onChange    func()
+	// virtual holds imported bundles, which have no NATS connection
+	virtual  map[string]Status
+	colorIdx int
+	onChange func()
 }
 
 func NewStore() *Store {
-	return &Store{connections: make(map[string]*Managed)}
+	return &Store{connections: make(map[string]*Managed), virtual: make(map[string]Status)}
 }
 
 // SetOnChange registers a callback fired whenever a connection is added,
@@ -339,6 +343,23 @@ func (s *Store) Disconnect(connID string) error {
 	return nil
 }
 
+// SetSubscriptions replaces the subject patterns of a live connection. The
+// caller restarts the subscription manager; this only records the change
+// and tells the browsers.
+func (s *Store) SetSubscriptions(connID string, subs []string) (Config, error) {
+	s.mu.Lock()
+	managed, ok := s.connections[connID]
+	if !ok {
+		s.mu.Unlock()
+		return Config{}, fmt.Errorf("connection not found")
+	}
+	managed.Config.Subscriptions = subs
+	cfg := managed.Config
+	s.mu.Unlock()
+	s.notify()
+	return cfg, nil
+}
+
 func (s *Store) DisconnectAll() {
 	for _, m := range s.All() {
 		s.Disconnect(m.ID)
@@ -353,6 +374,9 @@ func (s *Store) Get(connID string) (*Managed, bool) {
 }
 
 func (s *Store) GetNC(connID string) (*nats.Conn, error) {
+	if s.IsVirtual(connID) {
+		return nil, errVirtual(connID)
+	}
 	m, ok := s.Get(connID)
 	if !ok || m.NC == nil {
 		return nil, fmt.Errorf("connection not found")
@@ -376,6 +400,12 @@ func (s *Store) All() []*Managed {
 func (s *Store) GetStatus(connID string) Status {
 	m, ok := s.Get(connID)
 	if !ok {
+		s.mu.RLock()
+		st, isVirtual := s.virtual[connID]
+		s.mu.RUnlock()
+		if isVirtual {
+			return st
+		}
 		return Status{ID: connID}
 	}
 	return m.status()
@@ -387,5 +417,7 @@ func (s *Store) AllStatuses() []Status {
 	for _, m := range all {
 		result = append(result, m.status())
 	}
-	return result
+	// Imported bundles sit next to the live connections; every module reads
+	// their recorded history the same way.
+	return append(result, s.virtualStatuses()...)
 }

@@ -63,7 +63,11 @@ export function serializeCollection(items: SavedRequest[]): string {
  */
 export function parseCollection(text: string): SavedRequest[] {
   const parsed: unknown = JSON.parse(text);
-  const list = Array.isArray(parsed) ? parsed : parsed && typeof parsed === 'object' && Array.isArray((parsed as { items?: unknown }).items) ? (parsed as { items: unknown[] }).items : [];
+  const list = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === 'object' && Array.isArray((parsed as { items?: unknown }).items)
+      ? (parsed as { items: unknown[] }).items
+      : [];
   const out: SavedRequest[] = [];
   for (const raw of list) {
     if (!raw || typeof raw !== 'object') continue;
@@ -143,6 +147,7 @@ export function savedFromDraft(d: RequestDraft, base: Pick<SavedRequest, 'id' | 
 /** True when the draft differs from what the template stores. */
 export function draftDiffers(d: RequestDraft, t: SavedRequest): boolean {
   const a = savedFromDraft(d, t);
-  const norm = (x: SavedRequest) => JSON.stringify([x.mode, x.subject, x.payload, x.headers, x.timeout ?? null, x.count ?? null, x.concurrency ?? null, x.intervalMs ?? null]);
+  const norm = (x: SavedRequest) =>
+    JSON.stringify([x.mode, x.subject, x.payload, x.headers, x.timeout ?? null, x.count ?? null, x.concurrency ?? null, x.intervalMs ?? null]);
   return norm(a) !== norm({ ...t, headers: t.headers.filter(h => h.key.trim()) });
 }

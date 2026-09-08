@@ -102,7 +102,7 @@ export function useAsync<T>(loader: () => Promise<T> | null, deps: unknown[], op
       setInitial(true);
     }
     run();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // biome-ignore lint/correctness/useExhaustiveDependencies: the list belongs to the caller of the hook
   }, deps);
 
   useEffect(() => {

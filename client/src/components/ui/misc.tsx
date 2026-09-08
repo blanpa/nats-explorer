@@ -7,7 +7,19 @@ import { cn } from '../../lib/utils';
 
 export type BadgeTone = 'neutral' | 'accent' | 'info' | 'ok' | 'warn' | 'danger';
 
-export function Badge({ tone = 'neutral', mono, className, children, title }: { tone?: BadgeTone; mono?: boolean; className?: string; children: ReactNode; title?: string }) {
+export function Badge({
+  tone = 'neutral',
+  mono,
+  className,
+  children,
+  title,
+}: {
+  tone?: BadgeTone;
+  mono?: boolean;
+  className?: string;
+  children: ReactNode;
+  title?: string;
+}) {
   return (
     <span className={cn('badge', `badge-${tone}`, mono && 'font-mono', className)} title={title}>
       {children}
@@ -74,11 +86,31 @@ export function StatStrip({ children, className }: { children: ReactNode; classN
   return <div className={cn('flex flex-wrap items-stretch gap-y-3', className)}>{children}</div>;
 }
 
-export function StatTile({ label, value, sub, tone, className }: { label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: 'ok' | 'warn' | 'danger' | 'accent'; className?: string }) {
+export function StatTile({
+  label,
+  value,
+  sub,
+  tone,
+  className,
+}: {
+  label: ReactNode;
+  value: ReactNode;
+  sub?: ReactNode;
+  tone?: 'ok' | 'warn' | 'danger' | 'accent';
+  className?: string;
+}) {
   return (
     <div data-stat="" className={cn('min-w-0 pl-4 pr-6 border-l border-line first:border-l-0 first:pl-0', className)}>
       <div className="text-xs text-muted truncate">{label}</div>
-      <div className={cn('text-md font-semibold font-mono tabular-nums truncate', tone === 'ok' && 'text-ok', tone === 'warn' && 'text-warn', tone === 'danger' && 'text-danger', tone === 'accent' && 'text-accent')}>
+      <div
+        className={cn(
+          'text-md font-semibold font-mono tabular-nums truncate',
+          tone === 'ok' && 'text-ok',
+          tone === 'warn' && 'text-warn',
+          tone === 'danger' && 'text-danger',
+          tone === 'accent' && 'text-accent',
+        )}
+      >
         {value}
       </div>
       {sub && <div className="text-xs text-faint truncate">{sub}</div>}
@@ -97,7 +129,15 @@ export interface KvItem {
 
 export function KeyValueGrid({ items, columns = 2, className }: { items: KvItem[]; columns?: 1 | 2 | 3; className?: string }) {
   return (
-    <dl className={cn('grid gap-x-6 gap-y-2', columns === 1 && 'grid-cols-1', columns === 2 && 'grid-cols-1 md:grid-cols-2', columns === 3 && 'grid-cols-1 md:grid-cols-3', className)}>
+    <dl
+      className={cn(
+        'grid gap-x-6 gap-y-2',
+        columns === 1 && 'grid-cols-1',
+        columns === 2 && 'grid-cols-1 md:grid-cols-2',
+        columns === 3 && 'grid-cols-1 md:grid-cols-3',
+        className,
+      )}
+    >
       {items.map((it, i) => (
         <div key={i} className={cn('flex items-baseline justify-between gap-3 min-w-0 border-b border-line/60 pb-1.5', it.span && 'md:col-span-full')}>
           <dt className="text-xs text-muted shrink-0">{it.label}</dt>
@@ -144,6 +184,7 @@ export function Tabs<T extends string>({ tabs, value, onChange, className }: { t
     <div role="tablist" className={cn('flex items-center gap-0.5 border-b border-line', className)}>
       {tabs.map(t => (
         <button
+          type="button"
           key={t.id}
           role="tab"
           aria-selected={value === t.id}
@@ -163,11 +204,22 @@ export function Tabs<T extends string>({ tabs, value, onChange, className }: { t
 
 /* Segmented control ------------------------------------------------------ */
 
-export function Segmented<T extends string>({ options, value, onChange, size = 'sm' }: { options: { id: T; label: ReactNode }[]; value: T; onChange: (id: T) => void; size?: 'xs' | 'sm' }) {
+export function Segmented<T extends string>({
+  options,
+  value,
+  onChange,
+  size = 'sm',
+}: {
+  options: { id: T; label: ReactNode }[];
+  value: T;
+  onChange: (id: T) => void;
+  size?: 'xs' | 'sm';
+}) {
   return (
     <div className="inline-flex items-center rounded border border-line bg-panel p-0.5 gap-0.5">
       {options.map(o => (
         <button
+          type="button"
           key={o.id}
           onClick={() => onChange(o.id)}
           className={cn(
@@ -190,7 +242,11 @@ export function Tooltip({ content, children, side = 'right' }: { content: ReactN
     <RadixTooltip.Root delayDuration={300}>
       <RadixTooltip.Trigger asChild>{children}</RadixTooltip.Trigger>
       <RadixTooltip.Portal>
-        <RadixTooltip.Content side={side} sideOffset={6} className="z-[70] rounded border border-line bg-raised px-2 py-1 text-xs text-fg shadow-pop animate-fade-in">
+        <RadixTooltip.Content
+          side={side}
+          sideOffset={6}
+          className="z-[70] rounded border border-line bg-raised px-2 py-1 text-xs text-fg shadow-pop animate-fade-in"
+        >
           {content}
         </RadixTooltip.Content>
       </RadixTooltip.Portal>

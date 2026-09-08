@@ -10,8 +10,10 @@ import { Field, Input, SearchInput, Select } from '../ui/Input';
 import { Dialog } from '../ui/Dialog';
 import { Badge, EmptyState, ErrorState, LoadingState, PaneHeader } from '../ui/misc';
 import DomainSwitch from '../jetstream/DomainSwitch';
+import { useCanWrite } from '../../lib/auth';
 
 export default function KvBucketList() {
+  const canWrite = useCanWrite();
   const connId = useStore(s => s.activeConnId);
   const domainOverride = useJsDomainOverride(connId);
   const connDomain = useStore(s => s.connections.find(c => c.id === connId)?.jsDomain);
@@ -22,7 +24,10 @@ export default function KvBucketList() {
   const [filter, setFilter] = useState('');
   const [creating, setCreating] = useState(false);
 
-  const { data, error, loading, initial, reload } = useAsync<KvBucketInfo[]>(() => (connId ? api.listKvBuckets(connId) : null), [connId, tick], { key: `kv:${connId}`, interval: 10_000 });
+  const { data, error, loading, initial, reload } = useAsync<KvBucketInfo[]>(() => (connId ? api.listKvBuckets(connId) : null), [connId, tick], {
+    key: `kv:${connId}`,
+    interval: 10_000,
+  });
 
   const buckets = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -33,18 +38,21 @@ export default function KvBucketList() {
     <div className="flex flex-col h-full min-h-0">
       <PaneHeader
         title="Key-Value buckets"
-        children={<DomainSwitch />}
         actions={
           <>
             <IconButton label="Refresh" size="xs" loading={loading && !initial} onClick={reload}>
               <RefreshCw size={13} />
             </IconButton>
-            <IconButton label="Create bucket" size="xs" onClick={() => setCreating(true)}>
-              <Plus size={14} />
-            </IconButton>
+            {canWrite && (
+              <IconButton label="Create bucket" size="xs" onClick={() => setCreating(true)}>
+                <Plus size={14} />
+              </IconButton>
+            )}
           </>
         }
-      />
+      >
+        <DomainSwitch />
+      </PaneHeader>
       <div className="px-2 py-2 border-b border-line">
         <SearchInput value={filter} onChange={e => setFilter(e.target.value)} placeholder="Filter buckets…" />
       </div>
@@ -54,10 +62,19 @@ export default function KvBucketList() {
         ) : error ? (
           <ErrorState title="Cannot list buckets" message={describeJsError(error, domainLabel)} />
         ) : buckets.length === 0 ? (
-          <EmptyState compact icon={KeyRound} title={filter ? 'No matching buckets' : 'No KV buckets'} description={filter ? undefined : 'Create a bucket to store keys with revision history.'} />
+          <EmptyState
+            compact
+            icon={KeyRound}
+            title={filter ? 'No matching buckets' : 'No KV buckets'}
+            description={filter ? undefined : 'Create a bucket to store keys with revision history.'}
+          />
         ) : (
           buckets.map(b => (
-            <div key={b.bucket} className={cn('list-row flex-col items-stretch gap-0.5 py-2', selected === b.bucket && 'list-row-active')} onClick={() => setSelected(b.bucket)}>
+            <div
+              key={b.bucket}
+              className={cn('list-row flex-col items-stretch gap-0.5 py-2', selected === b.bucket && 'list-row-active')}
+              onClick={() => setSelected(b.bucket)}
+            >
               <div className="flex items-center gap-2 min-w-0">
                 <KeyRound size={13} className="text-accent shrink-0" />
                 <span className="font-medium truncate">{b.bucket}</span>

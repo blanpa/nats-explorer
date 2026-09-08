@@ -1,29 +1,37 @@
 {
   "name": "nats-explorer",
-  "version": "0.2.0",
-  "license": "Apache-2.0",
+  "version": "0.3.0",
+  "license": "AGPL-3.0-or-later",
   "private": true,
   "scripts": {
-    "dev": "concurrently \"pnpm dev:server\" \"pnpm dev:client\"",
+    "dev": "concurrently \"bun run dev:server\" \"bun run dev:client\"",
     "dev:server": "cd go-server && PORT=3002 go run .",
-    "dev:client": "pnpm --filter client dev",
-    "build": "pnpm --filter shared build && pnpm --filter client build && scripts/build-server.sh current",
+    "dev:client": "bun run --filter client dev",
+    "build": "bun run --filter shared build && bun run --filter client build && scripts/build-server.sh current",
     "docker:build": "docker build -f go-server/Dockerfile -t nats-explorer .",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
-    "nats:start": "pnpm --filter nats-dev start",
-    "nats:stop": "pnpm --filter nats-dev stop",
-    "nats:seed": "pnpm --filter nats-dev seed",
-    "nats:simulate": "pnpm --filter nats-dev simulate",
-    "nats:dev": "pnpm --filter nats-dev dev",
-    "test": "pnpm --filter client test && cd go-server && go test ./...",
-    "test:e2e": "pnpm --filter e2e test",
+    "nats:start": "bun run --filter nats-dev start",
+    "nats:stop": "bun run --filter nats-dev stop",
+    "nats:seed": "bun run --filter nats-dev seed",
+    "nats:simulate": "bun run --filter nats-dev simulate",
+    "nats:dev": "bun run --filter nats-dev dev",
+    "typecheck": "bun run --filter client typecheck",
+    "lint": "biome check",
+    "format": "biome check --write",
+    "test": "bun run --filter client test && cd go-server && go test ./...",
+    "test:e2e": "bun run --filter e2e test",
     "build:server": "scripts/build-server.sh",
     "build:desktop": "scripts/build-desktop.sh"
   },
   "devDependencies": {
-    "concurrently": "^9.0.0",
-    "esbuild": "^0.24.0"
+    "@biomejs/biome": "^2.5.12",
+    "concurrently": "^10.0.5"
   },
-  "packageManager": "pnpm@10.34.5"
+  "workspaces": [
+    "shared",
+    "client",
+    "dev",
+    "e2e"
+  ]
 }

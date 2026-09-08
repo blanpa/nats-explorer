@@ -21,6 +21,8 @@ export interface SavedConnection {
   tlsInsecure?: boolean;
   subscriptions: string[];
   sysTopics: Partial<Record<SystemTopicKey, boolean>>;
+  /** Opened by the backend when it starts (file storage only). */
+  autoConnect?: boolean;
   monitoringUrl?: string;
   monitoringPort?: number;
   jsDomain?: string;
@@ -34,7 +36,7 @@ export interface SavedConnection {
 }
 
 export const SYSTEM_TOPICS: { key: SystemTopicKey; subject: string; label: string; description: string }[] = [
-  { key: 'sys', subject: '$SYS.>', label: '$SYS', description: 'Server events, account and connection stats' },
+  { key: 'sys', subject: '$SYS.>', label: '$SYS', description: 'Server events, account and connection stats (system account only)' },
   { key: 'js', subject: '$JS.>', label: '$JS', description: 'JetStream API and advisories' },
   { key: 'kv', subject: '$KV.>', label: '$KV', description: 'Key-Value change notifications' },
   { key: 'srv', subject: '$SRV.>', label: '$SRV', description: 'Micro service discovery and ping' },

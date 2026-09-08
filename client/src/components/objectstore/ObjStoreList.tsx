@@ -10,8 +10,10 @@ import { Field, Input, SearchInput, Select } from '../ui/Input';
 import { Dialog } from '../ui/Dialog';
 import { Badge, EmptyState, ErrorState, LoadingState, PaneHeader } from '../ui/misc';
 import DomainSwitch from '../jetstream/DomainSwitch';
+import { useCanWrite } from '../../lib/auth';
 
 export default function ObjStoreList() {
+  const canWrite = useCanWrite();
   const connId = useStore(s => s.activeConnId);
   const domainOverride = useJsDomainOverride(connId);
   const connDomain = useStore(s => s.connections.find(c => c.id === connId)?.jsDomain);
@@ -22,7 +24,10 @@ export default function ObjStoreList() {
   const [filter, setFilter] = useState('');
   const [creating, setCreating] = useState(false);
 
-  const { data, error, loading, initial, reload } = useAsync<ObjStoreInfo[]>(() => (connId ? api.listObjectStores(connId) : null), [connId, tick], { key: `obj:${connId}`, interval: 10_000 });
+  const { data, error, loading, initial, reload } = useAsync<ObjStoreInfo[]>(() => (connId ? api.listObjectStores(connId) : null), [connId, tick], {
+    key: `obj:${connId}`,
+    interval: 10_000,
+  });
 
   const stores = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -33,18 +38,21 @@ export default function ObjStoreList() {
     <div className="flex flex-col h-full min-h-0">
       <PaneHeader
         title="Object stores"
-        children={<DomainSwitch />}
         actions={
           <>
             <IconButton label="Refresh" size="xs" loading={loading && !initial} onClick={reload}>
               <RefreshCw size={13} />
             </IconButton>
-            <IconButton label="Create store" size="xs" onClick={() => setCreating(true)}>
-              <Plus size={14} />
-            </IconButton>
+            {canWrite && (
+              <IconButton label="Create store" size="xs" onClick={() => setCreating(true)}>
+                <Plus size={14} />
+              </IconButton>
+            )}
           </>
         }
-      />
+      >
+        <DomainSwitch />
+      </PaneHeader>
       <div className="px-2 py-2 border-b border-line">
         <SearchInput value={filter} onChange={e => setFilter(e.target.value)} placeholder="Filter stores…" />
       </div>
@@ -54,10 +62,19 @@ export default function ObjStoreList() {
         ) : error ? (
           <ErrorState title="Cannot list object stores" message={describeJsError(error, domainLabel)} />
         ) : stores.length === 0 ? (
-          <EmptyState compact icon={Archive} title={filter ? 'No matching stores' : 'No object stores'} description={filter ? undefined : 'Create a store to upload files and blobs.'} />
+          <EmptyState
+            compact
+            icon={Archive}
+            title={filter ? 'No matching stores' : 'No object stores'}
+            description={filter ? undefined : 'Create a store to upload files and blobs.'}
+          />
         ) : (
           stores.map(s => (
-            <div key={s.bucket} className={cn('list-row flex-col items-stretch gap-0.5 py-2', selected === s.bucket && 'list-row-active')} onClick={() => setSelected(s.bucket)}>
+            <div
+              key={s.bucket}
+              className={cn('list-row flex-col items-stretch gap-0.5 py-2', selected === s.bucket && 'list-row-active')}
+              onClick={() => setSelected(s.bucket)}
+            >
               <div className="flex items-center gap-2 min-w-0">
                 <Archive size={13} className="text-accent shrink-0" />
                 <span className="font-medium truncate">{s.bucket}</span>

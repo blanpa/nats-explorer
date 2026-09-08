@@ -17,6 +17,7 @@ export function useLiveWatch<T extends WsEventType>(
   handler.current = onEvent;
   const key = start ? JSON.stringify(start) : '';
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: key stands for the start message; the objects are new on every render
   useEffect(() => {
     if (!start || !stop) return;
     const unsubStatus = wsClient.onStatus(status => {
@@ -28,6 +29,5 @@ export function useLiveWatch<T extends WsEventType>(
       unsubEvent();
       wsClient.send(stop);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, eventType]);
 }
