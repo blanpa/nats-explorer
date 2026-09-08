@@ -299,7 +299,7 @@ Releases are built automatically on tag push (`v*`); a manual `workflow_dispatch
 | Server (headless) | `nats-explorer-server-<version>-{linux-x64,linux-arm64,windows-x64,macos-x64,macos-arm64}` |
 | Docker (GHCR) | `ghcr.io/blanpa/nats-explorer:<version>` |
 
-Every release carries a `SHA256SUMS.txt`. Installers are not code-signed (see the notes in [Install](#install)).
+Every release carries a `SHA256SUMS.txt`. Installers are not code-signed (see the notes in [Download](#download)).
 
 ---
 

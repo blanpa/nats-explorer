@@ -13,8 +13,8 @@ A NATS management tool and message explorer -- as a desktop app for Windows, mac
 and Linux, or as a web UI served by a single Go binary.
 {: .fs-6 .fw-300 }
 
-[Install]({% link installation.md %}){: .btn .btn-primary .mr-2 }
-[Features]({% link features.md %}){: .btn .mr-2 }
+[Install]({{ site.baseurl }}{% link installation.md %}){: .btn .btn-primary .mr-2 }
+[Features]({{ site.baseurl }}{% link features.md %}){: .btn .mr-2 }
 [GitHub](https://github.com/blanpa/nats-explorer){: .btn }
 
 ---
@@ -35,7 +35,7 @@ keep the messages after the tab is closed. Inspired by
 | **Windows** | [Installer (.exe)](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-windows-x64-setup.exe) -- per-user, no admin rights |
 | **macOS** | [Disk image (.dmg)](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-macos-universal.dmg) -- Intel and Apple Silicon |
 | **Linux** | [AppImage](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-linux-x64.AppImage) &middot; [.deb](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-linux-x64.deb) |
-| **Server** | Docker image, or the standalone binary -- see [Installation]({% link installation.md %}) |
+| **Server** | Docker image, or the standalone binary -- see [Installation]({{ site.baseurl }}{% link installation.md %}) |
 
 These links always hand out the newest build. Every package with its version in
 the name, plus `SHA256SUMS.txt` over all of them, is on the
@@ -86,7 +86,7 @@ audit log of every write.
 **Support bundle.** A time range plus the server snapshot as one file, reopened in
 any explorer and read like a live connection -- analysis without server access.
 
-[All of it in detail]({% link features.md %}){: .btn .btn-outline }
+[All of it in detail]({{ site.baseurl }}{% link features.md %}){: .btn .btn-outline }
 
 ---
 
@@ -102,9 +102,9 @@ any explorer and read like a live connection -- analysis without server access.
 
 ## Next
 
-- [Installation]({% link installation.md %}) -- every package, Docker, the binary, first connection
-- [Deployment]({% link deployment.md %}) -- the web UI for a team, behind a proxy, with roles
-- [Architecture]({% link architecture.md %}) -- how it is built, and the full HTTP API
-- [Development]({% link development.md %}) -- build it from source
+- [Installation]({{ site.baseurl }}{% link installation.md %}) -- every package, Docker, the binary, first connection
+- [Deployment]({{ site.baseurl }}{% link deployment.md %}) -- the web UI for a team, behind a proxy, with roles
+- [Architecture]({{ site.baseurl }}{% link architecture.md %}) -- how it is built, and the full HTTP API
+- [Development]({{ site.baseurl }}{% link development.md %}) -- build it from source
 - [Changelog](https://github.com/blanpa/nats-explorer/blob/main/CHANGELOG.md) -- what changed per release
-- [License]({% link license.md %}) -- AGPL v3.0 or later, and what that means for you
+- [License]({{ site.baseurl }}{% link license.md %}) -- AGPL v3.0 or later, and what that means for you

@@ -144,7 +144,7 @@ SOURCE_URL=https://git.example.org/ops/nats-explorer
 That is what the AGPL asks of a deployment people reach over a network: its users
 have to be able to get the source of the version that is serving them. An
 unmodified deployment needs nothing -- the link already points at the source it
-was built from. See [License]({% link license.md %}).
+was built from. See [License]({{ site.baseurl }}{% link license.md %}).
 
 ---
 
@@ -168,4 +168,4 @@ A manual `workflow_dispatch` run produces the artifacts without publishing.
 | `nats-explorer-server-<v>-{linux-x64,linux-arm64,windows-x64,macos-x64,macos-arm64}` | Server |
 | `ghcr.io/blanpa/nats-explorer:<v>` | Docker |
 
-Installers are not code-signed; see the notes on the [Installation]({% link installation.md %}) page.
+Installers are not code-signed; see the notes on the [Installation]({{ site.baseurl }}{% link installation.md %}) page.

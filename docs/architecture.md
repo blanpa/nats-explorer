@@ -292,7 +292,7 @@ All API endpoints are under `/api` and accept `connId` via query parameter or re
 | —      | `?domain=`        | On every JetStream/KV/Object Store route: address another JetStream domain for this call (defaults to the connection's `jsDomain` / `jsApiPrefix`) |
 | GET    | `/api/cluster/{connId}/overview` | Cluster-wide view. With system-account credentials on the connection: `$SYS.REQ.SERVER.PING.STATSZ` and `.JSZ` fan-out to every server (servers, meta cluster, stream placement); otherwise the connected node's `varz`/`jsz` with an explanatory error |
 | GET    | `/api/monitoring/{connId}/leafz` | Leaf node connections (also `routez`, `varz`, `jsz`, `connz`, `subsz`, `healthz`) |
-| POST   | `/api/run`        | Repeat a publish or request `count` times (`concurrency`, `intervalMs`, `timeout`); subject, payload and headers may use `{{i}}`, `{{ts}}`, `{{uuid}}`, `{{rand:MIN-MAX}}`; returns counts, throughput, latency percentiles, sample replies and error samples (max 10 000 sends, 120 s) |
+| POST   | `/api/run`        | Repeat a publish or request `count` times (`concurrency`, `intervalMs`, `timeout`); subject, payload and headers may use {% raw %}`{{i}}`{% endraw %}, {% raw %}`{{ts}}`{% endraw %}, {% raw %}`{{uuid}}`{% endraw %}, {% raw %}`{{rand:MIN-MAX}}`{% endraw %}; returns counts, throughput, latency percentiles, sample replies and error samples (max 10 000 sends, 120 s) |
 
 ### JetStream Streams
 

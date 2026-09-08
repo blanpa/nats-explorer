@@ -117,7 +117,7 @@ A stream that mirrors or sources from another says so, with the lag and the time
 - Saved request templates in the sidebar: name, publish or request/reply, subject, headers, payload, timeout
 - Create, edit, duplicate, delete; import and export as JSON to share collections
 - **Repeated runs**: send a template up to 10 000 times with parallel senders and an optional pause; read sent/ok/errors, throughput, latency min/avg/p50/p95/max and the first replies
-- Variables replaced per message in subject, payload and headers: `{{i}}` (counter), `{{ts}}` (unix milliseconds), `{{uuid}}`, `{{rand:MIN-MAX}}`
+- Variables replaced per message in subject, payload and headers: {% raw %}`{{i}}`{% endraw %} (counter), {% raw %}`{{ts}}`{% endraw %} (unix milliseconds), {% raw %}`{{uuid}}`{% endraw %}, {% raw %}`{{rand:MIN-MAX}}`{% endraw %}
 
 ## Response times
 

@@ -80,7 +80,7 @@ NATS Explorer builds on other people's work, all of it under permissive licenses
 | | |
 |:--|:--|
 | [nats.go](https://github.com/nats-io/nats.go), [nats-server](https://github.com/nats-io/nats-server) | Apache-2.0 |
-| [cel-go](https://github.com/google/cel-go) | Apache-2.0 |
+| [cel-go](https://github.com/cel-expr/cel-go) | Apache-2.0 |
 | [chi](https://github.com/go-chi/chi) | MIT |
 | [gorilla/websocket](https://github.com/gorilla/websocket) | BSD-2-Clause |
 | [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) | BSD-3-Clause |

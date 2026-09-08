@@ -85,7 +85,7 @@ cd nats-explorer && ./nats-explorer
 | `STORAGE_DIR` | unset | Keep connections, templates and preferences in this directory instead of the browser (single-user servers). Same layout as the desktop app. Saved connections marked "Connect when the server starts" are opened by the backend at start |
 | `NO_KEYRING` | unset | With `STORAGE_DIR`: always use `secrets.json` instead of the system keyring |
 | `PPROF` | unset | When set, Go's profiler is served under `/debug/pprof` (load investigations only) |
-| `SOURCE_URL` | this project | Where the source of this build is offered. The status bar and the login dialog link it as "source"; unset, it points at this project at the commit or tag the binary was built from. Set it when you deploy a version you changed -- see [License]({% link license.md %}) |
+| `SOURCE_URL` | this project | Where the source of this build is offered. The status bar and the login dialog link it as "source"; unset, it points at this project at the commit or tag the binary was built from. Set it when you deploy a version you changed -- see [License]({{ site.baseurl }}{% link license.md %}) |
 | `HISTORY_DB` | unset | Path of a SQLite file; every message is also written there, and the UI can load time ranges from it (`from`/`to` on the history endpoints, the range picker in the subject detail) |
 | `HISTORY_RETENTION` | `72h` | With `HISTORY_DB`: rows older than this are deleted once a minute (Go duration, e.g. `24h`, `168h`) |
 | `ROLLUP_RETENTION` | `2160h` | With `HISTORY_DB`: how long the minute aggregates behind long-range charts are kept (90 days by default; they are far smaller than the messages) |
