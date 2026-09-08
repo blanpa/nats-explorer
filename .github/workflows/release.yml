@@ -23,16 +23,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter shared build
-      - run: pnpm --filter client typecheck
-      - run: pnpm --filter client test
-      - run: pnpm --filter client build
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run --filter shared build
+      - run: bun run --filter client typecheck
+      - run: bun run --filter client test
+      - run: bun run --filter client build
       - uses: actions/upload-artifact@v4
         with:
           name: client-dist
@@ -191,6 +189,8 @@ jobs:
     needs: [desktop-linux, desktop-windows, desktop-macos, server, docker]
     runs-on: ubuntu-latest
     steps:
+      # For CHANGELOG.md; the rest of this job only needs the artifacts.
+      - uses: actions/checkout@v4
       # Only our packages: the docker job also uploads a build-record artifact
       # that is not needed here and made the download step fail.
       - uses: actions/download-artifact@v4
@@ -207,9 +207,26 @@ jobs:
         run: |
           mkdir -p out
           find artifacts -type f \( -name '*.exe' -o -name '*.zip' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.tar.gz' \) -exec cp {} out/ \;
+          # Every file a second time without the version in its name, so the
+          # README can link to /releases/latest/download/<name> and always
+          # hand out the current build. GitHub resolves those only for names
+          # that stay the same across releases.
+          version="${GITHUB_REF_NAME#v}"
+          for f in out/*; do
+            base=$(basename "$f")
+            stable=${base/-$version/}
+            if [ "$stable" != "$base" ]; then
+              cp "$f" "out/$stable"
+            fi
+          done
           (cd out && sha256sum * > SHA256SUMS.txt)
           ls -la out
+      # The changelog entry of this version becomes the release body; the
+      # generated notes (commits, contributors, compare link) follow it.
+      - name: Release notes from the changelog
+        run: scripts/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
       - uses: softprops/action-gh-release@v2
         with:
+          body_path: ${{ runner.temp }}/notes.md
           generate_release_notes: true
           files: out/*
