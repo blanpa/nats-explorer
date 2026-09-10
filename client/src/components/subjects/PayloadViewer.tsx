@@ -101,7 +101,11 @@ export default function PayloadViewer({ payload, type, subject, size, onFieldSel
   }
 
   return (
-    <div className={cn('flex flex-col min-h-0', className)}>
+    // With a maxHeight the viewer fills a box someone else measured, so it
+    // may shrink. Without one it stands in a column that scrolls, and there
+    // it must not: a flex child that can collapse will, and the payload gets
+    // squeezed to a line while the charts above it take the room.
+    <div className={cn('flex flex-col', maxHeight ? 'min-h-0' : 'shrink-0', className)}>
       <div className={cn('flex items-center gap-2', compact ? 'mb-1' : 'mb-2')}>
         <Segmented
           size="xs"
@@ -136,7 +140,7 @@ export default function PayloadViewer({ payload, type, subject, size, onFieldSel
         </div>
       </div>
       {subject && <DecoderDialog open={rulesOpen} onClose={() => setRulesOpen(false)} prefill={rule?.pattern ?? subject} />}
-      <div className="code-block flex-1 min-h-0 overflow-auto" style={{ maxHeight }}>
+      <div className={cn('code-block overflow-auto', maxHeight ? 'flex-1 min-h-0' : 'min-h-40')} style={{ maxHeight }}>
         {body}
       </div>
     </div>
