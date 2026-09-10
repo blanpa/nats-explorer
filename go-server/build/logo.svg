@@ -2,7 +2,7 @@
      A subject tree: a root and the branches under it, which is what the
      application shows. The colour is --accent. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 32 32">
-  <rect x="0.6" y="0.6" width="30.8" height="30.8" rx="6.6" fill="#12161c" stroke="#262e39" stroke-width="1.2"/>
+  <rect x="0.6" y="0.6" width="30.8" height="30.8" rx="6.6" fill="#161616" stroke="#2d2d2d" stroke-width="1.2"/>
   <path d="M8 9.25V22.75M8 12.75H15.4M8 22.75H20.4" stroke="#5aa9ff" stroke-width="2.6" fill="none" stroke-linecap="round"/>
   <circle cx="8" cy="9.25" r="3" fill="#5aa9ff"/>
   <circle cx="19" cy="12.75" r="3" fill="#5aa9ff"/>

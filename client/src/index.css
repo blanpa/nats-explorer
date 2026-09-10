@@ -100,16 +100,20 @@
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  --bg-0: 12 15 19;        /* app canvas, rail            */
-  --bg-1: 18 22 28;        /* panels                      */
-  --bg-2: 24 29 36;        /* cards, raised surfaces      */
-  --bg-3: 31 38 48;        /* inputs, hover               */
-  --border: 38 46 57;
-  --border-strong: 52 64 77;
+  /* Neutral grey, not blue-grey. The surfaces used to carry a cast that
+     grew with lightness -- 36 points between red and blue at fg-faint --
+     which put the interface in competition with its own blue accent. The
+     luminance of every step is unchanged, so the contrast ratios are too. */
+  --bg-0: 15 15 15;        /* app canvas, rail            */
+  --bg-1: 22 22 22;        /* panels                      */
+  --bg-2: 29 29 29;        /* cards, raised surfaces      */
+  --bg-3: 37 37 37;        /* inputs, hover               */
+  --border: 45 45 45;
+  --border-strong: 63 63 63;
 
-  --fg: 227 232 239;
-  --fg-muted: 139 151 168;
-  --fg-faint: 114 130 150;   /* 4.6:1 on --bg-1; it is the most used ink */
+  --fg: 231 231 231;
+  --fg-muted: 150 150 150;
+  --fg-faint: 128 128 128;   /* 4.6:1 on --bg-1; it is the most used ink */
 
   /* The interface has one blue, and it is the accent: an "info" badge and a
      primary button meaning the same colour is a simplification, not a clash.
