@@ -57,6 +57,19 @@ describe('ChartPanel', () => {
     expect(screen.getByRole('checkbox', { name: /Scale each field/ })).toBeChecked();
   });
 
+  it('keeps the settings out of the way of adding a field', () => {
+    panel();
+    const agg = screen.getByRole('button', { name: 'Min/Max' });
+    const chip = screen.getByRole('button', { name: 'Stop charting x' });
+    // The settings stand above the chips, so a chip more -- or a row of
+    // them -- cannot push them down while the reader is aiming at them.
+    expect(agg.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // And the control that exists only from the second field on stands at
+    // the left of a group that hangs right, so its appearing moves nothing.
+    const layout = screen.getByRole('button', { name: 'Separate' });
+    expect(layout.compareDocumentPosition(agg) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('offers the layout only when there is something to lay out', () => {
     panel({ fields: ['x'], seriesByField: { x: series('x', 400) } });
     expect(screen.queryByRole('button', { name: 'One chart' })).not.toBeInTheDocument();

@@ -101,8 +101,43 @@ export default function ChartPanel({ fields, messages, seriesByField, settings, 
 
   return (
     <div className="card p-3 flex flex-col gap-2">
+      {/*
+        The settings come first, and the fields below them. Charting a
+        second field used to add both a chip and the layout control to one
+        shared row, so the settings moved twice over -- down a line and
+        sideways -- while the reader was still clicking numbers to add.
+        Above the chips nothing they do can push the settings around.
+      */}
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className="text-muted">Charting</span>
+
+        <span className="ml-auto flex flex-wrap items-center gap-2">
+          {/*
+            The layout question only exists with a second field, so it sits
+            at the left of a group that hangs to the right: appearing there
+            grows the group into empty space instead of shoving the two
+            controls that were already under the cursor aside.
+          */}
+          {many && (
+            <Segmented
+              size="xs"
+              options={[
+                { id: 'separate', label: 'Separate' },
+                { id: 'overlay', label: 'One chart' },
+              ]}
+              value={layout}
+              onChange={v => onSettings({ layout: v })}
+            />
+          )}
+          <span className="inline-flex items-center gap-1">
+            <Segmented size="xs" options={AGGREGATIONS.map(a => ({ id: a.id, label: a.label }))} value={agg} onChange={v => onSettings({ agg: v })} />
+            {aggHint && <Hint text={aggHint} />}
+          </span>
+          <Segmented size="xs" options={CHART_TYPES} value={type} onChange={v => onSettings({ type: v })} />
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 text-xs">
         {fields.map((f, i) => (
           <span key={f} className="inline-flex items-center gap-1 rounded border border-line px-1.5 py-0.5">
             <span className="w-2 h-2 rounded-full" style={{ background: colorForIndex(i) }} aria-hidden />
@@ -117,25 +152,6 @@ export default function ChartPanel({ fields, messages, seriesByField, settings, 
             clear all
           </button>
         )}
-
-        <span className="ml-auto flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center gap-1">
-            <Segmented size="xs" options={AGGREGATIONS.map(a => ({ id: a.id, label: a.label }))} value={agg} onChange={v => onSettings({ agg: v })} />
-            {aggHint && <Hint text={aggHint} />}
-          </span>
-          {many && (
-            <Segmented
-              size="xs"
-              options={[
-                { id: 'separate', label: 'Separate' },
-                { id: 'overlay', label: 'One chart' },
-              ]}
-              value={layout}
-              onChange={v => onSettings({ layout: v })}
-            />
-          )}
-          <Segmented size="xs" options={CHART_TYPES} value={type} onChange={v => onSettings({ type: v })} />
-        </span>
       </div>
 
       {many && layout === 'overlay' && (
