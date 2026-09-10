@@ -48,9 +48,11 @@ export default function MessageList({ messages, subjectPrefix, onOpen, onSelect,
         <ColumnGrip {...resize('subject')} />
       </span>
       <span>Payload</span>
+      {/* The last column: its right edge is the table's, so the line that
+          moves -- and the one to grab -- is the one on its left. */}
       <span className="relative text-right">
         Size
-        <ColumnGrip {...resize('size')} />
+        <ColumnGrip {...resize('size', 'left')} />
       </span>
     </div>
   );
