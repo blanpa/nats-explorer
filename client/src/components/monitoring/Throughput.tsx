@@ -29,9 +29,9 @@ export default function Throughput({ connId }: { connId: string }) {
         {span > 0 && <span className="font-normal text-faint ml-2">last {span < 1 ? '<1' : span} min</span>}
       </SectionTitle>
       {samples.length < 2 ? (
-        <div className="text-xs text-muted py-2">Collecting samples, the curves appear with the next refresh.</div>
+        <div className="card px-3 py-2 text-xs text-muted">Collecting samples, the curves appear with the next refresh.</div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-6 gap-y-4">
+        <div className="card px-3 py-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-6 gap-y-4">
           <RateChart
             title="Messages per second"
             times={msgsIn.times}

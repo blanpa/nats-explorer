@@ -105,69 +105,97 @@ export default function MonitoringDashboard() {
     <div className="flex flex-col h-full min-h-0">
       {header}
       {bundleDialog}
+      {/*
+        The page answers four questions in the order they are asked: is this
+        server well, what is it carrying, what is inside JetStream, and who
+        is talking to it. Each answer is a titled card, the shape the tables
+        below already had -- before, the strips and sections were loose rows
+        and the page read as one long ribbon with no grouping in it.
+      */}
       <div className="flex-1 min-h-0 overflow-auto p-4 flex flex-col gap-5">
-        <div className="flex flex-wrap items-center gap-2 text-sm">
+        <div className="card px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
           <Badge tone={healthz ? (healthy ? 'ok' : 'danger') : 'neutral'}>
             {healthz ? (healthy ? 'healthy' : healthz.error || healthz.status) : 'health unknown'}
           </Badge>
           <ServerName name={varz.server_name} className="font-medium" />
           <span className="text-muted font-mono text-xs">
-            v{varz.version} · {varz.go} · {varz.host}:{varz.port} · up {varz.uptime}
+            v{varz.version} · {varz.go} · {varz.host}:{varz.port}
           </span>
-          {data.errors.length > 0 && <span className="text-xs text-warn ml-auto">{data.errors.length} endpoint(s) failed</span>}
+          {data.errors.length > 0 && (
+            <span className="text-xs text-warn" title={data.errors.join('\n')}>
+              {data.errors.length} endpoint{data.errors.length === 1 ? '' : 's'} did not answer
+            </span>
+          )}
+          <span className="ml-auto text-xs text-muted font-mono tabular-nums">up {varz.uptime}</span>
         </div>
 
-        <StatStrip>
-          <StatTile label="CPU" value={`${(varz.cpu ?? 0).toFixed(1)}%`} sub={`${varz.cores} cores`} tone={varz.cpu > 80 ? 'warn' : undefined} />
-          <StatTile label="Memory" value={formatBytes(varz.mem)} />
-          <StatTile label="Connections" value={formatNumber(varz.connections)} sub={`${formatNumber(varz.total_connections)} total`} />
-          <StatTile label="Subscriptions" value={formatNumber(varz.subscriptions)} />
-          <StatTile label="Slow consumers" value={formatNumber(varz.slow_consumers)} tone={varz.slow_consumers > 0 ? 'warn' : undefined} />
-          <StatTile label="Messages in / out" value={`${formatNumber(varz.in_msgs)} / ${formatNumber(varz.out_msgs)}`} />
-          <StatTile label="Bytes in / out" value={`${formatBytes(varz.in_bytes)} / ${formatBytes(varz.out_bytes)}`} />
-          <StatTile label="Routes / Leaf" value={`${varz.routes ?? 0} / ${varz.leafnodes ?? 0}`} />
-        </StatStrip>
+        <div>
+          <SectionTitle>Overview</SectionTitle>
+          {/* Load first, then who is attached, then how much has gone
+              through, then what it is attached to. The cumulative totals sit
+              at the end: they are the least useful figure on the page and
+              they used to lead it. */}
+          <div className="card px-3 py-2">
+            <StatStrip>
+              <StatTile label="CPU" value={`${(varz.cpu ?? 0).toFixed(1)}%`} sub={`${varz.cores} cores`} tone={varz.cpu > 80 ? 'warn' : undefined} />
+              <StatTile label="Memory" value={formatBytes(varz.mem)} />
+              <StatTile label="Slow consumers" value={formatNumber(varz.slow_consumers)} tone={varz.slow_consumers > 0 ? 'warn' : undefined} />
+              <StatTile label="Connections" value={formatNumber(varz.connections)} sub={`${formatNumber(varz.total_connections)} total`} />
+              <StatTile label="Subscriptions" value={formatNumber(varz.subscriptions)} />
+              <StatTile label="Routes" value={formatNumber(varz.routes ?? 0)} />
+              <StatTile label="Leaf nodes" value={formatNumber(varz.leafnodes ?? 0)} />
+              <StatTile label="Messages in / out" value={`${formatNumber(varz.in_msgs)} / ${formatNumber(varz.out_msgs)}`} sub="since start" />
+              <StatTile label="Bytes in / out" value={`${formatBytes(varz.in_bytes)} / ${formatBytes(varz.out_bytes)}`} sub="since start" />
+            </StatStrip>
+          </div>
+        </div>
 
         <Throughput connId={connId} />
 
-        <div>
-          <SectionTitle>JetStream</SectionTitle>
-          {jsz ? (
-            <div className="flex flex-wrap items-start gap-x-10 gap-y-4">
-              <StatStrip className="shrink-0">
-                <StatTile label="Streams" value={formatNumber(jsz.streams)} />
-                <StatTile label="Consumers" value={formatNumber(jsz.consumers)} />
-                <StatTile label="Messages" value={formatNumber(jsz.messages)} sub={formatBytes(jsz.bytes)} />
-                <StatTile
-                  label="API calls"
-                  value={formatNumber(jsz.api?.total ?? 0)}
-                  sub={`${formatNumber(jsz.api?.errors ?? 0)} errors`}
-                  tone={(jsz.api?.errors ?? 0) > 0 ? 'warn' : undefined}
-                />
-              </StatStrip>
-              {/* Usage next to the counters, so the section is one row and not a bar above a strip. */}
-              <div className="flex-1 min-w-[280px] max-w-[640px] grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
-                <UsageBar label="Memory" used={jsz.memory} max={jsz.config?.max_memory ?? 0} />
-                <UsageBar label="Storage" used={jsz.storage} max={jsz.config?.max_storage ?? 0} />
-              </div>
+        {/* JetStream is wide because its bars are; the subscription figures
+            fill the space beside it that the bars used to leave empty. */}
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">
+          <div className="xl:col-span-2">
+            <SectionTitle>JetStream</SectionTitle>
+            <div className="card px-3 py-2">
+              {jsz ? (
+                <div className="flex flex-col gap-3">
+                  <StatStrip>
+                    <StatTile label="Streams" value={formatNumber(jsz.streams)} />
+                    <StatTile label="Consumers" value={formatNumber(jsz.consumers)} />
+                    <StatTile label="Messages" value={formatNumber(jsz.messages)} sub={formatBytes(jsz.bytes)} />
+                    <StatTile
+                      label="API calls"
+                      value={formatNumber(jsz.api?.total ?? 0)}
+                      sub={`${formatNumber(jsz.api?.errors ?? 0)} errors`}
+                      tone={(jsz.api?.errors ?? 0) > 0 ? 'warn' : undefined}
+                    />
+                  </StatStrip>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
+                    <UsageBar label="Memory" used={jsz.memory} max={jsz.config?.max_memory ?? 0} />
+                    <UsageBar label="Storage" used={jsz.storage} max={jsz.config?.max_storage ?? 0} />
+                  </div>
+                </div>
+              ) : (
+                <div className="text-sm text-muted">JetStream is not enabled on this server.</div>
+              )}
             </div>
-          ) : (
-            <div className="text-sm text-muted">JetStream is not enabled on this server.</div>
-          )}
-        </div>
+          </div>
 
-        <div>
-          <SectionTitle>Subscriptions</SectionTitle>
-          {subsz ? (
-            <StatStrip>
-              <StatTile label="Total" value={formatNumber(subsz.num_subscriptions)} />
-              <StatTile label="Cache hit rate" value={`${((subsz.cache_hit_rate ?? 0) * 100).toFixed(1)}%`} />
-              <StatTile label="Max fan-out" value={formatNumber(subsz.max_fanout)} />
-              <StatTile label="Avg fan-out" value={(subsz.avg_fanout ?? 0).toFixed(2)} />
-            </StatStrip>
-          ) : (
-            <div className="text-sm text-muted">Not available.</div>
-          )}
+          <div>
+            <SectionTitle>Subscription routing</SectionTitle>
+            <div className="card px-3 py-2">
+              {subsz ? (
+                <StatStrip>
+                  <StatTile label="Cache hit rate" value={`${((subsz.cache_hit_rate ?? 0) * 100).toFixed(1)}%`} />
+                  <StatTile label="Max fan-out" value={formatNumber(subsz.max_fanout)} />
+                  <StatTile label="Avg fan-out" value={(subsz.avg_fanout ?? 0).toFixed(2)} />
+                </StatStrip>
+              ) : (
+                <div className="text-sm text-muted">Not available.</div>
+              )}
+            </div>
+          </div>
         </div>
 
         {routez && routez.num_routes > 0 && <PeerTable title="Cluster routes" rows={groupRoutes(routez.routes)} />}

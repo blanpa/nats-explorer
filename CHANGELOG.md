@@ -66,6 +66,9 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 - The websocket endpoint was built from a value the bundler could fold away, which under a subpath sent it to the wrong path while the REST calls were still right. The prefix is read on every call now.
 - The desktop app lost its message history on every restart. It never opened a database -- the only way to ask for one was `HISTORY_DB`, which a packaged app has no way to set. It now keeps the history in `history.db` next to the settings by default, and the setting above switches it off.
 
+### Changed
+- **Server monitoring is grouped instead of stacked.** The page was a ribbon of loose strips and headings: eight tiles in one row mixing load, topology and totals since start, then the charts, then two more strips, then the tables -- the only part with a shape. Every part is a titled card now, in the order the questions come: is this server well (health, version, uptime), what is it carrying (overview, then the curves), what is inside JetStream, who is talking to it. The cumulative totals moved to the end of the overview, where the least useful figures belong, and the subscription figures fill the space beside JetStream that its usage bars used to leave empty.
+
 ## [0.3.0] - 2026-09-08
 
 ### Added
