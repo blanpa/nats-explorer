@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import type { NatsMessage } from 'shared';
 import { cn, extractNumber, tryParseJson } from '../../lib/utils';
+import { delayOf, DELAY_PREFIX, timeFieldsOf } from '../../lib/payloadTime';
 
 const MAX_FIELDS = 6;
 const W = 88;
@@ -54,17 +55,26 @@ export default function TrendStrip({
   const trends = useMemo(() => {
     if (latest.payloadType !== 'json' || messages.length < 3) return [];
     const recent = messages.length > 120 ? messages.slice(messages.length - 120) : messages;
-    return fieldsOf(latest.payload)
-      .map(field => {
-        const values: number[] = [];
-        for (const m of recent) {
-          if (m.payloadType !== 'json') continue;
-          const v = extractNumber(m.payload, field);
-          if (v !== null) values.push(v);
-        }
-        return { field, values, current: extractNumber(latest.payload, field) };
-      })
-      .filter(t => t.values.length >= 3);
+    const numeric = fieldsOf(latest.payload).map(field => {
+      const values: number[] = [];
+      for (const m of recent) {
+        if (m.payloadType !== 'json') continue;
+        const v = extractNumber(m.payload, field);
+        if (v !== null) values.push(v);
+      }
+      return { field, label: field, values, current: extractNumber(latest.payload, field) };
+    });
+    // The producer's own clock against ours: a figure nothing else in the
+    // stack reports, and the one that says whether a hold-up is upstream.
+    const delays = timeFieldsOf(latest).map(field => {
+      const values: number[] = [];
+      for (const m of recent) {
+        const d = delayOf(m, field);
+        if (d !== null) values.push(d);
+      }
+      return { field: DELAY_PREFIX + field, label: `${field} → delay`, values, current: delayOf(latest, field) };
+    });
+    return [...numeric, ...delays].filter(t => t.values.length >= 3);
   }, [messages, latest]);
 
   if (trends.length === 0) return null;
@@ -79,10 +89,10 @@ export default function TrendStrip({
             selected.includes(t.field) && 'border-accent/60',
           )}
           onClick={() => onSelect(t.field)}
-          title={selected.includes(t.field) ? `Stop charting ${t.field}` : `Chart ${t.field}`}
+          title={selected.includes(t.field) ? `Stop charting ${t.label}` : `Chart ${t.label}`}
         >
           <span className="min-w-0">
-            <span className="block text-xs text-muted font-mono truncate">{t.field}</span>
+            <span className="block text-xs text-muted font-mono truncate">{t.label}</span>
             <span className="block text-sm font-mono text-syn-num tabular-nums">{t.current}</span>
           </span>
           <Sparkline values={t.values} />

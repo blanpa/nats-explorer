@@ -28,6 +28,7 @@ import BookmarkButton from './BookmarkButton';
 import HeaderList from './HeaderList';
 import MatchDialog from './MatchDialog';
 import { msgId, repeatedIds } from '../../lib/natsHeaders';
+import { isDelayField } from '../../lib/payloadTime';
 import RuleDialog from '../alerts/RuleDialog';
 import { alertRuleForSubject } from '../../lib/alerts';
 import type { AlertRule } from 'shared';
@@ -192,7 +193,12 @@ function SingleSubjectView() {
     async () => {
       if (!subject || chartFields.length === 0) return {};
       const answers = await Promise.all(
-        chartFields.map(f => api.getSeries(subject, f, { points: 600, from: range?.from, to: range?.to, agg: chartSettings.agg }).catch(() => null)),
+        // A delay is two clocks subtracted, not a field's value: the server
+        // has no series for it, and the browser computes it from the
+        // messages it holds.
+        chartFields.map(f =>
+          isDelayField(f) ? null : api.getSeries(subject, f, { points: 600, from: range?.from, to: range?.to, agg: chartSettings.agg }).catch(() => null),
+        ),
       );
       return Object.fromEntries(chartFields.map((f, i) => [f, answers[i]]));
     },

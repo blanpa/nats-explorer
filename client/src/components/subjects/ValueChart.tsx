@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Aggregation, HistorySeries, NatsMessage } from 'shared';
 import { cn, extractNumber, formatCount, formatDurationMs, formatTime } from '../../lib/utils';
+import { delayOf, delaySource, isDelayField } from '../../lib/payloadTime';
 
 export interface Point {
   t: number;
@@ -10,6 +11,8 @@ export interface Point {
 /** One field drawn in a chart, with the colour it is known by. */
 export interface ChartSeries {
   field: string;
+  /** how the field reads in the legend; the field itself by default */
+  label?: string;
   points: Point[];
   color: string;
   /** what the server reported for this field, for the footer */
@@ -97,10 +100,12 @@ export function mergePoints(series: HistorySeries | null | undefined, messages: 
   // "newer than 16 624" was every live message, and the chart stopped
   // growing. A minute bucket has no sequence at all.
   const after = out.length ? out[out.length - 1].t : 0;
+  const delay = isDelayField(fieldPath);
+  const path = delay ? delaySource(fieldPath) : fieldPath;
   for (const m of messages) {
     if (m.payloadType !== 'json') continue;
     if (series && m.timestamp <= after) continue;
-    const v = extractNumber(m.payload, fieldPath);
+    const v = delay ? delayOf(m, path) : extractNumber(m.payload, path);
     if (v !== null) out.push({ t: m.timestamp, v });
   }
   return out;
@@ -324,7 +329,7 @@ export default function ValueChart({ series, height = 160, onPick, marker, type,
           return (
             <span key={d.s.field} className="flex items-baseline gap-1.5 min-w-0">
               <span className="w-2 h-2 rounded-full shrink-0 self-center" style={{ background: d.s.color }} aria-hidden />
-              <span className="font-mono text-muted truncate">{d.s.field}</span>
+              <span className="font-mono text-muted truncate">{d.s.label ?? d.s.field}</span>
               <span className="font-mono font-semibold text-fg tabular-nums">{niceNumber(at.v)}</span>
             </span>
           );
@@ -353,7 +358,7 @@ export default function ValueChart({ series, height = 160, onPick, marker, type,
         height={height}
         className={cn('block', onZoom && 'cursor-crosshair select-none', !onZoom && onPick && 'cursor-pointer')}
         role="img"
-        aria-label={`${series.map(s => s.field).join(', ')} over time`}
+        aria-label={`${series.map(s => s.label ?? s.field).join(', ')} over time`}
         onMouseMove={onMove}
         onMouseLeave={() => setHoverT(null)}
         onPointerDown={onDown}

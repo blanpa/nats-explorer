@@ -5,6 +5,7 @@ import { readSetting, writeSetting } from '../../lib/utils';
 import { Checkbox } from '../ui/Input';
 import { IconButton } from '../ui/Button';
 import { Hint, Segmented } from '../ui/misc';
+import { delayLabel, isDelayField } from '../../lib/payloadTime';
 import ValueChart, { CHART_TYPES, type ChartSeries, type ChartType, colorForIndex, mergePoints, type Point } from './ValueChart';
 
 /**
@@ -90,6 +91,7 @@ export default function ChartPanel({ fields, messages, seriesByField, settings, 
     () =>
       fields.map((field, i) => ({
         field,
+        label: isDelayField(field) ? delayLabel(field) : field,
         color: colorForIndex(i),
         points: mergePoints(seriesByField[field], messages, field, agg),
         info: seriesByField[field],
@@ -146,7 +148,7 @@ export default function ChartPanel({ fields, messages, seriesByField, settings, 
         {fields.map((f, i) => (
           <span key={f} className="inline-flex items-center gap-1 rounded border border-line px-1.5 py-0.5">
             <span className="w-2 h-2 rounded-full" style={{ background: colorForIndex(i) }} aria-hidden />
-            <span className="font-mono">{f}</span>
+            <span className="font-mono">{isDelayField(f) ? delayLabel(f) : f}</span>
             <IconButton label={`Stop charting ${f}`} size="xs" onClick={() => onRemove(f)}>
               <X size={11} />
             </IconButton>
