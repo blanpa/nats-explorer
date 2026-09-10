@@ -30,6 +30,9 @@ type NatsMessage struct {
 	// ConnID is set on messages served from history, where one response may
 	// span several connections. The live feed carries it on the envelope.
 	ConnID string `json:"connId,omitempty"`
+	// Schema is the verdict against the schema pinned for this subject, or
+	// nil when none is pinned.
+	Schema *SchemaVerdict `json:"schema,omitempty"`
 }
 
 // Record is a received message as the server keeps it: the payload bytes
@@ -115,6 +118,18 @@ func (r *Record) Bytes() int {
 		}
 	}
 	return n
+}
+
+// SchemaVerdict is how a message stands against the schema pinned for its
+// subject. Absent means there is no reference, which is not the same as
+// matching one: a view has to tell "nothing pinned" from "matches".
+type SchemaVerdict struct {
+	// Valid is false when the message breaks the pinned schema.
+	Valid bool `json:"valid"`
+	// Violations say what differs, at most a handful, for the tooltip.
+	Violations []string `json:"violations,omitempty"`
+	// Pattern is the subject pattern the schema was pinned under.
+	Pattern string `json:"pattern"`
 }
 
 // Wire builds the browser form of the record.

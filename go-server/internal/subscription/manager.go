@@ -8,6 +8,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 
+	"nats-explorer/internal/filter"
 	"nats-explorer/internal/history"
 	"nats-explorer/internal/message"
 )
@@ -593,6 +594,9 @@ func (m *Manager) flushBatches() {
 		for i, rec := range batch {
 			msgs[i] = rec.Wire("")
 		}
+		// The same verdict the history carries, so a row does not change
+		// colour when it is read back from the server.
+		filter.Annotate(msgs)
 		out = append(out, pending{c, msgs})
 	}
 	m.mu.RUnlock()

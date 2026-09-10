@@ -2,6 +2,7 @@ import { Loader2 } from 'lucide-react';
 import type { NatsMessage } from 'shared';
 import { messageKey } from '../../lib/messages';
 import { cn, formatBytes, formatCount, formatTime, previewPayload } from '../../lib/utils';
+import { SchemaMark } from '../ui/misc';
 import { VirtualRows } from '../ui/VirtualRows';
 
 const ROW = 40;
@@ -69,7 +70,9 @@ export default function HistoryRail({ messages, active, onPick, onLoadOlder, loa
           const m = messages[messages.length - 1 - i];
           const p = previewPayload(m.payload, m.payloadType, 48);
           return (
-            <div className={cn('list-row h-full py-0', m === active && 'list-row-active')} onClick={() => onPick(m)}>
+            <div className={cn('list-row h-full py-0 gap-2', m === active && 'list-row-active')} onClick={() => onPick(m)}>
+              {/* Against the schema pinned for this subject, if there is one. */}
+              <SchemaMark verdict={m.schema} className="my-1" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 text-xs">
                   <span className="font-mono text-muted">{formatTime(m.timestamp)}</span>

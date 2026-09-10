@@ -144,6 +144,31 @@ func SetSchemaChecker(fn SchemaChecker) (remove func()) {
 	return func() { checker.CompareAndSwap(p, nil) }
 }
 
+/**
+ * Annotate marks browser messages with how they stand against the schema
+ * pinned for their subject, so a list can show it without asking again.
+ *
+ * It is the same judgement `!valid` makes in an expression, from the same
+ * reference -- a row that reads red and a filter that does not catch it
+ * would be two answers to one question. Nothing pinned costs a pattern
+ * lookup and no parse, which is the case on almost every subject.
+ */
+func Annotate(msgs []message.NatsMessage) {
+	p := checker.Load()
+	if p == nil {
+		return
+	}
+	check := *p
+	for i := range msgs {
+		m := &msgs[i]
+		violations, pattern := check(m.Subject, m.PayloadType, []byte(m.Payload))
+		if pattern == "" {
+			continue
+		}
+		m.Schema = &message.SchemaVerdict{Valid: len(violations) == 0, Violations: violations, Pattern: pattern}
+	}
+}
+
 // activation resolves the variables of one evaluation. Everything an
 // expression does not mention costs nothing: the payload is parsed, the
 // headers are flattened and the schema is checked at most once, and only

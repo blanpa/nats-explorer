@@ -13,6 +13,20 @@ export interface NatsMessage {
   sequence?: number;
   /** connection that delivered the message; set by the history API, added client-side for the live feed */
   connId?: string;
+  /**
+   * How the message stands against the schema pinned for its subject.
+   * Absent means nothing is pinned, which is not the same as matching.
+   */
+  schema?: SchemaVerdict;
+}
+
+/** The verdict of a pinned schema on one message. */
+export interface SchemaVerdict {
+  valid: boolean;
+  /** what differs, for the tooltip; empty when it matches */
+  violations?: string[];
+  /** the subject pattern the schema was pinned under */
+  pattern: string;
 }
 
 /**

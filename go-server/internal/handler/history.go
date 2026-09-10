@@ -157,6 +157,9 @@ func (h *HistoryHandler) Range(w http.ResponseWriter, r *http.Request) {
 		}
 		resp["total"] = total
 	}
+	if msgs, ok := resp["messages"].([]message.NatsMessage); ok {
+		filter.Annotate(msgs)
+	}
 	writeJSON(w, resp)
 }
 
@@ -288,6 +291,10 @@ func (h *HistoryHandler) Get(w http.ResponseWriter, r *http.Request) {
 			resp.BranchMore = true
 		}
 	}
+	// How each message stands against the schema pinned for its subject, so
+	// a list can show it without asking a second time.
+	filter.Annotate(resp.Messages)
+	filter.Annotate(resp.Branch)
 	writeJSON(w, resp)
 }
 
@@ -463,6 +470,7 @@ func (h *HistoryHandler) Search(w http.ResponseWriter, r *http.Request) {
 			more = true
 		}
 	}
+	filter.Annotate(out)
 	writeJSON(w, map[string]interface{}{"subject": subject, "q": q, "expr": r.URL.Query().Get("expr"), "messages": out, "more": more})
 }
 

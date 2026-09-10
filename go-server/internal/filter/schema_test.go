@@ -1,7 +1,10 @@
 package filter
 
 import (
+	"strings"
 	"testing"
+
+	"nats-explorer/internal/message"
 )
 
 // `valid` is what makes the payload filter, the history endpoints and the
@@ -62,5 +65,50 @@ func TestSchemaCheckIsLazy(t *testing.T) {
 	}
 	if asked != 0 {
 		t.Fatalf("schema checked %d times for an expression that does not use it", asked)
+	}
+}
+
+// A list the browser gets carries the same verdict an expression makes, so
+// a row that reads red and a `!valid` filter that does not catch it cannot
+// disagree.
+func TestAnnotate(t *testing.T) {
+	t.Cleanup(func() { SetSchemaChecker(nil) })
+	SetSchemaChecker(func(subject, _ string, payload []byte) ([]string, string) {
+		if subject != "plant.temp" {
+			return nil, ""
+		}
+		if strings.Contains(string(payload), `"temp"`) {
+			return nil, "plant.>"
+		}
+		return []string{"temp: missing"}, "plant.>"
+	})
+
+	msgs := []message.NatsMessage{
+		{Subject: "plant.temp", PayloadType: "json", Payload: `{"temp":21}`},
+		{Subject: "plant.temp", PayloadType: "json", Payload: `{"other":1}`},
+		{Subject: "plant.other", PayloadType: "json", Payload: `{}`},
+	}
+	Annotate(msgs)
+
+	if msgs[0].Schema == nil || !msgs[0].Schema.Valid || msgs[0].Schema.Pattern != "plant.>" {
+		t.Fatalf("matching message = %+v", msgs[0].Schema)
+	}
+	if msgs[1].Schema == nil || msgs[1].Schema.Valid || len(msgs[1].Schema.Violations) != 1 {
+		t.Fatalf("breaking message = %+v", msgs[1].Schema)
+	}
+	// Nothing pinned is not the same as matching: the field stays away.
+	if msgs[2].Schema != nil {
+		t.Fatalf("unpinned subject = %+v", msgs[2].Schema)
+	}
+}
+
+// Without a pinned schema anywhere the annotation costs one lookup and
+// changes nothing.
+func TestAnnotateWithoutAChecker(t *testing.T) {
+	SetSchemaChecker(nil)
+	msgs := []message.NatsMessage{{Subject: "plant.temp", PayloadType: "json", Payload: `{}`}}
+	Annotate(msgs)
+	if msgs[0].Schema != nil {
+		t.Fatalf("verdict without a reference: %+v", msgs[0].Schema)
 	}
 }

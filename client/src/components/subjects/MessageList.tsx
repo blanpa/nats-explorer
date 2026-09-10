@@ -90,10 +90,12 @@ export default function MessageList({ messages, subjectPrefix, onOpen, onSelect,
             className={cn(
               'grid gap-3 px-3 h-full items-center text-sm border-b border-line/70 cursor-pointer hover:bg-field/50',
               selected && messageKey(selected) === messageKey(m) && 'bg-accent/10',
+              // Against the schema pinned for the subject, where one is.
+              m.schema && (m.schema.valid ? 'border-l-2 border-l-ok/60' : 'border-l-2 border-l-danger'),
             )}
             style={grid}
             onClick={() => (onSelect ? onSelect(m) : onOpen(m.subject))}
-            title={onSelect ? 'Show this message' : 'Open this subject'}
+            title={m.schema?.violations?.length ? m.schema.violations.join('\n') : onSelect ? 'Show this message' : 'Open this subject'}
           >
             <span className="font-mono text-muted text-xs truncate">{formatTime(m.timestamp)}</span>
             {below !== null ? (

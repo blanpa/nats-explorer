@@ -1,5 +1,6 @@
 import * as RadixTooltip from '@radix-ui/react-tooltip';
 import { Info, Loader2, type LucideIcon } from 'lucide-react';
+import type { SchemaVerdict } from 'shared';
 import { useEffect, useId, useState, type ReactNode } from 'react';
 import { cn, formatUptime } from '../../lib/utils';
 
@@ -332,5 +333,23 @@ export function Since({ ts, className }: { ts: number; className?: string }) {
     <span className={className} title={`Last message at ${new Date(ts).toLocaleString()}`}>
       {formatUptime(Math.max(0, Date.now() - ts))} ago
     </span>
+  );
+}
+
+/**
+ * The mark a row carries when a schema is pinned for its subject: green
+ * while the message matches the reference, red when it breaks it, and
+ * nothing at all when there is no reference -- "nothing pinned" and
+ * "matches" are different answers and must not look alike.
+ */
+export function SchemaMark({ verdict, className }: { verdict?: SchemaVerdict; className?: string }) {
+  if (!verdict) return null;
+  const why = verdict.violations?.length ? verdict.violations.join('\n') : 'Matches the schema pinned for this subject';
+  return (
+    <span
+      aria-label={verdict.valid ? 'Matches the pinned schema' : 'Breaks the pinned schema'}
+      title={`${verdict.pattern}\n${why}`}
+      className={cn('w-0.5 self-stretch rounded-full shrink-0', verdict.valid ? 'bg-ok/60' : 'bg-danger', className)}
+    />
   );
 }
