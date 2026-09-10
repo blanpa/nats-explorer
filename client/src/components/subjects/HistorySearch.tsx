@@ -2,10 +2,14 @@ import { Search, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { NatsMessage } from 'shared';
 import { api, errorMessage } from '../../lib/api';
+import { messageKey } from '../../lib/messages';
 import { formatCount } from '../../lib/utils';
 import { IconButton } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Segmented } from '../ui/misc';
+
+/** How many hits one search page brings in. */
+const SEARCH_PAGE = 200;
 
 export interface SearchState {
   q: string;
@@ -14,36 +18,73 @@ export interface SearchState {
   error: string | null;
   /** false searches every subject instead of the selected one */
   scoped: boolean;
+  /** the store held more matches before the oldest one shown */
+  more: boolean;
+  /** an older page of hits is on its way */
+  loadingMore: boolean;
 }
 
 /** Search field over the recorded history of a subject and everything below it. */
 export function useHistorySearch(
   subject: string | null,
   range?: { from: number; to: number } | null,
-): SearchState & { setQuery: (q: string) => void; clear: () => void; setScoped: (b: boolean) => void } {
+): SearchState & { setQuery: (q: string) => void; clear: () => void; setScoped: (b: boolean) => void; loadMore: () => void } {
   const [q, setQ] = useState('');
   const [scoped, setScopedState] = useState(true);
-  const [state, setState] = useState<Omit<SearchState, 'q' | 'scoped'>>({ results: null, loading: false, error: null });
+  const empty = { results: null, loading: false, error: null, more: false, loadingMore: false };
+  const [state, setState] = useState<Omit<SearchState, 'q' | 'scoped'>>(empty);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: the search clears on a subject change, which the body itself does not read
   useEffect(() => {
     setQ('');
-    setState({ results: null, loading: false, error: null });
+    setState(empty);
   }, [subject]);
 
   const run = (next: string, inScope: boolean) => {
     setQ(next);
     if (!next.trim() || (inScope && !subject)) {
-      setState({ results: null, loading: false, error: null });
+      setState(empty);
       return;
     }
     setState(s => ({ ...s, loading: true }));
     api
       // An empty subject searches every subject of every connection.
-      .searchHistory(inScope ? (subject ?? '') : '', next.trim(), { limit: 500, from: range?.from, to: range?.to })
-      .then(res => setState({ results: res.messages, loading: false, error: null }))
-      .catch(err => setState({ results: [], loading: false, error: errorMessage(err) }));
+      .searchHistory(inScope ? (subject ?? '') : '', next.trim(), { limit: SEARCH_PAGE, from: range?.from, to: range?.to })
+      .then(res => setState({ results: res.messages, loading: false, error: null, more: !!res.more, loadingMore: false }))
+      .catch(err => setState({ results: [], loading: false, error: errorMessage(err), more: false, loadingMore: false }));
   };
+
+  // Hits are newest first, so the last one is the cursor for the next page.
+  const loadMore = () => {
+    const results = state.results;
+    if (!q.trim() || !state.more || state.loadingMore || !results?.length) return;
+    const oldest = results[results.length - 1];
+    setState(s => ({ ...s, loadingMore: true }));
+    api
+      .searchHistory(scoped ? (subject ?? '') : '', q.trim(), {
+        limit: SEARCH_PAGE,
+        from: range?.from,
+        to: range?.to,
+        // Both halves of the cursor, always: without a range the search
+        // still reads from the database when there is one, and that orders
+        // by (timestamp, sequence).
+        beforeTs: oldest.timestamp,
+        beforeSeq: oldest.sequence,
+      })
+      .then(res =>
+        setState(s => {
+          const have = new Set((s.results ?? []).map(messageKey));
+          return {
+            ...s,
+            results: [...(s.results ?? []), ...res.messages.filter(m => !have.has(messageKey(m)))],
+            more: !!res.more,
+            loadingMore: false,
+          };
+        }),
+      )
+      .catch(err => setState(s => ({ ...s, loadingMore: false, error: errorMessage(err) })));
+  };
+
   return {
     q,
     scoped,
@@ -54,6 +95,7 @@ export function useHistorySearch(
       run(q, b);
     },
     clear: () => run('', scoped),
+    loadMore,
   };
 }
 

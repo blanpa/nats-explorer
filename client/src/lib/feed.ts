@@ -1,5 +1,5 @@
 import type { NatsMessage } from 'shared';
-import { MAX_BRANCH_MESSAGES, MAX_SUBJECT_MESSAGES, useStore } from '../store';
+import { MAX_BRANCH_MESSAGES, MAX_LOADED_MESSAGES, MAX_SUBJECT_MESSAGES, OLDER_PAGE, useStore } from '../store';
 import { api, errorMessage } from './api';
 import { wsClient } from './ws';
 import { describeEvent, useAlerts } from '../store/alerts';
@@ -44,13 +44,13 @@ export function enqueue(msgs: NatsMessage[]): void {
 
 const loadSeq = new Map<string, number>();
 
-async function loadSubject(subject: string): Promise<void> {
+async function loadSubject(subject: string, replace = false): Promise<void> {
   const seq = (loadSeq.get(subject) ?? 0) + 1;
   loadSeq.set(subject, seq);
   try {
     const expr = useStore.getState().subjectExpr.trim() || undefined;
     const res = await api.getHistory(subject, { limit: MAX_SUBJECT_MESSAGES, branchLimit: MAX_BRANCH_MESSAGES, expr });
-    if (loadSeq.get(subject) === seq) useStore.getState().applyHistory(subject, res);
+    if (loadSeq.get(subject) === seq) useStore.getState().applyHistory(subject, res, replace);
   } catch (err) {
     if (loadSeq.get(subject) === seq) useStore.getState().setLiveError(subject, errorMessage(err));
   }
@@ -61,10 +61,82 @@ async function loadSubject(subject: string): Promise<void> {
  * ignored. By default only views that still wait for it are loaded; `all`
  * refreshes every selected subject (reconnect, subscription change).
  */
-export async function loadHistory(all = false): Promise<void> {
+export async function loadHistory(all = false, replace = false): Promise<void> {
   const { selectedSubjects, live } = useStore.getState();
   const todo = selectedSubjects.filter(s => all || live.get(s)?.loading);
-  await Promise.all(todo.map(loadSubject));
+  await Promise.all(todo.map(s => loadSubject(s, replace)));
+}
+
+/**
+ * Loads the page of messages before the oldest one this tab holds, so the
+ * history grows as it is scrolled instead of stopping at the first request.
+ * Sequences count per connection, so every connection that contributed to
+ * the view is asked with its own cursor and the pages are merged.
+ */
+export async function loadOlder(subject: string): Promise<void> {
+  const state = useStore.getState();
+  const view = state.live.get(subject);
+  if (!view || view.loading || view.loadingOlder || view.atOldest) return;
+  if (view.messages.length >= MAX_LOADED_MESSAGES) return;
+  // The messages are oldest first, so the first of each connection is its
+  // cursor. A message without a sequence (a live one that never reached the
+  // history) is skipped; the next one only pages over it, it leaves no gap.
+  const cursors = new Map<string, number>();
+  for (const m of view.messages) {
+    if (m.connId && m.sequence !== undefined && !cursors.has(m.connId)) cursors.set(m.connId, m.sequence);
+  }
+  if (cursors.size === 0) return;
+  state.setLoadingOlder(subject, true);
+  const expr = state.subjectExpr.trim() || undefined;
+  try {
+    const pages = await Promise.all(
+      [...cursors].map(([connId, before]) => api.getHistory(subject, { connId, before, limit: OLDER_PAGE, branchLimit: 0, expr })),
+    );
+    // A filter can empty a full page, so the server reports whether it had
+    // more before the cursor instead of us counting what came back.
+    useStore.getState().prependOlder(
+      subject,
+      pages.flatMap(p => p.messages),
+      pages.every(p => !p.more),
+    );
+  } catch (err) {
+    // The messages already loaded stay: a failed page is not a broken view.
+    useStore.getState().setLoadingOlder(subject, false);
+    toast.error('Older messages not loaded', errorMessage(err));
+  }
+}
+
+/**
+ * The same for the list of everything below a subject. It merges every
+ * subject under the node, so it runs out at its own point and carries its
+ * own cursor.
+ */
+export async function loadOlderBranch(subject: string): Promise<void> {
+  const state = useStore.getState();
+  const view = state.live.get(subject);
+  if (!view || view.loading || view.loadingOlderBranch || view.branchAtOldest) return;
+  if (view.branch.length >= MAX_LOADED_MESSAGES) return;
+  // Newest first, so the last message of each connection is its oldest.
+  const cursors = new Map<string, number>();
+  for (const m of view.branch) {
+    if (m.connId && m.sequence !== undefined) cursors.set(m.connId, m.sequence);
+  }
+  if (cursors.size === 0) return;
+  state.setLoadingOlderBranch(subject, true);
+  const expr = state.subjectExpr.trim() || undefined;
+  try {
+    const pages = await Promise.all(
+      [...cursors].map(([connId, branchBefore]) => api.getHistory(subject, { connId, branchBefore, limit: 1, branchLimit: MAX_BRANCH_MESSAGES, expr })),
+    );
+    useStore.getState().appendOlderBranch(
+      subject,
+      pages.flatMap(p => p.branch),
+      pages.every(p => !p.branchMore),
+    );
+  } catch (err) {
+    useStore.getState().setLoadingOlderBranch(subject, false);
+    toast.error('Older messages not loaded', errorMessage(err));
+  }
 }
 
 /** Forget the recorded history on the server and in this tab. */
@@ -111,6 +183,7 @@ const treeView = (s: ReturnType<typeof useStore.getState>) => ({
   filter: s.subjectFilter,
   expr: s.subjectExpr,
   hideSystem: s.hideSystemSubjects,
+  preview: s.treePreview,
 });
 
 /** Wire websocket events and selection changes to the store; returns a cleanup. */
@@ -139,7 +212,8 @@ export function startFeed(): () => void {
         s.expandAll !== prev.expandAll ||
         s.subjectFilter !== prev.subjectFilter ||
         s.subjectExpr !== prev.subjectExpr ||
-        s.hideSystemSubjects !== prev.hideSystemSubjects
+        s.hideSystemSubjects !== prev.hideSystemSubjects ||
+        s.treePreview !== prev.treePreview
       ) {
         wsClient.setView(treeView(s));
       }
@@ -151,9 +225,11 @@ export function startFeed(): () => void {
       sendFocus();
       void loadHistory(true);
     }),
-    // The payload filter also narrows what the history endpoints return.
+    // The payload filter also narrows what the history endpoints return. The
+    // answer replaces the view: a filter that only ever added would never
+    // narrow a subject that is already open.
     useStore.subscribe((s, prev) => {
-      if (s.subjectExpr !== prev.subjectExpr && s.selectedSubjects.length) void loadHistory(true);
+      if (s.subjectExpr !== prev.subjectExpr && s.selectedSubjects.length) void loadHistory(true, true);
     }),
     useStore.subscribe((s, prev) => {
       if (s.selectedSubjects !== prev.selectedSubjects) {

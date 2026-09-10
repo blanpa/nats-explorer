@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"sort"
@@ -27,11 +28,27 @@ const (
 type HistoryHandler struct {
 	Store   *connection.Store
 	History history.Store
-	// DB serves time ranges beyond memory; nil without HISTORY_DB.
-	DB *history.DB
+	// Tee holds the optional database that serves time ranges beyond memory.
+	Tee *history.Tee
+	// Persist switches that database on and off.
+	Persist *history.Persistence
 	// OnCleared is called with the subjects a clear emptied, so the
 	// subscription manager can drop them from its tree and counters.
 	OnCleared func(connID string, subjects []string)
+	// OnClearedAll is called when everything of a connection was cleared, or
+	// of every connection when connID is empty. The tree goes with the
+	// history: a subject with a count and nothing behind it is worse than a
+	// tree that starts over.
+	OnClearedAll func(connID string)
+}
+
+// db is the database behind the history, or nil when it is memory-only.
+// Read once per request: the setting can be switched while one is running.
+func (h *HistoryHandler) db() *history.DB {
+	if h.Tee == nil {
+		return nil
+	}
+	return h.Tee.DB()
 }
 
 // exprParam compiles the optional CEL filter of a request. An invalid
@@ -75,10 +92,13 @@ const (
 )
 
 // Range answers GET /api/history/range?subject=...&from=&to=&branch=1&limit=&connId=:
-// persisted messages in a time range, newest first.
+// persisted messages in a time range, newest first. beforeTs/beforeSeq page
+// backwards from a message already shown; `more` says whether another page
+// may follow.
 func (h *HistoryHandler) Range(w http.ResponseWriter, r *http.Request) {
-	if h.DB == nil {
-		writeError(w, http.StatusNotFound, "persistent history is not enabled (HISTORY_DB)")
+	db := h.db()
+	if db == nil {
+		writeError(w, http.StatusNotFound, "the persistent history is switched off")
 		return
 	}
 	subject := r.URL.Query().Get("subject")
@@ -94,23 +114,31 @@ func (h *HistoryHandler) Range(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	branch := r.URL.Query().Get("branch") == "1"
+	beforeTS, _ := strconv.ParseInt(r.URL.Query().Get("beforeTs"), 10, 64)
+	beforeSeq, _ := strconv.ParseUint(r.URL.Query().Get("beforeSeq"), 10, 64)
 	out := []message.NatsMessage{}
 	ids := h.connIDs(r)
+	scan := scanLimit(limit, prg, maxRangeLimit*10)
+	more := false
 	for _, id := range ids {
-		msgs, err := h.DB.Range(r.Context(), id, subject, branch, from, to, scanLimit(limit, prg, maxRangeLimit*10))
+		msgs, err := db.RangePage(r.Context(), id, subject, branch, from, to, beforeTS, beforeSeq, scan)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		// A full page means the database had at least that many rows before
+		// the cursor: filtering may hide them, but there is more to fetch.
+		more = more || len(msgs) == scan
 		out = append(out, filter.Keep(prg, msgs, limit)...)
 	}
 	if len(ids) > 1 {
 		sort.SliceStable(out, func(i, j int) bool { return older(&out[j], &out[i]) })
 		if len(out) > limit {
 			out = out[:limit]
+			more = true
 		}
 	}
-	writeJSON(w, map[string]interface{}{"subject": subject, "from": from, "to": to, "messages": out, "expr": r.URL.Query().Get("expr")})
+	writeJSON(w, map[string]interface{}{"subject": subject, "from": from, "to": to, "messages": out, "more": more, "expr": r.URL.Query().Get("expr")})
 }
 
 // HistoryResponse is the answer to GET /api/history.
@@ -120,6 +148,12 @@ type HistoryResponse struct {
 	Messages []message.NatsMessage `json:"messages"`
 	// Branch holds the newest messages below the subject, newest first.
 	Branch []message.NatsMessage `json:"branch"`
+	// BranchMore is true when the store held more below the branch cursor.
+	BranchMore bool `json:"branchMore,omitempty"`
+	// More is true when the store still held messages before the cursor, so
+	// another page backwards may follow. Reported separately from the
+	// message count because a payload filter can empty a full page.
+	More bool `json:"more"`
 }
 
 func (h *HistoryHandler) connIDs(r *http.Request) []string {
@@ -158,7 +192,15 @@ func (h *HistoryHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	limit := limitParam(r, "limit", defaultSubjectLimit, maxSubjectLimit)
 	branchLimit := limitParam(r, "branchLimit", defaultBranchLimit, maxBranchLimit)
+	// An explicit zero means "no branch", which limitParam's zero-picks-the-
+	// default cannot express. Paging backwards wants the subject only.
+	if r.URL.Query().Get("branchLimit") == "0" {
+		branchLimit = 0
+	}
 	before, _ := strconv.ParseUint(r.URL.Query().Get("before"), 10, 64)
+	// The branch is its own list with its own cursor: it merges every
+	// subject below the node, so it runs out at a different point.
+	branchBefore, _ := strconv.ParseUint(r.URL.Query().Get("branchBefore"), 10, 64)
 	prg, err := exprParam(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -167,25 +209,33 @@ func (h *HistoryHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	ids := h.connIDs(r)
 	resp := HistoryResponse{Subject: subject, Messages: []message.NatsMessage{}, Branch: []message.NatsMessage{}}
+	scan := scanLimit(limit, prg, maxSubjectLimit)
 	for _, id := range ids {
-		msgs := h.History.Subject(id, subject, scanLimit(limit, prg, maxSubjectLimit), before)
+		msgs := h.History.Subject(id, subject, scan, before)
+		// A full page means the store had more before the cursor.
+		resp.More = resp.More || len(msgs) == scan
 		if prg != nil {
 			// Oldest first here, so keep the newest matches, not the first.
 			msgs = keepNewest(prg, msgs, limit)
 		}
 		resp.Messages = append(resp.Messages, msgs...)
 		if branchLimit > 0 {
-			resp.Branch = append(resp.Branch, filter.Keep(prg, h.History.Branch(id, subject, scanLimit(branchLimit, prg, maxBranchLimit)), branchLimit)...)
+			branchScan := scanLimit(branchLimit, prg, maxBranchLimit)
+			below := h.History.Branch(id, subject, branchScan, branchBefore)
+			resp.BranchMore = resp.BranchMore || len(below) == branchScan
+			resp.Branch = append(resp.Branch, filter.Keep(prg, below, branchLimit)...)
 		}
 	}
 	if len(ids) > 1 {
 		sort.SliceStable(resp.Messages, func(i, j int) bool { return older(&resp.Messages[i], &resp.Messages[j]) })
 		if len(resp.Messages) > limit {
 			resp.Messages = resp.Messages[len(resp.Messages)-limit:]
+			resp.More = true
 		}
 		sort.SliceStable(resp.Branch, func(i, j int) bool { return older(&resp.Branch[j], &resp.Branch[i]) })
 		if len(resp.Branch) > branchLimit {
 			resp.Branch = resp.Branch[:branchLimit]
+			resp.BranchMore = true
 		}
 	}
 	writeJSON(w, resp)
@@ -231,10 +281,17 @@ func (h *HistoryHandler) Search(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Paging backwards: the database orders by (timestamp, sequence), the
+	// memory store by sequence alone, which is the same order within one
+	// connection.
+	beforeTS, _ := strconv.ParseInt(r.URL.Query().Get("beforeTs"), 10, 64)
+	beforeSeq, _ := strconv.ParseUint(r.URL.Query().Get("beforeSeq"), 10, 64)
 	ids := h.connIDs(r)
+	db := h.db()
 	out := make([]message.NatsMessage, 0, 64)
+	more := false
 	from, to, ranged := timeRange(r)
-	if !ranged && h.DB != nil {
+	if !ranged && db != nil {
 		// With a persistent history the index knows more than memory does,
 		// so a search without a range still goes to the database.
 		to = time.Now().UnixMilli()
@@ -242,24 +299,28 @@ func (h *HistoryHandler) Search(w http.ResponseWriter, r *http.Request) {
 	}
 	scan := scanLimit(limit, prg, maxSearchLimit*5)
 	for _, id := range ids {
-		if ranged && h.DB != nil {
-			msgs, err := h.DB.Search(r.Context(), id, subject, q, from, to, scan)
+		if ranged && db != nil {
+			msgs, err := db.SearchPage(r.Context(), id, subject, q, from, to, beforeTS, beforeSeq, scan)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
+			more = more || len(msgs) == scan
 			out = append(out, filter.Keep(prg, msgs, limit)...)
 			continue
 		}
-		out = append(out, filter.Keep(prg, h.History.Search(id, subject, q, scan), limit)...)
+		found := h.History.Search(id, subject, q, scan, beforeSeq)
+		more = more || len(found) == scan
+		out = append(out, filter.Keep(prg, found, limit)...)
 	}
 	if len(ids) > 1 {
 		sort.SliceStable(out, func(i, j int) bool { return older(&out[j], &out[i]) })
 		if len(out) > limit {
 			out = out[:limit]
+			more = true
 		}
 	}
-	writeJSON(w, map[string]interface{}{"subject": subject, "q": q, "expr": r.URL.Query().Get("expr"), "messages": out})
+	writeJSON(w, map[string]interface{}{"subject": subject, "q": q, "expr": r.URL.Query().Get("expr"), "messages": out, "more": more})
 }
 
 // Clear answers DELETE /api/history?connId=... and forgets the recorded
@@ -287,10 +348,23 @@ func (h *HistoryHandler) Clear(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]interface{}{"success": true, "subject": subject, "branch": branch, "cleared": len(cleared)})
 		return
 	}
-	if id := r.URL.Query().Get("connId"); id != "" {
+	// The persisted copy goes too. Otherwise the next connect restores the
+	// tree from it and the clear looks like it did nothing.
+	id := r.URL.Query().Get("connId")
+	if dropper, ok := h.History.(interface {
+		DropRecorded(context.Context, string) error
+	}); ok {
+		if err := dropper.DropRecorded(r.Context(), id); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	} else if id != "" {
 		h.History.Drop(id)
 	} else {
 		h.History.Clear()
+	}
+	if h.OnClearedAll != nil {
+		h.OnClearedAll(id)
 	}
 	writeJSON(w, map[string]bool{"success": true})
 }
@@ -338,16 +412,17 @@ func (h *HistoryHandler) Series(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := strings.Split(field, ".")
+	db := h.db()
 
 	// A long range is answered from the minute buckets. An expression has to
 	// see the messages, so it keeps the message path.
 	ranged0, ranged1, isRanged := timeRange(r)
 	wantRollup := r.URL.Query().Get("rollup") == "1" || (isRanged && time.Duration(ranged1-ranged0)*time.Millisecond > rollupFrom)
-	if h.DB != nil && isRanged && wantRollup && prg == nil {
+	if db != nil && isRanged && wantRollup && prg == nil {
 		points := make([][2]float64, 0, 256)
 		samples := 0
 		for _, id := range h.connIDs(r) {
-			buckets, err := h.DB.SeriesRollup(r.Context(), id, subject, field, ranged0, ranged1)
+			buckets, err := db.SeriesRollup(r.Context(), id, subject, field, ranged0, ranged1)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
@@ -372,9 +447,9 @@ func (h *HistoryHandler) Series(w http.ResponseWriter, r *http.Request) {
 	from, to, ranged := timeRange(r)
 	for _, id := range h.connIDs(r) {
 		var msgs []message.NatsMessage
-		if ranged && h.DB != nil {
+		if ranged && db != nil {
 			var err error
-			if msgs, err = h.DB.Series(r.Context(), id, subject, from, to, 200000); err != nil {
+			if msgs, err = db.Series(r.Context(), id, subject, from, to, 200000); err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
@@ -411,10 +486,10 @@ func (h *HistoryHandler) Fields(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields := []string{}
-	if h.DB != nil {
+	if db := h.db(); db != nil {
 		seen := map[string]bool{}
 		for _, id := range h.connIDs(r) {
-			list, err := h.DB.RollupFields(r.Context(), id, subject)
+			list, err := db.RollupFields(r.Context(), id, subject)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return

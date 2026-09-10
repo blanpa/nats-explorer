@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Eye, X } from 'lucide-react';
 import type { NatsMessage } from 'shared';
 import { useStore, type LiveView } from '../../store';
+import { loadOlder, loadOlderBranch } from '../../lib/feed';
 import { messageKey, newerFirst, recentRate } from '../../lib/messages';
 import { cn, formatCount, formatTime, previewPayload } from '../../lib/utils';
 import { Button } from '../ui/Button';
@@ -36,6 +37,12 @@ export default function MultiSubjectView() {
   const [listMessage, setListMessage] = useState<NatsMessage | null>(null);
 
   const views = useMemo(() => subjects.map(s => live.get(s)).filter((v): v is LiveView => !!v), [subjects, live]);
+  const loadOlderAll = useCallback(() => {
+    for (const s of subjects) {
+      void loadOlder(s);
+      void loadOlderBranch(s);
+    }
+  }, [subjects]);
 
   // Newest messages across every watched subject, exact and below.
   const merged = useMemo(() => {
@@ -116,7 +123,18 @@ export default function MultiSubjectView() {
         })}
       </div>
 
-      <MessageList className="flex-1 min-h-0" messages={merged} onOpen={revealSubject} onSelect={setListMessage} selected={listMessage} />
+      <MessageList
+        className="flex-1 min-h-0"
+        messages={merged}
+        onOpen={revealSubject}
+        onSelect={setListMessage}
+        selected={listMessage}
+        // The merged list is fed by the watched subjects, so an older page
+        // means every one of them pages back.
+        onLoadOlder={loadOlderAll}
+        loadingOlder={views.some(v => v.loadingOlder || v.loadingOlderBranch)}
+        atOldest={views.every(v => v.atOldest && v.branchAtOldest)}
+      />
       {listMessage && <MessagePanel message={listMessage} onClose={() => setListMessage(null)} onOpenSubject={revealSubject} />}
     </div>
   );

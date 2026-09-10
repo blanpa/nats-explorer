@@ -1,3 +1,4 @@
+import { Loader2 } from 'lucide-react';
 import type { NatsMessage } from 'shared';
 import { messageKey } from '../../lib/messages';
 import { cn, formatBytes, formatTime, previewPayload } from '../../lib/utils';
@@ -19,6 +20,11 @@ interface Props {
   onSelect?: (message: NatsMessage) => void;
   selected?: NatsMessage | null;
   className?: string;
+  /** fetch what is older than the last row; called when the end comes into view */
+  onLoadOlder?: () => void;
+  loadingOlder?: boolean;
+  /** nothing older is left to fetch */
+  atOldest?: boolean;
 }
 
 /**
@@ -27,7 +33,7 @@ interface Props {
  * The time, subject and size columns can be dragged; the payload takes what
  * is left.
  */
-export default function MessageList({ messages, subjectPrefix, onOpen, onSelect, selected, className }: Props) {
+export default function MessageList({ messages, subjectPrefix, onOpen, onSelect, selected, className, onLoadOlder, loadingOlder, atOldest }: Props) {
   const { widths, resize } = useColumnWidths('ne.messageListCols', DEFAULT_WIDTHS);
   const grid = { gridTemplateColumns: `${widths.time}px ${widths.subject}px minmax(0, 1fr) ${widths.size}px` };
 
@@ -55,6 +61,24 @@ export default function MessageList({ messages, subjectPrefix, onOpen, onSelect,
       rowHeight={ROW}
       rowKey={i => messageKey(messages[i])}
       header={header}
+      onEndReached={onLoadOlder}
+      footer={
+        onLoadOlder && messages.length > 0 ? (
+          <div className="h-9 flex items-center justify-center gap-1.5 text-xs text-faint border-t border-line">
+            {loadingOlder ? (
+              <>
+                <Loader2 size={12} className="animate-spin" /> Loading older…
+              </>
+            ) : atOldest ? (
+              'No older messages'
+            ) : (
+              <button type="button" className="hover:text-fg" onClick={onLoadOlder}>
+                Load older
+              </button>
+            )}
+          </div>
+        ) : null
+      }
       renderRow={i => {
         const m = messages[i];
         const p = previewPayload(m.payload, m.payloadType, 90);

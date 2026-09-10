@@ -90,14 +90,14 @@ func TestBranchMergesNewestFirst(t *testing.T) {
 	s.Append("c", msg("a.x", 3, 20))
 	s.Append("c", msg("a", 4, 40))    // the branch itself is not below it
 	s.Append("c", msg("ab.q", 5, 50)) // shares a prefix but not a segment
-	got := s.Branch("c", "a", 10)
+	got := s.Branch("c", "a", 10, 0)
 	if len(got) != 3 || got[0].Sequence != 2 || got[1].Sequence != 3 || got[2].Sequence != 1 {
 		t.Fatalf("branch = %+v", got)
 	}
-	if got := s.Branch("c", "a", 2); len(got) != 2 || got[1].Sequence != 3 {
+	if got := s.Branch("c", "a", 2, 0); len(got) != 2 || got[1].Sequence != 3 {
 		t.Fatalf("limited branch = %+v", got)
 	}
-	if s.Branch("c", "nothing", 5) != nil && len(s.Branch("c", "nothing", 5)) != 0 {
+	if s.Branch("c", "nothing", 5, 0) != nil && len(s.Branch("c", "nothing", 5, 0)) != 0 {
 		t.Fatal("unknown branch must be empty")
 	}
 }
@@ -109,17 +109,17 @@ func TestSearchMatchesSubjectOrPayload(t *testing.T) {
 	s.Append("c", &message.Record{Subject: "plant.line2.temp", Data: []byte(`{"value":19,"unit":"celsius"}`), Timestamp: 3, Sequence: 3})
 	s.Append("c", &message.Record{Subject: "plant.line2.raw", Data: []byte{0xff, 'c', 'e', 'l'}, Timestamp: 4, Sequence: 4})
 	s.Append("c", &message.Record{Subject: "other.celsius", Data: []byte("x"), Timestamp: 5, Sequence: 5})
-	got := s.Search("c", "plant", "CELSIUS", 10)
+	got := s.Search("c", "plant", "CELSIUS", 10, 0)
 	if len(got) != 2 || got[0].Sequence != 3 || got[1].Sequence != 1 {
 		t.Fatalf("payload search = %+v", got)
 	}
-	if got := s.Search("c", "plant", "line1", 10); len(got) != 2 {
+	if got := s.Search("c", "plant", "line1", 10, 0); len(got) != 2 {
 		t.Fatalf("subject search = %+v", got)
 	}
-	if got := s.Search("c", "plant.line2.temp", "", 10); len(got) != 1 || got[0].Sequence != 3 {
+	if got := s.Search("c", "plant.line2.temp", "", 10, 0); len(got) != 1 || got[0].Sequence != 3 {
 		t.Fatalf("exact subject with empty query = %+v", got)
 	}
-	if got := s.Search("c", "plant", "value", 2); len(got) != 2 || got[0].Sequence != 3 {
+	if got := s.Search("c", "plant", "value", 2, 0); len(got) != 2 || got[0].Sequence != 3 {
 		t.Fatalf("limit keeps the newest: %+v", got)
 	}
 }
@@ -170,7 +170,7 @@ func TestShardsSplitBudgetAndAggregate(t *testing.T) {
 	if got := s.Subject("c", "s.7", 5, 0); len(got) != 5 || got[4].Sequence != 367 {
 		t.Fatalf("subject across shards = %+v", got)
 	}
-	if got := s.Branch("c", "s", 3); len(got) != 3 || got[0].Sequence != 400 || got[2].Sequence != 398 {
+	if got := s.Branch("c", "s", 3, 0); len(got) != 3 || got[0].Sequence != 400 || got[2].Sequence != 398 {
 		t.Fatalf("branch across shards = %+v", got)
 	}
 	s.Drop("c")
@@ -188,5 +188,57 @@ func BenchmarkAppend(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		s.Append("c", &message.Record{Subject: subjects[i%5000], Data: []byte("p"), Sequence: uint64(i)})
+	}
+}
+
+// The branch list and the search merge every subject below a node. Both page
+// backwards on the arrival sequence, which orders that merge because it is
+// arrival order within one connection.
+func TestBranchAndSearchPageBackwards(t *testing.T) {
+	s := NewMemStore(0, 0)
+	// Three subjects below a.b, interleaved, so paging has to walk the merge
+	// and not one subject at a time.
+	for i := 1; i <= 30; i++ {
+		subject := fmt.Sprintf("a.b.s%d", i%3)
+		s.Append("c1", &message.Record{Subject: subject, Data: []byte(fmt.Sprintf(`{"n":%d,"tag":"x"}`, i)), Timestamp: int64(i), Sequence: uint64(i)})
+	}
+
+	page := func(get func(before uint64) []message.NatsMessage) []int {
+		var seen []int
+		var before uint64
+		for round := 0; round < 10; round++ {
+			got := get(before)
+			if len(got) == 0 {
+				break
+			}
+			for _, m := range got {
+				seen = append(seen, int(m.Sequence))
+			}
+			before = got[len(got)-1].Sequence
+		}
+		return seen
+	}
+
+	branch := page(func(before uint64) []message.NatsMessage { return s.Branch("c1", "a.b", 7, before) })
+	if len(branch) != 30 {
+		t.Fatalf("branch paged %d of 30 messages: %v", len(branch), branch)
+	}
+	for i, seq := range branch {
+		if want := 30 - i; seq != want {
+			t.Fatalf("branch position %d = %d, want %d (newest first, no gaps, no repeats)", i, seq, want)
+		}
+	}
+
+	found := page(func(before uint64) []message.NatsMessage { return s.Search("c1", "a.b", "tag", 7, before) })
+	if len(found) != 30 {
+		t.Fatalf("search paged %d of 30 matches: %v", len(found), found)
+	}
+	if found[0] != 30 || found[29] != 1 {
+		t.Fatalf("search order = %d … %d", found[0], found[29])
+	}
+
+	// A cursor older than everything ends the paging instead of starting over.
+	if got := s.Branch("c1", "a.b", 7, 1); len(got) != 0 {
+		t.Fatalf("nothing is older than the first message, got %d", len(got))
 	}
 }

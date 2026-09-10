@@ -34,6 +34,8 @@ export interface SubjectEntry {
   tr: number;
   /** number of children on the server; a collapsed branch shows a chevron from this */
   c?: number;
+  /** subjects with at least one message in the subtree, this node included */
+  sc?: number;
   /** preview of the last payload, truncated server-side; absent for binary */
   p?: string;
   pt?: PayloadType;
@@ -57,7 +59,7 @@ export interface SubscriptionStats {
     messages: number;
     bytes: number;
     subjects: number;
-    db?: { path: string; messages: number; bytes: number; oldest: number; dropped: number; retention: string };
+    db?: HistoryDbStats;
   };
   /** counters per subscribed pattern */
   patterns?: { pattern: string; received: number; subjects: number; rate: number }[];
@@ -84,6 +86,48 @@ export interface HistoryResponse {
   messages: NatsMessage[];
   /** newest messages on subjects below it, newest first */
   branch: NatsMessage[];
+  /** the store held more before the cursor, so another page backwards may follow */
+  more?: boolean;
+  /** the same for the branch list, which merges every subject below the node */
+  branchMore?: boolean;
+}
+
+/** GET /api/history/range: persisted messages of a time range, newest first. */
+export interface HistoryRangeResponse {
+  subject: string;
+  from: number;
+  to: number;
+  messages: NatsMessage[];
+  /** another page before the oldest message returned may follow */
+  more?: boolean;
+}
+
+/** Size of the SQLite copy of the history. */
+export interface HistoryDbStats {
+  path: string;
+  messages: number;
+  bytes: number;
+  /** timestamp of the oldest message kept, unix ms; 0 when empty */
+  oldest: number;
+  /** messages not persisted because the writer fell behind */
+  dropped: number;
+  retention: string;
+}
+
+/** GET/PUT /api/history/persistence: the SQLite copy of the history as a setting. */
+export interface HistoryPersistence {
+  /** false when this installation has nowhere to put the file; `reason` says why */
+  supported: boolean;
+  reason?: string;
+  /** HISTORY_DB decides: the UI reports the state but cannot change it */
+  managed: boolean;
+  enabled: boolean;
+  path?: string;
+  /** how far back the database is kept, as a Go duration ("72h0m0s") */
+  retention: string;
+  /** the word index behind the search over the persistent history */
+  fullText?: boolean;
+  db?: HistoryDbStats;
 }
 
 export interface PublishInput {

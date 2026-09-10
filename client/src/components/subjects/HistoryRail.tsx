@@ -1,6 +1,7 @@
+import { Loader2 } from 'lucide-react';
 import type { NatsMessage } from 'shared';
 import { messageKey } from '../../lib/messages';
-import { cn, formatBytes, formatTime, previewPayload } from '../../lib/utils';
+import { cn, formatBytes, formatCount, formatTime, previewPayload } from '../../lib/utils';
 import { VirtualRows } from '../ui/VirtualRows';
 
 const ROW = 40;
@@ -10,20 +11,50 @@ interface Props {
   messages: NatsMessage[];
   active: NatsMessage | undefined;
   onPick: (m: NatsMessage) => void;
+  /** fetch the messages before the oldest one shown; called when the end comes into view */
+  onLoadOlder?: () => void;
+  loadingOlder?: boolean;
+  /** nothing older is left to fetch */
+  atOldest?: boolean;
+  /** width in pixels; the pane is draggable */
+  width: number;
 }
 
-/** The message history of a subject as a narrow, virtualized rail. */
-export default function HistoryRail({ messages, active, onPick }: Props) {
+/**
+ * The message history of a subject as a narrow, virtualized rail. It is
+ * rendered newest first and pages backwards as it is scrolled, so the list
+ * is not limited to what the first request brought.
+ */
+export default function HistoryRail({ messages, active, onPick, onLoadOlder, loadingOlder, atOldest, width }: Props) {
+  const paging = !!onLoadOlder;
   return (
-    <div className="w-72 shrink-0 border-r border-line flex flex-col min-h-0">
+    <div className="shrink-0 border-r border-line flex flex-col min-h-0" style={{ width }}>
       <div className="flex items-center h-9 px-3 border-b border-line text-xs text-muted">
         <span className="section-title">History</span>
-        <span className="ml-auto">{messages.length} newest first</span>
+        <span className="ml-auto">{formatCount(messages.length)} newest first</span>
       </div>
       <VirtualRows
         className="flex-1 min-h-0"
         count={messages.length}
         rowHeight={ROW}
+        onEndReached={onLoadOlder}
+        footer={
+          paging && messages.length > 0 ? (
+            <div className="h-9 flex items-center justify-center gap-1.5 text-xs text-faint border-t border-line">
+              {loadingOlder ? (
+                <>
+                  <Loader2 size={12} className="animate-spin" /> Loading older…
+                </>
+              ) : atOldest ? (
+                'No older messages'
+              ) : (
+                <button type="button" className="hover:text-fg" onClick={onLoadOlder}>
+                  Load older
+                </button>
+              )}
+            </div>
+          ) : null
+        }
         rowKey={i => messageKey(messages[messages.length - 1 - i])}
         renderRow={i => {
           const m = messages[messages.length - 1 - i];

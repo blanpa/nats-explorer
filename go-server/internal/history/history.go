@@ -26,11 +26,15 @@ type Store interface {
 	// are returned, which pages backwards through the history.
 	Subject(connID, subject string, limit int, beforeSeq uint64) []message.NatsMessage
 	// Branch returns up to limit of the newest messages on subjects strictly
-	// below prefix (prefix + "."), newest first.
-	Branch(connID, prefix string, limit int) []message.NatsMessage
+	// below prefix (prefix + "."), newest first. With beforeSeq > 0 only
+	// messages older than it are returned, which pages backwards: sequences
+	// are arrival order within a connection, so they order the merge over
+	// all of its subjects as well.
+	Branch(connID, prefix string, limit int, beforeSeq uint64) []message.NatsMessage
 	// Search returns up to limit of the newest messages on subject or below
-	// it whose subject or payload text contains q (case-insensitive, ASCII).
-	Search(connID, subject, q string, limit int) []message.NatsMessage
+	// it whose subject or payload text contains q (case-insensitive, ASCII),
+	// pageable backwards the same way.
+	Search(connID, subject, q string, limit int, beforeSeq uint64) []message.NatsMessage
 	// Drop forgets everything recorded for a connection.
 	Drop(connID string)
 	// Clear forgets everything.
@@ -278,7 +282,7 @@ func (h *cursorHeap) Pop() interface{} {
 	return x
 }
 
-func (s *MemStore) Branch(connID, prefix string, limit int) []message.NatsMessage {
+func (s *MemStore) Branch(connID, prefix string, limit int, beforeSeq uint64) []message.NatsMessage {
 	if limit <= 0 {
 		return nil
 	}
@@ -302,8 +306,8 @@ func (s *MemStore) Branch(connID, prefix string, limit int) []message.NatsMessag
 			if !strings.HasPrefix(subject, p) {
 				continue
 			}
-			if buf.len() > 0 {
-				h = append(h, &cursor{buf: buf, i: buf.len() - 1})
+			if c := newestBefore(buf, beforeSeq); c != nil {
+				h = append(h, c)
 			}
 		}
 	}
@@ -322,6 +326,20 @@ func (s *MemStore) Branch(connID, prefix string, limit int) []message.NatsMessag
 		}
 	}
 	return out
+}
+
+// newestBefore starts a cursor at the newest entry of a subject older than
+// beforeSeq, or at the newest entry when there is no cursor. The ring is in
+// arrival order, so the boundary is a binary search.
+func newestBefore(buf *subjectBuf, beforeSeq uint64) *cursor {
+	end := buf.len()
+	if beforeSeq > 0 {
+		end = sort.Search(buf.len(), func(i int) bool { return buf.at(i).rec.Sequence >= beforeSeq })
+	}
+	if end == 0 {
+		return nil
+	}
+	return &cursor{buf: buf, i: end - 1}
 }
 
 // containsFold is an allocation-free, ASCII case-insensitive substring test;
@@ -357,7 +375,7 @@ outer:
 	return false
 }
 
-func (s *MemStore) Search(connID, subject, q string, limit int) []message.NatsMessage {
+func (s *MemStore) Search(connID, subject, q string, limit int, beforeSeq uint64) []message.NatsMessage {
 	if limit <= 0 {
 		return nil
 	}
@@ -385,8 +403,8 @@ func (s *MemStore) Search(connID, subject, q string, limit int) []message.NatsMe
 			if !all && subj != subject && !strings.HasPrefix(subj, p) {
 				continue
 			}
-			if buf.len() > 0 {
-				h = append(h, &cursor{buf: buf, i: buf.len() - 1})
+			if c := newestBefore(buf, beforeSeq); c != nil {
+				h = append(h, c)
 			}
 		}
 	}

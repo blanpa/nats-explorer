@@ -1,14 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { NatsMessage } from 'shared';
 import { Check, Copy, Diff, Eraser, FolderTree, History, LineChart, MousePointerClick, Send, X } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import { useCanWrite } from '../../lib/auth';
-import { clearSubject } from '../../lib/feed';
-import { appInfo } from '../../lib/storage';
+import { clearSubject, loadOlder, loadOlderBranch } from '../../lib/feed';
 import { byArrival, newerFirst, recentRate } from '../../lib/messages';
 import { useAsync } from '../../lib/useAsync';
 import { copyToClipboard, extractNumber, formatBytes, formatCount, formatTime, prettyJson, readSetting, writeSetting } from '../../lib/utils';
-import { useBranchMessages, useLiveView, useStore, useSubjectMessages } from '../../store';
+import { HISTORY_RAIL_WIDTH, MAX_LOADED_MESSAGES, useBranchMessages, useLiveView, useStore, useSubjectMessages } from '../../store';
 import { Button, IconButton } from '../ui/Button';
 import { confirm } from '../ui/Dialog';
 import { Badge, EmptyState, PaneHeader } from '../ui/misc';
@@ -18,6 +17,7 @@ import ExportMenu from './ExportMenu';
 import { HistorySearchInput, SearchSummary, useHistorySearch } from './HistorySearch';
 import RangePicker, { type TimeRange } from './RangePicker';
 import HistoryRail from './HistoryRail';
+import { ResizeHandle } from '../layout/ResizeHandle';
 import MessageList from './MessageList';
 import MessagePanel from './MessagePanel';
 import MultiSubjectView from './MultiSubjectView';
@@ -29,6 +29,9 @@ import PublishDrawer from './PublishDrawer';
 import SchemaPanel from './SchemaPanel';
 import TrendStrip from './TrendStrip';
 import ValueChart from './ValueChart';
+
+/** Messages per request, for the first page of a range and every one after. */
+const RANGE_PAGE = 2000;
 
 export default function SubjectDetail() {
   const count = useStore(s => s.selectedSubjects.length);
@@ -47,6 +50,9 @@ function SingleSubjectView() {
   const revealSubject = useStore(s => s.revealSubject);
   const connections = useStore(s => s.connections);
   const prefillPublish = useStore(s => s.prefillPublish);
+  const historyDb = useStore(s => s.historyDb);
+  const railWidth = useStore(s => s.historyRailWidth);
+  const setRailWidth = useStore(s => s.setHistoryRailWidth);
 
   const [showHistory, setShowHistoryState] = useState(() => readSetting('ne.historyRail', true));
   const setShowHistory = (v: boolean) => {
@@ -56,7 +62,10 @@ function SingleSubjectView() {
   const [showDiff, setShowDiff] = useState(false);
   const [chartField, setChartField] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [range, setRange] = useState<TimeRange | null>(null);
+  const [rangeState, setRange] = useState<TimeRange | null>(null);
+  // Switching the persistent history off takes the range with it: without a
+  // database there is nothing behind it and the view would stay empty.
+  const range = historyDb ? rangeState : null;
   // A row of the search results or the branch list, shown under it.
   const [listMessage, setListMessage] = useState<NatsMessage | null>(null);
   const search = useHistorySearch(subject, range);
@@ -64,10 +73,46 @@ function SingleSubjectView() {
   const canWrite = useCanWrite();
   // Messages of the chosen time range from the persistent history.
   const ranged = useAsync(
-    () => (subject && range ? api.getHistoryRange(subject, { from: range.from, to: range.to, branch: true, limit: 2000 }) : null),
+    () => (subject && range ? api.getHistoryRange(subject, { from: range.from, to: range.to, branch: true, limit: RANGE_PAGE }) : null),
     [subject, range?.from, range?.to],
     { key: subject && range ? `range:${subject}:${range.from}:${range.to}` : undefined },
   );
+  const [loadingOlderRange, setLoadingOlderRange] = useState(false);
+  const { data: rangedData, setData: setRangedData } = ranged;
+
+  // Pages backwards through the range, the same way the live history does:
+  // every connection that contributed keeps its own (timestamp, sequence)
+  // cursor, so messages sharing a millisecond are not skipped.
+  const loadOlderRange = useCallback(async () => {
+    if (!subject || !range || !rangedData?.more || loadingOlderRange) return;
+    if (rangedData.messages.length >= MAX_LOADED_MESSAGES) return;
+    const cursors = new Map<string, NatsMessage>();
+    // Newest first, so the last message of a connection is its oldest.
+    for (const m of rangedData.messages) if (m.connId) cursors.set(m.connId, m);
+    if (cursors.size === 0) return;
+    setLoadingOlderRange(true);
+    try {
+      const pages = await Promise.all(
+        [...cursors].map(([connId, m]) =>
+          api.getHistoryRange(subject, {
+            from: range.from,
+            to: range.to,
+            branch: true,
+            limit: RANGE_PAGE,
+            connId,
+            beforeTs: m.timestamp,
+            beforeSeq: m.sequence,
+          }),
+        ),
+      );
+      const older = pages.flatMap(p => p.messages);
+      setRangedData(prev => (prev ? { ...prev, messages: prev.messages.concat(older), more: pages.some(p => p.more) } : prev));
+    } catch (err) {
+      toast.error('Older messages not loaded', errorMessage(err));
+    } finally {
+      setLoadingOlderRange(false);
+    }
+  }, [subject, range, rangedData, loadingOlderRange, setRangedData]);
 
   // Reset per-subject UI state when the subject changes.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the reset belongs to a subject change, which the body itself does not read
@@ -150,8 +195,8 @@ function SingleSubjectView() {
       setSelectedMessage(local);
       return;
     }
-    if (!appInfo.historyDb) {
-      toast.info('Message no longer here', 'This point is older than what the browser holds. A persistent history (HISTORY_DB) keeps it.');
+    if (!useStore.getState().historyDb) {
+      toast.info('Message no longer here', 'This point is older than what the browser holds. Switching the persistent history on keeps it.');
       return;
     }
     try {
@@ -226,7 +271,7 @@ function SingleSubjectView() {
     </PaneHeader>
   );
 
-  const rangeBar = appInfo.historyDb ? (
+  const rangeBar = historyDb ? (
     <div className="shrink-0 px-3 py-1.5 border-b border-line flex items-center gap-3">
       <RangePicker range={range} onChange={setRange} />
       {range && (
@@ -257,6 +302,9 @@ function SingleSubjectView() {
           onOpen={s => s !== subject && revealSubject(s)}
           onSelect={setListMessage}
           selected={listMessage}
+          onLoadOlder={search.loadMore}
+          loadingOlder={search.loadingMore}
+          atOldest={!search.more}
         />
         {listMessage && (
           <MessagePanel
@@ -282,6 +330,10 @@ function SingleSubjectView() {
           onOpen={revealSubject}
           onSelect={setListMessage}
           selected={listMessage}
+          // A time range brings its own messages; that list grows with the rail.
+          onLoadOlder={range ? loadOlderRange : () => loadOlderBranch(subject)}
+          loadingOlder={range ? loadingOlderRange : !!view?.loadingOlderBranch}
+          atOldest={range ? !rangedData?.more : !!view?.branchAtOldest}
         />
         {listMessage && <MessagePanel message={listMessage} onClose={() => setListMessage(null)} onOpenSubject={revealSubject} />}
         <div className="shrink-0 px-4 py-2 text-xs text-faint flex items-center gap-1.5 border-t border-line">
@@ -300,7 +352,25 @@ function SingleSubjectView() {
 
       <div className="flex-1 min-h-0 flex">
         {showHistory && shownMessages.length > 1 && (
-          <HistoryRail messages={shownMessages} active={display} onPick={m => setSelectedMessage(m === latest ? null : m)} />
+          <>
+            <HistoryRail
+              messages={shownMessages}
+              active={display}
+              width={railWidth}
+              onPick={m => setSelectedMessage(m === latest ? null : m)}
+              onLoadOlder={range ? loadOlderRange : () => loadOlder(subject)}
+              loadingOlder={range ? loadingOlderRange : !!view?.loadingOlder}
+              atOldest={range ? !rangedData?.more : !!view?.atOldest}
+            />
+            <ResizeHandle
+              label="history"
+              width={railWidth}
+              onChange={setRailWidth}
+              min={HISTORY_RAIL_WIDTH[0]}
+              max={HISTORY_RAIL_WIDTH[1]}
+              reset={HISTORY_RAIL_WIDTH[2]}
+            />
+          </>
         )}
 
         <div className="flex-1 min-w-0 min-h-0 overflow-auto p-4 flex flex-col gap-4">

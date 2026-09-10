@@ -1,7 +1,7 @@
 import { CalendarClock, X } from 'lucide-react';
 import { useState } from 'react';
-import { appInfo } from '../../lib/storage';
 import { cn } from '../../lib/utils';
+import { useStore } from '../../store';
 import { Button, IconButton } from '../ui/Button';
 import { Input } from '../ui/Input';
 
@@ -30,10 +30,12 @@ const toLocalInput = (ms: number) => {
  * database.
  */
 export default function RangePicker({ range, onChange }: { range: TimeRange | null; onChange: (r: TimeRange | null) => void }) {
+  const historyDb = useStore(s => s.historyDb);
+  const retention = useStore(s => s.historyRetention);
   const [custom, setCustom] = useState(false);
   const [from, setFrom] = useState(() => toLocalInput(Date.now() - 3600_000));
   const [to, setTo] = useState(() => toLocalInput(Date.now()));
-  if (!appInfo.historyDb) return null;
+  if (!historyDb) return null;
 
   const pick = (minutes: number, label: string) => {
     setCustom(false);
@@ -47,7 +49,7 @@ export default function RangePicker({ range, onChange }: { range: TimeRange | nu
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-1" title={`Persistent history, retention ${appInfo.historyRetention ?? ''}`}>
+    <div className="flex flex-wrap items-center gap-1" title={`Persistent history, retention ${retention}`}>
       <CalendarClock size={13} className="text-muted mr-0.5" />
       <button type="button" className={cn('btn btn-xs', range === null ? 'btn-primary' : 'btn-outline')} onClick={() => onChange(null)}>
         Live

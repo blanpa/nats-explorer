@@ -12,6 +12,8 @@ const EXAMPLES = [
   { label: 'a field is set', expr: 'has(payload.alarm)' },
   { label: 'text in the payload', expr: 'raw.contains("error")' },
   { label: 'subject and payload', expr: 'subject.endsWith(".temp") && payload.unit == "C"' },
+  // Only useful with a pinned schema, and then it is the most useful one.
+  { label: 'does not match the pinned schema', expr: '!valid' },
 ];
 
 /**

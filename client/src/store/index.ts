@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { ConnectionStatus, HistoryResponse, NatsMessage, SubscriptionStats } from 'shared';
 import { applyTheme, readTheme, type Theme } from '../lib/theme';
 import { readSetting, writeSetting } from '../lib/utils';
+import { appInfo } from '../lib/storage';
 import { byArrival, messageKey } from '../lib/messages';
 import { clearAsyncCache } from '../lib/useAsync';
 import { ancestorsOf, type FlatNode } from '../components/subjects/tree';
@@ -23,6 +24,14 @@ export const MODULES: { id: Module; label: string; hasExplorer: boolean }[] = [
 
 /** How many messages of the selected subject the browser keeps (history + live). */
 export const MAX_SUBJECT_MESSAGES = 1000;
+/**
+ * The ceiling the view may grow to by paging backwards. It matches what the
+ * server keeps per subject in memory, and bounds the tab's heap: every
+ * message is held with its payload.
+ */
+export const MAX_LOADED_MESSAGES = 10000;
+/** How many older messages one page brings in. */
+export const OLDER_PAGE = 500;
 /** How many messages below a selected branch the browser keeps, newest first. */
 export const MAX_BRANCH_MESSAGES = 200;
 
@@ -39,6 +48,20 @@ export interface LiveView {
   /** history request in flight */
   loading: boolean;
   error: string | null;
+  /**
+   * How many messages this view may hold. It starts at MAX_SUBJECT_MESSAGES
+   * and grows with every page of older messages loaded, so the live feed
+   * does not push what was fetched back out again.
+   */
+  cap: number;
+  /** a page of older messages is on its way */
+  loadingOlder: boolean;
+  /** the server has nothing older than what is loaded */
+  atOldest: boolean;
+  /** the same three for the list of everything below the subject */
+  branchCap: number;
+  loadingOlderBranch: boolean;
+  branchAtOldest: boolean;
 }
 
 function countSubjects(stats: Map<string, SubscriptionStats>): number {
@@ -47,19 +70,39 @@ function countSubjects(stats: Map<string, SubscriptionStats>): number {
   return c;
 }
 
-const emptyView = (subject: string): LiveView => ({ subject, messages: [], branch: [], loading: true, error: null });
+const emptyView = (subject: string): LiveView => ({
+  subject,
+  messages: [],
+  branch: [],
+  loading: true,
+  error: null,
+  cap: MAX_SUBJECT_MESSAGES,
+  loadingOlder: false,
+  atOldest: false,
+  branchCap: MAX_BRANCH_MESSAGES,
+  loadingOlderBranch: false,
+  branchAtOldest: false,
+});
 
 const EXPLORER_WIDTH_KEY = 'ne.explorerWidth';
+const HISTORY_RAIL_WIDTH_KEY = 'ne.historyRailWidth';
 
-function readExplorerWidth(): number {
+/** Bounds of the resizable panes: [min, max, default]. */
+export const EXPLORER_WIDTH = [220, 800, 340] as const;
+export const HISTORY_RAIL_WIDTH = [180, 800, 288] as const;
+
+/** A stored pane width, or the default when it is missing or out of bounds. */
+export function readWidth(key: string, [min, max, fallback]: readonly [number, number, number]): number {
   try {
-    const n = Number(localStorage.getItem(EXPLORER_WIDTH_KEY));
-    if (n >= 220 && n <= 800) return n;
+    const n = Number(localStorage.getItem(key));
+    if (n >= min && n <= max) return n;
   } catch {
-    /* ignore */
+    /* private mode, cleared storage */
   }
-  return 340;
+  return fallback;
 }
+
+const clampWidth = (w: number, [min, max]: readonly [number, number, number]) => Math.max(min, Math.min(max, Math.round(w)));
 
 export interface AppState {
   // Connections
@@ -78,9 +121,20 @@ export interface AppState {
   toggleTheme: () => void;
   explorerWidth: number;
   setExplorerWidth: (w: number) => void;
+  /** width of the history rail in the subject detail */
+  historyRailWidth: number;
+  setHistoryRailWidth: (w: number) => void;
   connectionsDialog: { open: boolean; editId?: string | null };
   openConnectionsDialog: (editId?: string | null) => void;
   closeConnectionsDialog: () => void;
+  settingsOpen: boolean;
+  setSettingsOpen: (open: boolean) => void;
+  /** the backend also writes the history to SQLite, so time ranges beyond
+   * memory can be queried. A setting, so it changes while the app runs. */
+  historyDb: boolean;
+  /** how far back that copy reaches, as a Go duration */
+  historyRetention: string;
+  setHistoryDb: (enabled: boolean, retention: string) => void;
   wsOnline: boolean;
   setWsOnline: (b: boolean) => void;
 
@@ -101,6 +155,13 @@ export interface AppState {
   /** hide _INBOX and $-prefixed roots (JetStream API, KV/object internals, system events) */
   hideSystemSubjects: boolean;
   setHideSystemSubjects: (b: boolean) => void;
+  /**
+   * Show the last payload next to each subject in the tree. Off by default:
+   * the tree is for counts and rates, and the preview is the largest part of
+   * every entry on the socket -- switched off it is not sent at all.
+   */
+  treePreview: boolean;
+  setTreePreview: (b: boolean) => void;
   /** subjects watched at once (Ctrl/Cmd-click in the tree); the last one is `selectedSubject` */
   selectedSubjects: string[];
   selectedSubject: string | null;
@@ -122,9 +183,20 @@ export interface AppState {
   live: Map<string, LiveView>;
   /** feed messages for the selected subjects; called once per animation frame */
   ingestFeed: (msgs: NatsMessage[]) => void;
-  /** merge the server history into the live view; ignored when the selection moved on */
-  applyHistory: (subject: string, res: HistoryResponse) => void;
+  /**
+   * Merge the server history into the live view; ignored when the selection
+   * moved on. With replace the answer is the whole truth -- a narrowed
+   * payload filter has to be able to take messages away, not only add.
+   */
+  applyHistory: (subject: string, res: HistoryResponse, replace?: boolean) => void;
   setLiveError: (subject: string, error: string) => void;
+  /** a page of older messages is being fetched */
+  setLoadingOlder: (subject: string, loading: boolean) => void;
+  /** put a page of older messages in front; `atOldest` when the server had no more */
+  prependOlder: (subject: string, msgs: NatsMessage[], atOldest: boolean) => void;
+  /** the same for the list below the subject, which is newest first */
+  setLoadingOlderBranch: (subject: string, loading: boolean) => void;
+  appendOlderBranch: (subject: string, msgs: NatsMessage[], atOldest: boolean) => void;
   /** forget buffered messages, keep the selection */
   resetLive: () => void;
   selectedMessage: NatsMessage | null;
@@ -209,15 +281,32 @@ export const useStore = create<AppState>((set, get) => ({
     set({ theme: t });
   },
   toggleTheme: () => get().setTheme(get().theme === 'dark' ? 'light' : 'dark'),
-  explorerWidth: readExplorerWidth(),
+  explorerWidth: readWidth(EXPLORER_WIDTH_KEY, EXPLORER_WIDTH),
   setExplorerWidth: w => {
-    const clamped = Math.max(220, Math.min(800, Math.round(w)));
+    const clamped = clampWidth(w, EXPLORER_WIDTH);
     writeSetting(EXPLORER_WIDTH_KEY, clamped);
     set({ explorerWidth: clamped });
+  },
+  historyRailWidth: readWidth(HISTORY_RAIL_WIDTH_KEY, HISTORY_RAIL_WIDTH),
+  setHistoryRailWidth: w => {
+    const clamped = clampWidth(w, HISTORY_RAIL_WIDTH);
+    writeSetting(HISTORY_RAIL_WIDTH_KEY, clamped);
+    set({ historyRailWidth: clamped });
   },
   connectionsDialog: { open: false, editId: null },
   openConnectionsDialog: editId => set({ connectionsDialog: { open: true, editId: editId ?? null } }),
   closeConnectionsDialog: () => set({ connectionsDialog: { open: false, editId: null } }),
+  settingsOpen: false,
+  setSettingsOpen: open => set({ settingsOpen: open }),
+  historyDb: appInfo.historyDb ?? false,
+  historyRetention: appInfo.historyRetention ?? '',
+  setHistoryDb: (enabled, retention) => {
+    // Keep appInfo in step: components that read it directly (and the next
+    // hydration) should not disagree with the store.
+    appInfo.historyDb = enabled;
+    appInfo.historyRetention = retention;
+    set({ historyDb: enabled, historyRetention: retention });
+  },
   wsOnline: false,
   setWsOnline: b => set({ wsOnline: b }),
 
@@ -238,6 +327,11 @@ export const useStore = create<AppState>((set, get) => ({
   setHideSystemSubjects: b => {
     writeSetting('ne.hideSystemSubjects', b);
     set({ hideSystemSubjects: b });
+  },
+  treePreview: readSetting('ne.treePreview', false),
+  setTreePreview: b => {
+    writeSetting('ne.treePreview', b);
+    set({ treePreview: b });
   },
   selectedSubjects: [],
   selectedSubject: null,
@@ -307,33 +401,102 @@ export const useStore = create<AppState>((set, get) => ({
       const updated = { ...view };
       if (exact) {
         const merged = view.messages.concat(exact);
-        updated.messages = merged.length > MAX_SUBJECT_MESSAGES ? merged.slice(merged.length - MAX_SUBJECT_MESSAGES) : merged;
+        updated.messages = merged.length > view.cap ? merged.slice(merged.length - view.cap) : merged;
       }
       if (below) {
         const merged = below.reverse().concat(view.branch);
-        updated.branch = merged.length > MAX_BRANCH_MESSAGES ? merged.slice(0, MAX_BRANCH_MESSAGES) : merged;
+        updated.branch = merged.length > view.branchCap ? merged.slice(0, view.branchCap) : merged;
       }
       (next ??= new Map(prev)).set(subject, updated);
     }
     if (next) set({ live: next });
   },
-  applyHistory: (subject, res) => {
+  applyHistory: (subject, res, replace) => {
     const view = get().live.get(subject);
     if (!view) return;
-    // The feed may have delivered messages while the request was in flight.
+    // The feed may have delivered messages while the request was in flight,
+    // so they are kept -- unless the caller says the answer replaces the
+    // view, which is what a changed payload filter needs.
     const seen = new Set(res.messages.map(messageKey));
-    const extra = view.messages.filter(m => !seen.has(messageKey(m)));
+    const extra = replace ? [] : view.messages.filter(m => !seen.has(messageKey(m)));
     let messages = res.messages.concat(extra);
     if (extra.length) messages.sort(byArrival);
     if (messages.length > MAX_SUBJECT_MESSAGES) messages = messages.slice(messages.length - MAX_SUBJECT_MESSAGES);
 
     const seenBranch = new Set(res.branch.map(messageKey));
-    let branch = view.branch.filter(m => !seenBranch.has(messageKey(m))).concat(res.branch);
+    let branch = replace ? res.branch : view.branch.filter(m => !seenBranch.has(messageKey(m))).concat(res.branch);
     if (branch.length !== res.branch.length) branch.sort((a, b) => byArrival(b, a));
     if (branch.length > MAX_BRANCH_MESSAGES) branch = branch.slice(0, MAX_BRANCH_MESSAGES);
 
     const live = new Map(get().live);
-    live.set(subject, { subject, messages, branch, loading: false, error: null });
+    // A fresh history starts the paging over: the cap is back to one page.
+    live.set(subject, {
+      ...view,
+      subject,
+      messages,
+      branch,
+      loading: false,
+      error: null,
+      cap: MAX_SUBJECT_MESSAGES,
+      loadingOlder: false,
+      atOldest: false,
+      branchCap: MAX_BRANCH_MESSAGES,
+      loadingOlderBranch: false,
+      branchAtOldest: false,
+    });
+    set({ live });
+  },
+  setLoadingOlder: (subject, loading) => {
+    const view = get().live.get(subject);
+    if (!view || view.loadingOlder === loading) return;
+    const live = new Map(get().live);
+    live.set(subject, { ...view, loadingOlder: loading });
+    set({ live });
+  },
+  setLoadingOlderBranch: (subject, loading) => {
+    const view = get().live.get(subject);
+    if (!view || view.loadingOlderBranch === loading) return;
+    const live = new Map(get().live);
+    live.set(subject, { ...view, loadingOlderBranch: loading });
+    set({ live });
+  },
+  appendOlderBranch: (subject, msgs, atOldest) => {
+    const view = get().live.get(subject);
+    if (!view) return;
+    const seen = new Set(view.branch.map(messageKey));
+    const older = msgs.filter(m => !seen.has(messageKey(m)));
+    // Newest first here, so an older page goes to the end.
+    const branch = older.length ? view.branch.concat(older).sort((a, b) => byArrival(b, a)) : view.branch;
+    const branchCap = Math.min(MAX_LOADED_MESSAGES, Math.max(view.branchCap, branch.length + MAX_BRANCH_MESSAGES));
+    const live = new Map(get().live);
+    live.set(subject, {
+      ...view,
+      branch: branch.length > branchCap ? branch.slice(0, branchCap) : branch,
+      branchCap,
+      loadingOlderBranch: false,
+      branchAtOldest: atOldest || branch.length >= MAX_LOADED_MESSAGES,
+    });
+    set({ live });
+  },
+  prependOlder: (subject, msgs, atOldest) => {
+    const view = get().live.get(subject);
+    if (!view) return;
+    const seen = new Set(view.messages.map(messageKey));
+    const older = msgs.filter(m => !seen.has(messageKey(m)));
+    // Pages of different connections interleave, so the whole list is
+    // sorted rather than assumed to be in order.
+    const messages = older.length ? older.concat(view.messages).sort(byArrival) : view.messages;
+    // The cap keeps a page of headroom above what is loaded, so live traffic
+    // fills that first instead of dropping the page just fetched.
+    const cap = Math.min(MAX_LOADED_MESSAGES, Math.max(view.cap, messages.length + MAX_SUBJECT_MESSAGES));
+    const live = new Map(get().live);
+    live.set(subject, {
+      ...view,
+      messages: messages.length > cap ? messages.slice(messages.length - cap) : messages,
+      cap,
+      loadingOlder: false,
+      atOldest: atOldest || messages.length >= MAX_LOADED_MESSAGES,
+    });
     set({ live });
   },
   setLiveError: (subject, error) => {
@@ -345,7 +508,8 @@ export const useStore = create<AppState>((set, get) => ({
   },
   resetLive: () => {
     const live = new Map<string, LiveView>();
-    for (const [subject, v] of get().live) live.set(subject, { ...v, messages: [], branch: [] });
+    for (const [subject, v] of get().live)
+      live.set(subject, { ...v, messages: [], branch: [], cap: MAX_SUBJECT_MESSAGES, atOldest: false, branchCap: MAX_BRANCH_MESSAGES, branchAtOldest: false });
     set({ live, selectedMessage: null });
   },
   selectedMessage: null,
