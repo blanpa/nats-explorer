@@ -163,6 +163,8 @@ Once a schema is pinned, every message in the history rail and in a branch list 
 
 A consumer row carries its lag, the distance between the stream head and what the consumer has delivered, with a warning arrow when the backlog grew over the last samples. Opening a row shows pending and ack-pending over time, sampled on every refresh of the list.
 
+It also names what the consumer is waiting for. An ack floor cannot move past a message that is never acknowledged, so a stuck consumer is nearly always stuck on the oldest of its unacknowledged messages and everything else waits behind that one. The row names it -- sequence, subject, payload, how long ago it was stored -- and lists the window behind it. A filtered consumer sees only the subjects it takes.
+
 A stream that mirrors or sources from another says so, with the lag and the time since the last activity, and every stream lists which other streams copy from it. Each name is a link to that stream.
 
 ## Key-Value

@@ -11,6 +11,7 @@ import { Badge, EmptyState, ErrorState, KeyValueGrid, LoadingState } from '../ui
 import { toast } from '../ui/Toast';
 import { useCanWrite } from '../../lib/auth';
 import { RateChart } from '../ui/RateChart';
+import AckPending from './AckPending';
 import { consumerSamples, consumerSeries, lagOf, pendingTrend, recordConsumer } from './consumerHistory';
 
 export default function ConsumerList({
@@ -223,6 +224,8 @@ export default function ConsumerList({
                               ...(c.config.optStartSeq ? [{ label: 'Start sequence', value: c.config.optStartSeq }] : []),
                             ]}
                           />
+
+                          <AckPending connId={connId} stream={stream} consumer={c} />
 
                           {samples.length > 1 && (
                             <div className="mt-3 max-w-[560px]">
