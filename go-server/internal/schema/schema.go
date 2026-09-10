@@ -171,16 +171,29 @@ func (c *collector) stat(path string) *stat {
 // walk records the value at path and descends into objects and arrays.
 // The root object itself is not a field; its members are.
 func (c *collector) walk(path string, v any, depth int, seen map[string]bool) {
-	if path != "" {
-		st := c.stat(path)
+	WalkDoc(path, v, depth, func(p string, val any) bool {
+		st := c.stat(p)
 		if st == nil {
-			return
+			// The field budget is spent; deeper paths of this branch add nothing.
+			return false
 		}
-		if !seen[path] {
-			seen[path] = true
+		if !seen[p] {
+			seen[p] = true
 			st.present++
 		}
-		st.observe(v)
+		st.observe(val)
+		return true
+	})
+}
+
+// WalkDoc visits every path of a document in the same shape the reported
+// fields use (`a.b`, `xs[]`, `xs[].n`), members in name order. Validation
+// walks documents the same way the inference did, so the two can never
+// disagree about what a path is called. Returning false from visit skips the
+// subtree below that path.
+func WalkDoc(path string, v any, depth int, visit func(path string, v any) bool) {
+	if path != "" && !visit(path, v) {
+		return
 	}
 	if depth >= MaxDepth {
 		return
@@ -197,11 +210,11 @@ func (c *collector) walk(path string, v any, depth int, seen map[string]bool) {
 			if path != "" {
 				p = path + "." + k
 			}
-			c.walk(p, x[k], depth+1, seen)
+			WalkDoc(p, x[k], depth+1, visit)
 		}
 	case []any:
 		for _, item := range x {
-			c.walk(path+"[]", item, depth+1, seen)
+			WalkDoc(path+"[]", item, depth+1, visit)
 		}
 	}
 }

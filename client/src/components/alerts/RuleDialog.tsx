@@ -9,6 +9,13 @@ import { Dialog } from '../ui/Dialog';
 import { Field, Input, Select } from '../ui/Input';
 import { toast } from '../ui/Toast';
 
+/** Starting points for a rule, including the one a pinned schema unlocks. */
+const EXPRESSIONS = [
+  { label: 'the payload does not match the schema pinned for the subject', expr: '!valid' },
+  { label: 'a value over a threshold', expr: 'payload.temp > 80' },
+  { label: 'a field is set', expr: 'has(payload.alarm)' },
+];
+
 /** Create or edit one alert rule, with a dry run against the recorded messages. */
 export default function RuleDialog({ rule, onClose }: { rule: AlertRule; onClose: () => void }) {
   const save = useAlerts(s => s.save);
@@ -70,9 +77,25 @@ export default function RuleDialog({ rule, onClose }: { rule: AlertRule; onClose
           </Field>
         </div>
 
-        <Field label="Expression" hint="CEL over subject, payload, headers, size, timestamp and kind. Leave empty to alert only on silence.">
+        <Field label="Expression" hint="CEL over subject, payload, headers, size, timestamp, kind and valid. Leave empty to alert only on silence.">
           <Input mono value={draft.expr ?? ''} onChange={e => patch({ expr: e.target.value })} placeholder="payload.temp > 80" spellCheck={false} />
         </Field>
+        {/* A pinned schema needs no rule type of its own: the same expression
+            language already carries the verdict. */}
+        <div className="flex flex-wrap items-center gap-1 -mt-1">
+          <span className="text-xs text-faint">Start from</span>
+          {EXPRESSIONS.map(e => (
+            <button
+              key={e.expr}
+              type="button"
+              className="text-[10px] font-mono text-faint hover:text-accent border border-line rounded px-1 py-0.5"
+              title={e.label}
+              onClick={() => patch({ expr: e.expr })}
+            >
+              {e.expr}
+            </button>
+          ))}
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <Field label="Silent after (s)" hint="0 turns it off.">

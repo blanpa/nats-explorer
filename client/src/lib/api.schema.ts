@@ -43,11 +43,17 @@ export interface SubjectSchema {
  * Without connId the histories of every connection are merged; from/to read
  * from the persistent history when it is enabled.
  */
-export function getSchema(
-  subject: string,
-  opts: { connId?: string; limit?: number; from?: number; to?: number } = {},
-): Promise<{ subject: string; schema: SubjectSchema }> {
+export function getSchema(subject: string, opts: { connId?: string; limit?: number; from?: number; to?: number } = {}): Promise<SchemaResponse> {
   const q = new URLSearchParams({ subject });
   for (const [k, val] of Object.entries(opts)) if (val !== undefined && val !== '') q.set(k, String(val));
-  return request<{ subject: string; schema: SubjectSchema }>(`/schema?${q.toString()}`);
+  return request<SchemaResponse>(`/schema?${q.toString()}`);
+}
+
+export interface SchemaResponse {
+  subject: string;
+  schema: SubjectSchema;
+  /** the pattern a schema is pinned under for this subject, if any */
+  pinnedPattern?: string;
+  /** how many of the sampled messages do not match it */
+  invalid?: number;
 }

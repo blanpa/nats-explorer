@@ -11,6 +11,13 @@
 //	size      int              payload bytes
 //	timestamp int              arrival time in milliseconds
 //	reply     string           the reply subject
+//	valid     bool             the payload matches the schema pinned for the subject
+//	violations list(string)    how it differs; empty when it matches
+//
+// `valid` and `violations` are resolved lazily: an expression that does not
+// mention them costs nothing, and without a pinned schema everything is
+// valid. That is what makes `!valid` work everywhere an expression does --
+// the subject tree, the history endpoints, a time range, an alert rule.
 //
 // Programs are cached by expression text: the same filter is asked for on
 // every view change and every history request.
@@ -21,9 +28,11 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/ext"
+	"cel.dev/cel-go/interpreter"
 
 	"nats-explorer/internal/message"
 )
@@ -38,6 +47,8 @@ var env = func() *cel.Env {
 		cel.Variable("size", cel.IntType),
 		cel.Variable("timestamp", cel.IntType),
 		cel.Variable("reply", cel.StringType),
+		cel.Variable("valid", cel.BoolType),
+		cel.Variable("violations", cel.ListType(cel.StringType)),
 		cel.CrossTypeNumericComparisons(true),
 		ext.Strings(),
 		ext.Math(),
@@ -101,11 +112,106 @@ type Vars struct {
 	Size      int
 	Timestamp int64
 	Reply     string
+	// Data is the payload as it arrived; the schema check needs the bytes,
+	// not the parsed document.
+	Data []byte
+}
+
+// SchemaChecker reports how a payload differs from the schema pinned for its
+// subject, and under which pattern it was pinned. An empty pattern means
+// nothing is pinned, which is not the same as a message that matches: the UI
+// has to tell "no reference" from "matches the reference".
+type SchemaChecker func(subject, kind string, payload []byte) (violations []string, pattern string)
+
+// checker is process-wide because the pinned schemas are: every expression,
+// wherever it runs, judges a message against the same reference.
+var checker atomic.Pointer[SchemaChecker]
+
+// SetSchemaChecker installs the check behind `valid` and `violations` and
+// returns how to remove it again. Removing only clears its own checker, so a
+// second server in the same process (tests) does not switch off the first's.
+// Passing nil clears whatever is installed.
+func SetSchemaChecker(fn SchemaChecker) (remove func()) {
+	if fn == nil {
+		checker.Store(nil)
+		return func() {}
+	}
+	p := &fn
+	checker.Store(p)
+	return func() { checker.CompareAndSwap(p, nil) }
+}
+
+// activation resolves the variables of one evaluation. The schema check runs
+// at most once, and only when the expression asks for it.
+type activation struct {
+	v          Vars
+	headers    map[string]string
+	payload    any
+	violations []string
+	checked    bool
+}
+
+func (a *activation) Parent() interpreter.Activation { return nil }
+
+func (a *activation) resolveViolations() []string {
+	if !a.checked {
+		a.checked = true
+		a.violations, _ = SchemaViolations(a.v.Subject, a.v.Kind, a.data())
+	}
+	return a.violations
+}
+
+// SchemaViolations asks the installed checker. Without one nothing is
+// pinned, so nothing can be violated.
+func SchemaViolations(subject, kind string, payload []byte) (violations []string, pattern string) {
+	fn := checker.Load()
+	if fn == nil {
+		return nil, ""
+	}
+	return (*fn)(subject, kind, payload)
+}
+
+// data is the raw payload; history results carry their text, not bytes.
+func (a *activation) data() []byte {
+	if a.v.Data != nil {
+		return a.v.Data
+	}
+	return []byte(a.v.Raw)
+}
+
+func (a *activation) ResolveName(name string) (any, bool) {
+	switch name {
+	case "subject":
+		return a.v.Subject, true
+	case "payload":
+		return a.payload, true
+	case "raw":
+		return a.v.Raw, true
+	case "kind":
+		return a.v.Kind, true
+	case "headers":
+		return a.headers, true
+	case "size":
+		return a.v.Size, true
+	case "timestamp":
+		return a.v.Timestamp, true
+	case "reply":
+		return a.v.Reply, true
+	case "valid":
+		return len(a.resolveViolations()) == 0, true
+	case "violations":
+		v := a.resolveViolations()
+		if v == nil {
+			v = []string{}
+		}
+		return v, true
+	}
+	return nil, false
 }
 
 // VarsOf builds the variables of a record. The payload is parsed once here.
 func VarsOf(r *message.Record) Vars {
-	v := Vars{Subject: r.Subject, Raw: r.Text(), Kind: r.Kind(), Size: len(r.Data), Timestamp: r.Timestamp, Reply: r.Reply}
+	v := Vars{Subject: r.Subject, Raw: r.Text(), Kind: r.Kind(), Size: len(r.Data), Timestamp: r.Timestamp, Reply: r.Reply, Data: r.Data}
 	if v.Kind == "json" {
 		var doc any
 		if err := json.Unmarshal(r.Data, &doc); err == nil {
@@ -183,16 +289,7 @@ func (p *Program) Eval(v Vars) (bool, error) {
 	if payload == nil {
 		payload = v.Raw
 	}
-	out, _, err := p.prg.Eval(map[string]any{
-		"subject":   v.Subject,
-		"payload":   payload,
-		"raw":       v.Raw,
-		"kind":      v.Kind,
-		"headers":   headers,
-		"size":      v.Size,
-		"timestamp": v.Timestamp,
-		"reply":     v.Reply,
-	})
+	out, _, err := p.prg.Eval(&activation{v: v, headers: headers, payload: payload})
 	if err != nil {
 		return false, err
 	}

@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Braces, Plus, Send, Trash2 } from 'lucide-react';
 import type { RequestReply, RunResult } from 'shared';
 import { api, errorMessage } from '../../lib/api';
+import { schemasApi } from '../../lib/api.schemas';
 import type { RequestDraft } from '../../lib/savedRequests';
 import { useStore } from '../../store';
 import { cn, formatDurationMs, formatNumber, previewPayload, prettyJson, tryParseJson } from '../../lib/utils';
@@ -64,6 +65,38 @@ export function useRequestRunner() {
   return { busy, reply, run, error, send, clear };
 }
 
+/**
+ * Checks the payload against the schema pinned for the subject, before it is
+ * sent. Nothing blocks: the schema is a reference, not a gate, and a payload
+ * with template placeholders is not JSON yet, so it is left alone.
+ */
+function useSchemaCheck(subject: string, payload: string): { pattern: string; violations: string[] } | null {
+  const [result, setResult] = useState<{ pattern: string; violations: string[] } | null>(null);
+  useEffect(() => {
+    const subj = subject.trim();
+    if (!subj || subj.includes('*') || subj.includes('>') || !payload.trim() || payload.includes('{{')) {
+      setResult(null);
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      schemasApi
+        .check(subj, payload)
+        .then(res => {
+          if (!cancelled) setResult(res.pinned && res.violations.length > 0 ? { pattern: res.pattern ?? subj, violations: res.violations } : null);
+        })
+        .catch(() => {
+          if (!cancelled) setResult(null);
+        });
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [subject, payload]);
+  return result;
+}
+
 /** Picks the connection a form sends through: explicit choice, else the active one, else any connected. */
 export function useSendConnection(chosen: string) {
   const activeConnId = useStore(s => s.activeConnId);
@@ -93,6 +126,7 @@ export function RequestForm({ draft, onChange, onSend, busy, canSend, connId, on
   const patch = (p: Partial<RequestDraft>) => onChange({ ...draft, ...p });
   const trimmed = draft.payload.trim();
   const jsonValid = trimmed === '' || (!trimmed.startsWith('{') && !trimmed.startsWith('[')) || tryParseJson(draft.payload) !== undefined;
+  const schemaCheck = useSchemaCheck(draft.subject, draft.payload);
   const repeated = draft.count > 1;
 
   return (
@@ -257,6 +291,10 @@ export function RequestForm({ draft, onChange, onSend, busy, canSend, connId, on
           <div className="flex items-center gap-2 text-xs">
             {!jsonValid ? (
               <span className="text-warn">Looks like JSON but does not parse. It will be sent as-is.</span>
+            ) : schemaCheck ? (
+              <span className="text-warn truncate" title={`Pinned for ${schemaCheck.pattern}: ${schemaCheck.violations.join('; ')}`}>
+                Does not match the pinned schema: {schemaCheck.violations.join('; ')}
+              </span>
             ) : (
               <span className="text-faint font-mono" title="Replaced per message in subject, payload and headers">
                 {'{{i}} {{ts}} {{uuid}} {{rand:1-100}}'}

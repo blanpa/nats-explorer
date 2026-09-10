@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"nats-explorer/internal/filter"
 	"nats-explorer/internal/message"
 	"nats-explorer/internal/schema"
 )
@@ -53,8 +54,8 @@ func init() {
 				}
 				var msgs []message.NatsMessage
 				for _, id := range ids {
-					if ranged && d.db != nil {
-						part, err := d.db.Range(req.Context(), id, subject, false, from, to, limit)
+					if db := d.tee.DB(); ranged && db != nil {
+						part, err := db.Range(req.Context(), id, subject, false, from, to, limit)
 						if err != nil {
 							schemaError(w, http.StatusInternalServerError, err.Error())
 							return
@@ -65,8 +66,21 @@ func init() {
 					msgs = append(msgs, d.history.Subject(id, subject, limit, 0)...)
 				}
 				out := schema.Infer(msgs)
+				// How the sampled messages hold up against a pinned schema:
+				// the number is the point of pinning one.
+				body := map[string]interface{}{"subject": subject, "schema": out}
+				if _, pattern := filter.SchemaViolations(subject, "json", []byte("{}")); pattern != "" {
+					invalid := 0
+					for i := range msgs {
+						if v, _ := filter.SchemaViolations(subject, msgs[i].PayloadType, []byte(msgs[i].Payload)); len(v) > 0 {
+							invalid++
+						}
+					}
+					body["pinnedPattern"] = pattern
+					body["invalid"] = invalid
+				}
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]interface{}{"subject": subject, "schema": out})
+				json.NewEncoder(w).Encode(body)
 			})
 		},
 	})
