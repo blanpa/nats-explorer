@@ -5,7 +5,7 @@ import { useAsync } from '../../lib/useAsync';
 import { formatCount } from '../../lib/utils';
 import { Button, IconButton } from '../ui/Button';
 import { Select } from '../ui/Input';
-import { Segmented } from '../ui/misc';
+import { Hint, Segmented } from '../ui/misc';
 import ValueChart, { CHART_TYPES, colorForIndex, type ChartType } from '../subjects/ValueChart';
 import { AGGREGATIONS, savedAgg, savedChartType, persistChartSettings, savedLayout, savedNormalize } from '../subjects/ChartPanel';
 
@@ -90,8 +90,9 @@ export default function StreamChart({
           </span>
         )}
         <span className="ml-auto flex flex-wrap items-center gap-1">
-          <span title={AGGREGATIONS.find(a => a.id === agg)?.hint}>
+          <span className="inline-flex items-center gap-1">
             <Segmented size="xs" options={AGGREGATIONS.map(a => ({ id: a.id, label: a.label }))} value={agg} onChange={setAgg} />
+            <Hint text={AGGREGATIONS.find(a => a.id === agg)?.hint ?? ''} />
           </span>
           <Segmented size="xs" options={CHART_TYPES} value={type} onChange={setType} />
           <IconButton label="Reload chart" size="xs" loading={loading && !!data} onClick={reload}>

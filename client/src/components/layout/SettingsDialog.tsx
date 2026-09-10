@@ -9,7 +9,7 @@ import { useStore } from '../../store';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
 import { Checkbox, Field, Input, Select } from '../ui/Input';
-import { Badge, ErrorState, KeyValueGrid, LoadingState, SectionTitle } from '../ui/misc';
+import { Badge, ErrorState, Hint, KeyValueGrid, LoadingState, SectionTitle } from '../ui/misc';
 import { toast } from '../ui/Toast';
 
 /** Retentions offered for the persistent history, as Go durations. */
@@ -115,12 +115,11 @@ function HistorySection() {
         }
       >
         Message history
+        <Hint
+          className="ml-1.5"
+          text="Received messages are always kept in memory, where a restart empties them. With a copy on disk the history survives a restart and the range picker can reach back further than memory."
+        />
       </SectionTitle>
-
-      <p className="text-sm text-muted">
-        Received messages are always kept in memory, where a restart empties them. With a copy on disk the history survives a restart and the range picker can
-        reach back further than memory.
-      </p>
 
       {!data.supported ? (
         <p className="text-sm text-warn">{data.reason}</p>

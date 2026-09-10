@@ -1,6 +1,6 @@
 import * as RadixTooltip from '@radix-ui/react-tooltip';
-import { Loader2, type LucideIcon } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { Info, Loader2, type LucideIcon } from 'lucide-react';
+import { useId, type ReactNode } from 'react';
 import { cn } from '../../lib/utils';
 
 /* Badge ---------------------------------------------------------------- */
@@ -245,7 +245,9 @@ export function Tooltip({ content, children, side = 'right' }: { content: ReactN
         <RadixTooltip.Content
           side={side}
           sideOffset={6}
-          className="z-[70] rounded border border-line bg-raised px-2 py-1 text-xs text-fg shadow-pop animate-fade-in"
+          // A hint can be a sentence or three; without a bound it becomes one
+          // unreadable line across the window.
+          className="z-[70] max-w-[min(340px,80vw)] rounded border border-line bg-raised px-2 py-1 text-xs text-fg shadow-pop animate-fade-in"
         >
           {content}
         </RadixTooltip.Content>
@@ -273,4 +275,43 @@ export const menuItemClass =
 /** Separates groups of controls in a header row, so a row reads as groups rather than as a queue. */
 export function HeaderDivider() {
   return <span className="w-px h-5 bg-line mx-1 shrink-0" aria-hidden />;
+}
+
+/* Hint ----------------------------------------------------------------- */
+
+/**
+ * An explanation that belongs to one control, on the control rather than
+ * under it. A paragraph of help text under every field turns a dialog into
+ * a wall of prose that nobody reads twice; the mark is small, sits where
+ * the question is asked, and gives the same words back on hover or focus.
+ *
+ * The text stays in the document, only hidden, so `aria-describedby` still
+ * finds it and a screen reader still reads it out.
+ */
+export function Hint({ text, id, className, side = 'top' }: { text: ReactNode; id?: string; className?: string; side?: 'top' | 'right' | 'bottom' | 'left' }) {
+  const autoId = useId();
+  const hintId = id ?? autoId;
+  return (
+    // Its own provider: a primitive this small has to work wherever it is
+    // put -- inside a dialog, a portal or a test -- without an ancestor
+    // having thought of it first.
+    <RadixTooltip.Provider>
+      <Tooltip content={text} side={side}>
+        {/* A button, because the keyboard has to reach what the mouse
+            reveals, and only interactive elements belong in the tab order.
+            It does nothing on click; the tooltip opens on hover and focus. */}
+        <button
+          type="button"
+          aria-label="Explanation"
+          aria-describedby={hintId}
+          className={cn('inline-flex shrink-0 text-faint hover:text-fg focus-visible:text-fg cursor-help align-middle', className)}
+        >
+          <Info size={12} />
+        </button>
+      </Tooltip>
+      <span id={hintId} className="sr-only">
+        {text}
+      </span>
+    </RadixTooltip.Provider>
+  );
 }

@@ -9,6 +9,7 @@ import {
   type TextareaHTMLAttributes,
 } from 'react';
 import { cn } from '../../lib/utils';
+import { Hint } from './misc';
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   mono?: boolean;
@@ -46,13 +47,14 @@ interface CheckboxProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'typ
 
 export function Checkbox({ label, description, className, ...rest }: CheckboxProps) {
   return (
-    <label className={cn('flex items-start gap-2 cursor-pointer select-none text-sm', className)}>
-      <input type="checkbox" className="checkbox mt-[3px]" {...rest} />
-      <span className="min-w-0">
-        <span className="text-fg">{label}</span>
-        {description && <span className="block text-xs text-muted">{description}</span>}
-      </span>
-    </label>
+    // The mark sits outside the label, or clicking it would toggle the box.
+    <div className={cn('flex items-start gap-1.5 text-sm', className)}>
+      <label className="flex items-start gap-2 cursor-pointer select-none min-w-0">
+        <input type="checkbox" className="checkbox mt-[3px]" {...rest} />
+        <span className="text-fg min-w-0">{label}</span>
+      </label>
+      {description && <Hint text={description} className="mt-[5px]" />}
+    </div>
   );
 }
 
@@ -76,16 +78,14 @@ export function Field({ label, hint, htmlFor, className, children, required }: F
       : children;
   return (
     <div className={cn('flex flex-col gap-1', className)}>
-      <label htmlFor={id} className="text-xs font-medium text-muted">
-        {label}
-        {required && <span className="text-danger ml-0.5">*</span>}
-      </label>
+      <span className="flex items-center gap-1.5">
+        <label htmlFor={id} className="text-xs font-medium text-muted">
+          {label}
+          {required && <span className="text-danger ml-0.5">*</span>}
+        </label>
+        {hint && <Hint text={hint} id={hintId} />}
+      </span>
       {control}
-      {hint && (
-        <span id={hintId} className="text-xs text-faint">
-          {hint}
-        </span>
-      )}
     </div>
   );
 }

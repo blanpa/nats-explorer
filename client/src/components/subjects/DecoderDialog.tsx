@@ -96,7 +96,12 @@ function DecoderEditor({ onClose, prefill }: { onClose: () => void; prefill?: st
                 <Field label="Subject pattern" hint="NATS wildcards: * for one token, > for the rest.">
                   <Input mono value={draft.pattern} onChange={e => patch({ pattern: e.target.value })} placeholder="telemetry.>" autoFocus={isNew} />
                 </Field>
-                <Field label="Format">
+                <Field
+                  label="Format"
+                  hint={
+                    draft.format === 'msgpack' ? 'MessagePack is self-describing, so it needs no schema.' : 'The schema below describes how to read the bytes.'
+                  }
+                >
                   <Select value={draft.format} onChange={e => patch({ format: e.target.value as DecoderFormat })}>
                     {(Object.keys(FORMAT_LABELS) as DecoderFormat[]).map(f => (
                       <option key={f} value={f}>
@@ -122,7 +127,7 @@ function DecoderEditor({ onClose, prefill }: { onClose: () => void; prefill?: st
                   />
                 </Field>
               )}
-              {draft.format === 'msgpack' && <p className="text-xs text-muted">MessagePack is self-describing; no schema needed.</p>}
+
               {!isNew && (
                 <div className="mt-auto pt-2">
                   <Button

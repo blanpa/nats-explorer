@@ -6,7 +6,7 @@ import { appInfo } from '../../lib/storage';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/Button';
 import { Checkbox, Field, Input, Select, Textarea } from '../ui/Input';
-import { Badge } from '../ui/misc';
+import { Badge, Hint } from '../ui/misc';
 
 const AUTH_OPTIONS: { value: AuthMethod; label: string }[] = [
   { value: 'none', label: 'None' },
@@ -217,14 +217,11 @@ export default function ConnectionForm({ draft, isNew, live, patch, onSubmit }: 
       </div>
 
       <p className="text-xs text-muted">
-        Subjects and system subjects ($SYS, $JS, $KV, $SRV) are chosen in the Subjects pane while connected and remembered here
-        {draft.subscriptions.length ? (
-          <>
-            {' '}
-            (currently <span className="font-mono">{draft.subscriptions.join(', ')}</span>)
-          </>
-        ) : null}
-        .
+        <Hint
+          className="mr-1"
+          text="Subjects and system subjects ($SYS, $JS, $KV, $SRV) are chosen in the Subjects pane while connected, and remembered here."
+        />
+        Subscriptions: <span className="font-mono text-fg">{draft.subscriptions.length ? draft.subscriptions.join(', ') : 'none'}</span>
       </p>
 
       <div className="flex flex-col gap-3 rounded border border-line p-3">

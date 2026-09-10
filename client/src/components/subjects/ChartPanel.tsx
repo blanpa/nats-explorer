@@ -4,7 +4,7 @@ import type { Aggregation, HistorySeries, NatsMessage } from 'shared';
 import { readSetting, writeSetting } from '../../lib/utils';
 import { Checkbox } from '../ui/Input';
 import { IconButton } from '../ui/Button';
-import { Segmented } from '../ui/misc';
+import { Hint, Segmented } from '../ui/misc';
 import ValueChart, { CHART_TYPES, type ChartSeries, type ChartType, colorForIndex, mergePoints, type Point } from './ValueChart';
 
 /**
@@ -119,8 +119,9 @@ export default function ChartPanel({ fields, messages, seriesByField, settings, 
         )}
 
         <span className="ml-auto flex flex-wrap items-center gap-2">
-          <span title={aggHint}>
+          <span className="inline-flex items-center gap-1">
             <Segmented size="xs" options={AGGREGATIONS.map(a => ({ id: a.id, label: a.label }))} value={agg} onChange={v => onSettings({ agg: v })} />
+            {aggHint && <Hint text={aggHint} />}
           </span>
           {many && (
             <Segmented
@@ -136,8 +137,6 @@ export default function ChartPanel({ fields, messages, seriesByField, settings, 
           <Segmented size="xs" options={CHART_TYPES} value={type} onChange={v => onSettings({ type: v })} />
         </span>
       </div>
-
-      {aggHint && <p className="text-xs text-faint -mt-1">{aggHint}</p>}
 
       {many && layout === 'overlay' && (
         <Checkbox

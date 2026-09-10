@@ -106,7 +106,12 @@ test('subscriptions change while connected', async ({ page }) => {
   // not what it is listening to at this instant. `live.temp` arrived in an
   // earlier test and is still there; `live.no` was published just now and
   // never reached us.
-  await expect(page.locator('.tree-label').filter({ hasText: /^temp$/ }).first()).toBeVisible();
+  await expect(
+    page
+      .locator('.tree-label')
+      .filter({ hasText: /^temp$/ })
+      .first(),
+  ).toBeVisible();
   await expect(page.locator('.tree-label').filter({ hasText: /^no$/ })).toHaveCount(0);
 
   // Removing the last pattern leaves the connection with none: the catch-all
