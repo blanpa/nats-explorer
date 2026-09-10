@@ -43,7 +43,10 @@ type DB struct {
 	written     atomic.Int64
 	count       atomic.Int64
 	stop        chan struct{}
-	done        sync.WaitGroup
+	// flushReq asks the writer to commit what it holds and answer when it
+	// has; the answer is what makes a flush a fact rather than a guess.
+	flushReq chan chan struct{}
+	done     sync.WaitGroup
 }
 
 type queued struct {
@@ -123,7 +126,10 @@ func OpenDB(path string, retention time.Duration) (*DB, error) {
 		db.Close()
 		return nil, err
 	}
-	d := &DB{db: db, path: path, rollupKeep: rollupRetention(os.Getenv), queue: make(chan *queued, dbQueue), stop: make(chan struct{})}
+	d := &DB{
+		db: db, path: path, rollupKeep: rollupRetention(os.Getenv),
+		queue: make(chan *queued, dbQueue), stop: make(chan struct{}), flushReq: make(chan chan struct{}),
+	}
 	d.retention.Store(int64(retention))
 	d.queueBudget.Store(DefaultQueueBytes)
 	d.fullText.Store(true)
@@ -215,6 +221,9 @@ func (d *DB) writer() {
 			if len(batch) == dbBatch {
 				flush()
 			}
+		case ack := <-d.flushReq:
+			flush()
+			close(ack)
 		case <-ticker.C:
 			flush()
 		case <-cleanup.C:
@@ -281,10 +290,23 @@ func nullable(b []byte) interface{} {
 // Flush blocks until everything queued so far has been written. For tests
 // and shutdown.
 func (d *DB) Flush() {
+	// Wait for the queue to reach the writer, then have it commit and say
+	// so. Sleeping for "long enough" instead makes every reader of the
+	// database a coin toss on a loaded machine.
 	for len(d.queue) > 0 {
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-d.stop:
+			return
+		default:
+			time.Sleep(time.Millisecond)
+		}
 	}
-	time.Sleep(dbFlushEvery + 50*time.Millisecond)
+	ack := make(chan struct{})
+	select {
+	case d.flushReq <- ack:
+		<-ack
+	case <-d.stop:
+	}
 }
 
 // Close stops the writer after draining the queue.
@@ -327,6 +349,30 @@ func (d *DB) RangePage(ctx context.Context, connID, subject string, branch bool,
 	}
 	defer rows.Close()
 	return scan(rows, connID)
+}
+
+// CountRange is how many messages a time range holds, without reading them.
+//
+// A view pages a range in as it is scrolled, which leaves it unable to say
+// how much it is looking at until the last page arrives -- and a number that
+// grows while you read it is worse than no number. The count comes from the
+// index alone: no payload is touched, so it costs a fraction of fetching the
+// rows it counts.
+func (d *DB) CountRange(ctx context.Context, connID, subject string, branch bool, from, to int64) (int64, error) {
+	where := `conn = ? AND ts BETWEEN ? AND ?`
+	args := []interface{}{connID, from, to}
+	if subject != "" {
+		if branch {
+			where += ` AND (subject = ? OR subject LIKE ? ESCAPE '\')`
+			args = append(args, subject, likePrefix(subject)+".%")
+		} else {
+			where += ` AND subject = ?`
+			args = append(args, subject)
+		}
+	}
+	var n int64
+	err := d.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE `+where, args...).Scan(&n)
+	return n, err
 }
 
 // Search finds recorded messages whose subject or payload matches q, newest

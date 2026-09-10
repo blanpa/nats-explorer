@@ -244,3 +244,75 @@ func TestServerRangePaging(t *testing.T) {
 		}
 	}
 }
+
+// A range says how many messages it holds with its first page, so a view
+// that pages as it is scrolled can show the real figure from the start
+// instead of a number that climbs while it is read.
+func TestServerRangeTotal(t *testing.T) {
+	ns := startNATS(t)
+	dir := t.TempDir()
+	srv := newTestServer(t, serverConfig{historyDB: filepath.Join(dir, "h.db"), historyManaged: true, historyRetention: time.Hour})
+	api := &apiClient{t: t, base: srv.URL}
+	api.do("POST", "/api/connect", map[string]interface{}{
+		"id": "t1", "name": "T", "servers": []string{ns.ClientURL()}, "authMethod": "none", "subscriptions": []string{"tot.>"},
+	}, nil)
+	defer api.do("POST", "/api/disconnect-all", nil, nil)
+
+	nc, err := nats.Connect(ns.ClientURL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nc.Close()
+	const total = 40
+	for i := 0; i < total; i++ {
+		nc.Publish("tot.a", []byte(fmt.Sprintf(`{"n":%d}`, i)))
+		nc.Publish("tot.a.below", []byte(fmt.Sprintf(`{"n":%d}`, i)))
+	}
+	nc.Flush()
+
+	type ranged struct {
+		Messages []struct {
+			Payload string `json:"payload"`
+		} `json:"messages"`
+		More  bool `json:"more"`
+		Total *int `json:"total"`
+	}
+	from := time.Now().Add(-time.Hour).UnixMilli()
+	to := time.Now().Add(time.Hour).UnixMilli()
+	url := func(extra string) string {
+		return fmt.Sprintf("/api/history/range?connId=t1&subject=tot.a&branch=1&from=%d&to=%d&limit=5%s", from, to, extra)
+	}
+
+	var page ranged
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		api.do("GET", url("&count=1"), nil, &page)
+		if page.Total != nil && *page.Total == 2*total {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if page.Total == nil || *page.Total != 2*total {
+		t.Fatalf("total = %v, want %d (the subject and everything below it)", page.Total, 2*total)
+	}
+	// The page itself is still the small one that was asked for: the count
+	// is what makes the number honest, not a bigger fetch.
+	if len(page.Messages) != 5 || !page.More {
+		t.Fatalf("page = %d messages, more=%v; want the requested 5 and more to follow", len(page.Messages), page.More)
+	}
+
+	// Without asking there is no count, so a page costs what it always did.
+	var plain ranged
+	api.do("GET", url(""), nil, &plain)
+	if plain.Total != nil {
+		t.Errorf("total = %v without count=1, want none", plain.Total)
+	}
+
+	// A payload filter decides per message, so only reading them can say how
+	// many are kept: the count is left out rather than guessed at.
+	var filtered ranged
+	api.do("GET", url("&count=1&expr=payload.n%20%3E%2020"), nil, &filtered)
+	if filtered.Total != nil {
+		t.Errorf("total = %v with an expression, want none", filtered.Total)
+	}
+}

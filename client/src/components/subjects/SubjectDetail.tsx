@@ -8,7 +8,7 @@ import { clearSubject, loadOlder, loadOlderBranch } from '../../lib/feed';
 import { byArrival, newerFirst, recentRate } from '../../lib/messages';
 import { useAsync } from '../../lib/useAsync';
 import { copyToClipboard, extractNumber, formatBytes, formatCount, formatTime, prettyJson, readSetting, writeSetting } from '../../lib/utils';
-import { HISTORY_RAIL_WIDTH, MAX_LOADED_MESSAGES, useBranchMessages, useLiveView, useStore, useSubjectMessages } from '../../store';
+import { HISTORY_RAIL_WIDTH, useBranchMessages, useLiveView, useStore, useSubjectMessages } from '../../store';
 import { Button, IconButton } from '../ui/Button';
 import { confirm } from '../ui/Dialog';
 import { Badge, EmptyState, HeaderDivider, menuClass, menuItemClass as itemClass, PaneHeader } from '../ui/misc';
@@ -34,6 +34,13 @@ import ChartPanel, { type ChartSettings, persistChartSettings, savedAgg, savedLa
 
 /** Messages per request, for the first page of a range and every one after. */
 const RANGE_PAGE = 2000;
+/**
+ * How far a range fills itself in before it waits to be scrolled. It is
+ * higher than the live view's ceiling because a range does not grow: the
+ * messages are read once and then sit there, where a live subject keeps
+ * arriving and every message is held with its payload.
+ */
+const RANGE_AUTOLOAD_MAX = 50_000;
 
 /** How many fields one chart panel takes. Past six the colours repeat and the legend stops being readable. */
 const MAX_CHART_FIELDS = 6;
@@ -93,7 +100,7 @@ function SingleSubjectView() {
   const canWrite = useCanWrite();
   // Messages of the chosen time range from the persistent history.
   const ranged = useAsync(
-    () => (subject && range ? api.getHistoryRange(subject, { from: range.from, to: range.to, branch: true, limit: RANGE_PAGE }) : null),
+    () => (subject && range ? api.getHistoryRange(subject, { from: range.from, to: range.to, branch: true, limit: RANGE_PAGE, count: true }) : null),
     [subject, range?.from, range?.to],
     { key: subject && range ? `range:${subject}:${range.from}:${range.to}` : undefined },
   );
@@ -107,7 +114,7 @@ function SingleSubjectView() {
   // cursor, so messages sharing a millisecond are not skipped.
   const loadOlderRange = useCallback(async () => {
     if (!subject || !range || !rangedData?.more || loadingOlderRange) return;
-    if (rangedData.messages.length >= MAX_LOADED_MESSAGES) return;
+    if (rangedData.messages.length >= RANGE_AUTOLOAD_MAX) return;
     const cursors = new Map<string, NatsMessage>();
     // Newest first, so the last message of a connection is its oldest.
     for (const m of rangedData.messages) if (m.connId) cursors.set(m.connId, m);
@@ -128,13 +135,23 @@ function SingleSubjectView() {
         ),
       );
       const older = pages.flatMap(p => p.messages);
-      setRangedData(prev => (prev ? { ...prev, messages: prev.messages.concat(older), more: pages.some(p => p.more) } : prev));
+      // A page that brings nothing while the server still says "more" would
+      // make the loop below spin forever; the empty page is the end.
+      const more = older.length > 0 && pages.some(p => p.more);
+      setRangedData(prev => (prev ? { ...prev, messages: prev.messages.concat(older), more } : prev));
     } catch (err) {
       toast.error('Older messages not loaded', errorMessage(err));
     } finally {
       setLoadingOlderRange(false);
     }
   }, [subject, range, rangedData, loadingOlderRange, setRangedData]);
+
+  // Picking a range means asking for that range, not for its first page. It
+  // fills itself in from here on: the count above it is the real one from
+  // the start, and scrolling is for reading rather than for loading.
+  useEffect(() => {
+    if (range && rangedData?.more && !loadingOlderRange && rangedData.messages.length < RANGE_AUTOLOAD_MAX) loadOlderRange();
+  }, [range, rangedData, loadingOlderRange, loadOlderRange]);
 
   // Reset per-subject UI state when the subject changes.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the reset belongs to a subject change, which the body itself does not read
@@ -237,6 +254,12 @@ function SingleSubjectView() {
       toast.error('Could not load the message', errorMessage(err));
     }
   };
+
+  const rangeLoaded = rangedAll.length;
+  // The count from the index, when the server was asked for one. A payload
+  // filter leaves it out: only reading the messages can say how many it keeps.
+  const rangeTotal = rangedData?.total ?? null;
+  const rangeFilling = !!(range && (loadingOlderRange || rangedData?.more));
 
   // An export asks for what was selected, not for what has been scrolled
   // into view: with a range active it pages the rest in first. Live, the
@@ -358,7 +381,14 @@ function SingleSubjectView() {
           ) : ranged.error ? (
             <span className="text-danger">{ranged.error}</span>
           ) : (
-            `${formatCount(ranged.data?.messages.length ?? 0)} messages, ${range.label}`
+            <>
+              {/* The total is the range's, not the loaded part's, so it does
+                  not climb while the pages arrive. */}
+              {rangeTotal !== null && rangeLoaded < rangeTotal
+                ? `${formatCount(rangeLoaded)} of ${formatCount(rangeTotal)} loaded`
+                : `${formatCount(rangeTotal ?? rangeLoaded)} messages, ${range.label}`}
+              {rangeFilling && <span className="text-accent ml-1">·</span>}
+            </>
           )}
         </span>
       )}

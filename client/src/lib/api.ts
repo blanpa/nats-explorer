@@ -132,7 +132,18 @@ export const api = {
    */
   getHistoryRange: (
     subject: string,
-    opts: { from: number; to?: number; branch?: boolean; limit?: number; connId?: string; expr?: string; beforeTs?: number; beforeSeq?: number },
+    opts: {
+      from: number;
+      to?: number;
+      branch?: boolean;
+      limit?: number;
+      connId?: string;
+      expr?: string;
+      beforeTs?: number;
+      beforeSeq?: number;
+      /** ask for the range's total as well; worth it once, with the first page */
+      count?: boolean;
+    },
   ) => {
     const p = new URLSearchParams({ subject, from: String(opts.from) });
     if (opts.to) p.set('to', String(opts.to));
@@ -144,6 +155,7 @@ export const api = {
       p.set('beforeTs', String(opts.beforeTs));
       p.set('beforeSeq', String(opts.beforeSeq ?? 0));
     }
+    if (opts.count) p.set('count', '1');
     return request<HistoryRangeResponse>(`/history/range?${p.toString()}`);
   },
   /** Newest recorded messages on a subject or below it whose subject or payload contains q. */

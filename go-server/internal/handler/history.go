@@ -138,7 +138,25 @@ func (h *HistoryHandler) Range(w http.ResponseWriter, r *http.Request) {
 			more = true
 		}
 	}
-	writeJSON(w, map[string]interface{}{"subject": subject, "from": from, "to": to, "messages": out, "more": more, "expr": r.URL.Query().Get("expr")})
+	resp := map[string]interface{}{"subject": subject, "from": from, "to": to, "messages": out, "more": more, "expr": r.URL.Query().Get("expr")}
+	// The total is asked for once, with the first page: a view that pages as
+	// it scrolls can then say how much it is looking at from the start
+	// instead of correcting the number upwards as pages arrive. It is left
+	// out when an expression is in play, because only reading the messages
+	// can say how many of them it keeps.
+	if r.URL.Query().Get("count") == "1" && prg == nil {
+		var total int64
+		for _, id := range ids {
+			n, err := db.CountRange(r.Context(), id, subject, branch, from, to)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			total += n
+		}
+		resp["total"] = total
+	}
+	writeJSON(w, resp)
 }
 
 // HistoryResponse is the answer to GET /api/history.

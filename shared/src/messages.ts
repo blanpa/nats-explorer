@@ -109,6 +109,14 @@ export interface HistoryRangeResponse {
   messages: NatsMessage[];
   /** another page before the oldest message returned may follow */
   more?: boolean;
+  /**
+   * How many messages the range holds in total, counted from the index and
+   * sent only when `count=1` was asked for. A view that pages as it is
+   * scrolled can then say what it is looking at from the first page, instead
+   * of showing a number that grows while it is read. Absent when a payload
+   * filter is in play: only reading the messages can say how many it keeps.
+   */
+  total?: number;
 }
 
 /** Size of the SQLite copy of the history. */

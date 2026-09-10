@@ -217,3 +217,59 @@ func TestRetentionForever(t *testing.T) {
 		t.Fatal("a one-second retention was accepted")
 	}
 }
+
+// A view that pages a range in as it is scrolled cannot say how much it is
+// looking at until the last page arrives, and a number that grows while it
+// is read is worse than no number. The count answers that from the index.
+func TestCountRange(t *testing.T) {
+	tee, p := persisting(t, PersistenceRequest{Enabled: true, Retention: time.Hour, FullText: true})
+	defer p.Close()
+	db := tee.DB()
+
+	base := time.Now().UnixMilli()
+	for i := range 30 {
+		rec := &message.Record{Subject: "a.b.c", Data: []byte("1"), Timestamp: base + int64(i), Sequence: uint64(i + 1)}
+		tee.Append("c1", rec)
+	}
+	for i := range 12 {
+		rec := &message.Record{Subject: "a.b", Data: []byte("1"), Timestamp: base + int64(i), Sequence: uint64(100 + i)}
+		tee.Append("c1", rec)
+	}
+	// Another connection's messages must not be counted into this one's.
+	tee.Append("c2", &message.Record{Subject: "a.b.c", Data: []byte("1"), Timestamp: base, Sequence: 1})
+	db.Flush()
+
+	ctx := context.Background()
+	to := base + 1000
+	cases := []struct {
+		name    string
+		subject string
+		branch  bool
+		from    int64
+		want    int64
+	}{
+		{"one subject", "a.b.c", false, 0, 30},
+		{"a subject and what is below it", "a.b", true, 0, 42},
+		{"the subject alone, not its children", "a.b", false, 0, 12},
+		{"every subject of the connection", "", false, 0, 42},
+		{"a window that starts after the messages", "a.b.c", false, to, 0},
+	}
+	for _, c := range cases {
+		got, err := db.CountRange(ctx, "c1", c.subject, c.branch, c.from, to)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if got != c.want {
+			t.Errorf("%s: count = %d, want %d", c.name, got, c.want)
+		}
+	}
+
+	// The count is the range's, so it follows the window and not the table.
+	half, err := db.CountRange(ctx, "c1", "a.b.c", false, 0, base+9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if half != 10 {
+		t.Errorf("count over the first ten milliseconds = %d, want 10", half)
+	}
+}
