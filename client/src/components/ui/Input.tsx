@@ -125,7 +125,13 @@ export function SearchInput({ className, suggestion, onAcceptSuggestion, ...rest
           is whatever the font does. It must carry the same box as the input
           for that to hold. */}
       {suggestion && (
-        <div aria-hidden className="absolute inset-0 pointer-events-none input input-sm pl-7 border-transparent bg-transparent overflow-hidden whitespace-pre">
+        <div
+          aria-hidden
+          // flex/items-center, because an input centres its text in the box
+          // by itself and a div does not: without this the ghost sits a few
+          // pixels high and reads as a superscript.
+          className="absolute inset-0 pointer-events-none input input-sm pl-7 border-transparent bg-transparent overflow-hidden whitespace-pre flex items-center"
+        >
           <span className="invisible">{typed}</span>
           <span className="text-faint">{suggestion}</span>
         </div>
