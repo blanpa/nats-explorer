@@ -1,6 +1,8 @@
+<img src="docs/assets/images/logo.png" alt="" width="80" height="80">
+
 # NATS Explorer
 
-A NATS management tool and message explorer inspired by MQTT Explorer, as a desktop app for Windows, macOS and Linux, or as a web UI served by a single Go binary. Browse subjects as a live tree, manage JetStream streams, Key-Value and Object Stores, run and repeat requests, watch servers, clusters and leaf nodes -- and keep the messages after the tab is closed.
+A NATS management tool and message explorer inspired by MQTT Explorer, as a desktop app for Windows, macOS and Linux, or as a web UI served by a single Go binary. Browse subjects as a live tree, manage JetStream streams, Key-Value and Object Stores, run and repeat requests, watch servers, clusters and leaf nodes -- keep the messages after the tab is closed, and get an answer when something does not arrive.
 
 Documentation: **[blanpa.github.io/nats-explorer](https://blanpa.github.io/nats-explorer/)** --
 [installation](https://blanpa.github.io/nats-explorer/installation.html),
@@ -81,11 +83,12 @@ Then add your server in the connection dialog. The [installation guide](https://
 ## What it does
 
 - **Subjects** -- a live tree of every subject a connection sees, virtualized and filterable, with the last value and the rate of each, and bookmarks for the ones worth coming back to
-- **Messages** -- JSON, raw and hex; headers; history; diff to the previous message; MessagePack, Protobuf and Avro decoded into the tree
-- **Charts** -- click a number in a payload to chart that field over time, drag across the chart to zoom into a stretch of it
-- **History that outlives the tab** -- an optional SQLite copy with a retention, time ranges, full-text search, and exports in six shapes including a `nats` CLI replay script
+- **Messages** -- JSON, raw and hex; history; diff to the previous message; MessagePack, Protobuf and Avro decoded into the tree; and the headers NATS sets explaining what they do
+- **Charts** -- click a number in a payload to chart that field over time, several at once with seven reductions, drag across a chart to zoom into a stretch of it, or chart the delay between the producer's clock and yours
+- **Debugging** -- what a subject would run into (subscriptions, streams, consumers, rules, schema), one message followed through the subjects it touched, the sequences a stream does not have, and the message a consumer is stuck on
+- **History that outlives the tab** -- an optional SQLite copy with a retention, time ranges from 15 minutes to forever, full-text search, and exports in six shapes including a `nats` CLI replay script
 - **JetStream** -- streams, consumers, messages and live tail; Key-Value buckets and Object Stores; JetStream domains for hub and leaf setups
-- **Filter and schema** -- a [CEL](https://cel.dev/) expression such as `payload.temp > 80` narrows tree, lists and charts; each subject's fields are read back from its own messages, with a marker when they drift
+- **Filter and schema** -- a [CEL](https://cel.dev/) expression such as `payload.temp > 80` narrows tree, lists and charts; each subject's fields are read back from its own messages, and a schema pinned as expected colours the history green or red
 - **Alerts** -- rules watch a subject pattern for a condition and keep firing with no browser open, with an optional webhook
 - **Requests** -- saved templates, request/reply, and repeated runs with latency percentiles and a histogram of the replies
 - **Monitoring and cluster** -- throughput history, every node of the cluster, the JetStream meta cluster and stream placement, and a Prometheus endpoint

@@ -40,6 +40,7 @@ Connect to `nats://localhost:4230` in the connection dialog.
 | `bun run test:e2e` | Playwright suite, one file per module in `e2e/` with shared helpers in `support.ts` against `http://localhost:3002` (`NE_URL`, `NATS_URL`, `PW_CHROME`) |
 | `scripts/build-desktop.sh` with `linux`, `windows` or `macos` | Desktop packages for one platform (`--docker` runs Linux and Windows in the builder image) |
 | `scripts/smoke-desktop.sh <binary>` | Launches a desktop build headless and checks API, UI, websocket and settings persistence |
+| `bun run --filter e2e screenshots` | Retakes the screenshots of the README and this site from a known dataset, against an explorer of its own (`NE_URL`, `NATS_URL`, `PW_CHROME`) |
 
 ---
 
