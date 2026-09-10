@@ -12,6 +12,7 @@ import { toast } from '../ui/Toast';
 import StreamDialog from './StreamDialog';
 import StreamMessages from './StreamMessages';
 import ConsumerList from './ConsumerList';
+import StreamGaps from './StreamGaps';
 import Replication from './Replication';
 import { useCanWrite } from '../../lib/auth';
 
@@ -148,6 +149,8 @@ export default function StreamDetail() {
                 className="[&>div:nth-child(2)]:text-sm"
               />
             </StatStrip>
+
+            <StreamGaps connId={connId} stream={stream.name} numDeleted={st.numDeleted ?? 0} />
 
             <div>
               <SectionTitle>Subjects</SectionTitle>

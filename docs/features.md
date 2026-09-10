@@ -153,6 +153,7 @@ Once a schema is pinned, every message in the history rail and in a branch list 
 - Consumers: list, create, delete, state, and pause/resume -- a paused consumer delivers nothing until its deadline and resumes by itself (NATS 2.11)
 - KV/Object backing streams (`KV_*`, `OBJ_*`) hidden by default behind a toggle
 - Jump to a point in time in a stream, export the page, replay it
+- Sequence gaps: the overview names the sequences between first and last that the stream does not have, as runs. A delete, a purge up to a sequence or a per-subject limit leaves a hole, and a consumer walking past it has not missed anything -- which is the thing that is hard to tell from outside
 - The message table's seq, time, subject and size columns are dragged to width by the line between the headers, which runs the length of the table while it is being aimed at; a double-click restores the default and the widths are remembered
 - The Seq header sorts the page newest first or oldest first
 - A number in an opened message charts that field over the last 500 to 50 000 messages of the stream, for the row's subject or across all subjects, read and downsampled by the backend (`GET /api/streams/{name}/series`)

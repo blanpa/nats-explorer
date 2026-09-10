@@ -32,6 +32,7 @@ import type {
   StreamMessagesPage,
   StreamSeries,
   MatchResponse,
+  StreamGaps,
 } from 'shared';
 import { type AuthInfo, useAuth } from './auth';
 import { serverUrl } from './basePath';
@@ -223,6 +224,8 @@ export const api = {
     request<{ success: boolean }>(withConn(`/streams/${enc(name)}/purge`, connId, { subject }), { method: 'POST' }),
   getStreamMessages: (connId: string, name: string, opts: { startSeq?: number; limit?: number } = {}) =>
     request<StreamMessagesPage>(withConn(`/streams/${enc(name)}/messages`, connId, opts)),
+  /** Which sequences between first and last the stream does not have. */
+  getStreamGaps: (connId: string, name: string) => request<StreamGaps>(withConn(`/streams/${enc(name)}/gaps`, connId)),
   /** The first stream sequence stored at or after a point in time. */
   getStreamSeqAt: (connId: string, name: string, timeMs: number) =>
     request<{ seq: number; timestamp: number; firstSeq: number; lastSeq: number }>(withConn(`/streams/${enc(name)}/seq`, connId, { time: timeMs })),

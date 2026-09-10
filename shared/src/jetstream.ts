@@ -226,3 +226,22 @@ export interface MatchResponse {
   jetStream: boolean;
   error?: string;
 }
+
+/** A run of sequences a stream does not have, inclusive. */
+export interface GapRange {
+  from: number;
+  to: number;
+}
+
+/** Where a stream's sequences are missing: GET /api/streams/{name}/gaps */
+export interface StreamGaps {
+  stream: string;
+  firstSeq: number;
+  lastSeq: number;
+  messages: number;
+  /** how many sequences between first and last are not stored */
+  missing: number;
+  ranges: GapRange[];
+  /** whether ranges covers all of them */
+  listed: boolean;
+}

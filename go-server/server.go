@@ -478,6 +478,8 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 		r.Delete("/streams/{name}", streamsHandler.Delete)
 		r.Post("/streams/{name}/purge", streamsHandler.Purge)
 		r.Get("/streams/{name}/messages", streamsHandler.GetMessages)
+		// Which sequences between first and last the stream does not have.
+		r.Get("/streams/{name}/gaps", streamsHandler.Gaps)
 		r.Get("/streams/{name}/series", streamsHandler.Series)
 		r.Get("/streams/{name}/seq", streamsHandler.SeqAtTime)
 		r.Delete("/streams/{name}/messages/{seq}", streamsHandler.DeleteMessage)
