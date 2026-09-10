@@ -655,7 +655,7 @@ func TestServerEndToEnd(t *testing.T) {
 func TestServerPersistentHistory(t *testing.T) {
 	ns := startNATS(t)
 	dbPath := filepath.Join(t.TempDir(), "history.db")
-	srv := newTestServer(t, serverConfig{historyDB: dbPath, historyRetention: time.Hour})
+	srv := newTestServer(t, serverConfig{historyDB: dbPath, historyRetention: time.Hour, historyManaged: true})
 	api := &apiClient{t: t, base: srv.URL}
 	var app struct {
 		HistoryDb        bool   `json:"historyDb"`

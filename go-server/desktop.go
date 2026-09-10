@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"testing/fstest"
 
+	"nats-explorer/internal/history"
 	"nats-explorer/internal/settings"
 
 	"github.com/wailsapp/wails/v2"
@@ -44,8 +45,17 @@ func main() {
 	}
 	log.Printf("NATS Explorer %s: settings in %s (secrets: %s)", version, store.Path(), store.SecretsName())
 
-	// Start the HTTP server (API + WebSocket) on a random port
-	app := createServer(frontendFS, serverConfig{mode: "desktop", settings: store, autoConnect: true})
+	// The history is persisted next to the settings and on by default: a
+	// desktop app that loses everything it recorded when it is closed is not
+	// what anyone expects. It can be switched off in the UI.
+	app := createServer(frontendFS, serverConfig{
+		mode:             "desktop",
+		settings:         store,
+		autoConnect:      true,
+		historyDB:        filepath.Join(storeDir, "history.db"),
+		historyRetention: history.DefaultRetention,
+		historyOn:        true,
+	})
 	// wails.Run blocks until the window is closed; the server goes with it.
 	defer app.Close()
 

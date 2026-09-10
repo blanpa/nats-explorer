@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -17,10 +20,12 @@ import (
 // deps is what a feature gets from the server: the shared services and a
 // way to hook into every subscription manager.
 type deps struct {
-	cfg      serverConfig
-	store    *connection.Store
-	history  history.Store
-	db       *history.DB // nil without HISTORY_DB
+	cfg     serverConfig
+	store   *connection.Store
+	history history.Store
+	// tee is the same history; tee.DB() is the SQLite copy when the
+	// persistent history is switched on, nil otherwise.
+	tee      *history.Tee
 	hub      *ws.Hub
 	auth     *auth.Service
 	settings *settings.Store // nil in browser-storage mode
@@ -74,4 +79,29 @@ var features []feature
 
 func registerFeature(f feature) {
 	features = append(features, f)
+}
+
+// featureJSON and featureError are how a feature answers. Shared because
+// every feature needs the same two lines.
+func featureJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(v)
+}
+
+func featureError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": strings.TrimSpace(msg)})
+}
+
+// decodeJSON reads a JSON body and answers the client on a bad one.
+func decodeJSON(w http.ResponseWriter, r *http.Request, out any) error {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err == nil {
+		err = json.Unmarshal(body, out)
+	}
+	if err != nil {
+		featureError(w, http.StatusBadRequest, err.Error())
+	}
+	return err
 }

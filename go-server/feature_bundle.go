@@ -175,13 +175,13 @@ func exportBundle(w http.ResponseWriter, r *http.Request, d *deps) {
 // from memory otherwise.
 func bundleMessages(ctx context.Context, d *deps, connID, subject string, from, to int64, limit int) ([]message.NatsMessage, []string) {
 	var errs []string
-	if d.db != nil && from > 0 {
+	if db := d.tee.DB(); db != nil && from > 0 {
 		var msgs []message.NatsMessage
 		var err error
 		if subject != "" {
-			msgs, err = d.db.Range(ctx, connID, subject, true, from, to, limit)
+			msgs, err = db.Range(ctx, connID, subject, true, from, to, limit)
 		} else {
-			msgs, err = d.db.RangeAll(ctx, connID, from, to, limit)
+			msgs, err = db.RangeAll(ctx, connID, from, to, limit)
 		}
 		if err == nil {
 			return msgs, nil
@@ -189,7 +189,7 @@ func bundleMessages(ctx context.Context, d *deps, connID, subject string, from, 
 		errs = append(errs, "history db: "+err.Error())
 	}
 	if subject != "" {
-		return d.history.Branch(connID, subject, limit), errs
+		return d.history.Branch(connID, subject, limit, 0), errs
 	}
 	if mem, ok := d.history.(interface {
 		Dump(string, int) []message.NatsMessage

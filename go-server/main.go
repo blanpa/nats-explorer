@@ -76,18 +76,30 @@ func main() {
 	}
 	debug.SetMemoryLimit(int64(cfg.historyBytes)*2 + 128<<20)
 	cfg.pprof = os.Getenv("PPROF") != ""
-	// HISTORY_DB keeps a copy of every message in SQLite, HISTORY_RETENTION
-	// (a Go duration, default 72h) bounds how far back it reaches.
+	// BASE_PATH serves everything under a prefix, for a reverse proxy that
+	// forwards /nats/ without stripping it.
+	cfg.basePath = normalizeBasePath(os.Getenv("BASE_PATH"))
+	if cfg.basePath != "" {
+		log.Printf("Serving under %s/", cfg.basePath)
+	}
+	// HISTORY_DB keeps a copy of every message in SQLite and pins it: the
+	// environment owns the setting and the UI only reports it.
+	// HISTORY_RETENTION (a Go duration, default 72h) bounds how far back it
+	// reaches; without HISTORY_DB it is the starting value of the setting.
+	cfg.historyRetention = history.DefaultRetention
+	if r := os.Getenv("HISTORY_RETENTION"); r != "" {
+		d, err := time.ParseDuration(r)
+		if err != nil || d <= 0 {
+			log.Fatalf("HISTORY_RETENTION: %q is not a duration", r)
+		}
+		cfg.historyRetention = d
+	}
+	// HISTORY_FTS=0 drops the word index of the persistent history: the
+	// writer is then several times faster and a search scans instead.
+	cfg.historyNoFullText = os.Getenv("HISTORY_FTS") == "0"
 	if path := os.Getenv("HISTORY_DB"); path != "" {
 		cfg.historyDB = path
-		cfg.historyRetention = 72 * time.Hour
-		if r := os.Getenv("HISTORY_RETENTION"); r != "" {
-			d, err := time.ParseDuration(r)
-			if err != nil || d <= 0 {
-				log.Fatalf("HISTORY_RETENTION: %q is not a duration", r)
-			}
-			cfg.historyRetention = d
-		}
+		cfg.historyManaged = true
 	}
 	// STORAGE_DIR turns a single-user server into a persistent installation:
 	// connections and templates live there instead of in the browser.
@@ -98,6 +110,11 @@ func main() {
 		}
 		log.Printf("UI settings stored in %s (secrets: %s)", store.Path(), store.SecretsName())
 		cfg.settings = store
+	}
+	// A server that keeps its state in a directory has a home for the
+	// history database too, so the UI can switch it on without HISTORY_DB.
+	if cfg.historyDB == "" && cfg.settings != nil {
+		cfg.historyDB = filepath.Join(cfg.settings.Dir(), "history.db")
 	}
 	app := createServer(staticFS, cfg)
 	defer app.Close()

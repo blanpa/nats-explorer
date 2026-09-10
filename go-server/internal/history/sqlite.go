@@ -22,22 +22,33 @@ import (
 // full queue drops rather than blocks. Rows older than the retention are
 // deleted once a minute.
 type DB struct {
-	db        *sql.DB
-	path      string
-	retention time.Duration
+	db   *sql.DB
+	path string
+	// retention is atomic: the UI can change it while the writer runs.
+	retention atomic.Int64
+	// fullText says whether the index behind the word search is being filled.
+	// Off, the writer is several times faster and a search falls back to a
+	// scan; the flag is read on the search path, so it is atomic.
+	fullText atomic.Bool
 	// rollupRetention outlives the messages: buckets are small.
 	rollupKeep time.Duration
 	queue      chan *queued
-	dropped    atomic.Int64
-	written    atomic.Int64
-	count      atomic.Int64
-	stop       chan struct{}
-	done       sync.WaitGroup
+	// queued bytes and their budget: the queue is bounded by memory, not by
+	// the number of messages in it.
+	queueBytes  atomic.Int64
+	queueBudget atomic.Int64
+	dropped     atomic.Int64
+	written     atomic.Int64
+	count       atomic.Int64
+	stop        chan struct{}
+	done        sync.WaitGroup
 }
 
 type queued struct {
 	conn string
 	rec  *message.Record
+	// size is what this entry counts against the queue budget.
+	size int64
 }
 
 // DBStats describes the persistent history.
@@ -54,10 +65,23 @@ type DBStats struct {
 }
 
 const (
-	dbQueue      = 1 << 16
+	// dbQueue is the number of pending records the channel can hold. The
+	// real limit is DefaultQueueBytes: counting messages says nothing about
+	// how much memory they are, and the two workloads that matter -- a
+	// firehose of small messages and a trickle of large ones -- sit at
+	// opposite ends of that.
+	dbQueue      = 1 << 20
 	dbBatch      = 2000
 	dbFlushEvery = 250 * time.Millisecond
 )
+
+// DefaultQueueBytes is how much of a burst the writer buffers before it
+// starts dropping. Disk is slower than the wire, so this is what decides
+// whether a burst reaches the database or only a part of it: 64 MB is about
+// 300 000 messages of 200 bytes, several seconds of a firehose. Beyond a
+// burst nothing helps -- a queue that keeps growing only postpones the loss
+// and pays for it in memory.
+const DefaultQueueBytes = 64 << 20
 
 // OpenDB opens or creates the database and starts the writer.
 func OpenDB(path string, retention time.Duration) (*DB, error) {
@@ -90,7 +114,10 @@ func OpenDB(path string, retention time.Duration) (*DB, error) {
 		db.Close()
 		return nil, err
 	}
-	d := &DB{db: db, path: path, retention: retention, rollupKeep: rollupRetention(os.Getenv), queue: make(chan *queued, dbQueue), stop: make(chan struct{})}
+	d := &DB{db: db, path: path, rollupKeep: rollupRetention(os.Getenv), queue: make(chan *queued, dbQueue), stop: make(chan struct{})}
+	d.retention.Store(int64(retention))
+	d.queueBudget.Store(DefaultQueueBytes)
+	d.fullText.Store(true)
 	var n int64
 	db.QueryRow(`SELECT COUNT(*) FROM messages`).Scan(&n)
 	d.count.Store(n)
@@ -99,14 +126,35 @@ func OpenDB(path string, retention time.Duration) (*DB, error) {
 	return d, nil
 }
 
-// Enqueue hands a record to the writer; a full queue drops it.
+// Enqueue hands a record to the writer. A full queue drops it rather than
+// blocking: the alternative is to stall the live feed and the tree for
+// everyone because a disk cannot keep up, and a dropped copy is counted and
+// shown while a stalled connection is not.
 func (d *DB) Enqueue(connID string, rec *message.Record) {
+	size := int64(len(rec.Data)) + int64(len(rec.Subject)) + queuedOverhead
+	if d.queueBytes.Add(size) > d.queueBudget.Load() {
+		d.queueBytes.Add(-size)
+		d.dropped.Add(1)
+		return
+	}
 	select {
-	case d.queue <- &queued{connID, rec}:
+	case d.queue <- &queued{connID, rec, size}:
 	default:
+		d.queueBytes.Add(-size)
 		d.dropped.Add(1)
 	}
 }
+
+// queuedOverhead is what a pending record costs beyond its payload: the
+// record itself, the queue entry and the pointer in the channel.
+const queuedOverhead = 128
+
+// SetQueueBytes changes how much of a burst is buffered. For tests and
+// benchmarks; the default suits the memory the history already uses.
+func (d *DB) SetQueueBytes(n int64) { d.queueBudget.Store(n) }
+
+// QueuedBytes is what is waiting to be written.
+func (d *DB) QueuedBytes() int64 { return d.queueBytes.Load() }
 
 func (d *DB) writer() {
 	defer d.done.Done()
@@ -127,6 +175,9 @@ func (d *DB) writer() {
 			d.count.Add(int64(len(batch)))
 		}
 		for i := range batch {
+			// The entry leaves the queue's budget only once it is written,
+			// so a slow writer cannot be handed more than it can hold.
+			d.queueBytes.Add(-batch[i].size)
 			batch[i] = nil
 		}
 		batch = batch[:0]
@@ -156,8 +207,8 @@ func (d *DB) writer() {
 			flush()
 		case <-cleanup.C:
 			flush()
-			if d.retention > 0 {
-				if res, err := d.db.Exec(`DELETE FROM messages WHERE ts < ?`, time.Now().Add(-d.retention).UnixMilli()); err == nil {
+			if keep := d.Retention(); keep > 0 {
+				if res, err := d.db.Exec(`DELETE FROM messages WHERE ts < ?`, time.Now().Add(-keep).UnixMilli()); err == nil {
 					if n, _ := res.RowsAffected(); n > 0 {
 						d.count.Add(-n)
 					}
@@ -227,8 +278,22 @@ func (d *DB) Close() error {
 // Range returns messages of a subject (and, with branch, everything below
 // it) between from and to (unix ms, inclusive), newest first, at most limit.
 func (d *DB) Range(ctx context.Context, connID, subject string, branch bool, from, to int64, limit int) ([]message.NatsMessage, error) {
+	return d.RangePage(ctx, connID, subject, branch, from, to, 0, 0, limit)
+}
+
+// RangePage is Range with a cursor: only messages older than (beforeTS,
+// beforeSeq) are returned, so a view can page backwards through a range
+// instead of asking for one ever larger limit. A zero beforeTS starts at the
+// newest message.
+func (d *DB) RangePage(ctx context.Context, connID, subject string, branch bool, from, to, beforeTS int64, beforeSeq uint64, limit int) ([]message.NatsMessage, error) {
 	where := `conn = ? AND ts BETWEEN ? AND ?`
 	args := []interface{}{connID, from, to}
+	if beforeTS > 0 {
+		// The rows are ordered by (ts, seq); the cursor is that pair, so
+		// messages sharing a millisecond are paged through and not skipped.
+		where += ` AND (ts < ? OR (ts = ? AND seq < ?))`
+		args = append(args, beforeTS, beforeTS, int64(beforeSeq))
+	}
 	if branch {
 		where += ` AND (subject = ? OR subject LIKE ? ESCAPE '\')`
 		args = append(args, subject, likePrefix(subject)+".%")
@@ -250,7 +315,18 @@ func (d *DB) Range(ctx context.Context, connID, subject string, branch bool, fro
 // full-text index answers word queries; anything it cannot express (a
 // fragment, punctuation only) falls back to a LIKE scan.
 func (d *DB) Search(ctx context.Context, connID, subject, q string, from, to int64, limit int) ([]message.NatsMessage, error) {
-	if strings.TrimSpace(q) != "" {
+	return d.SearchPage(ctx, connID, subject, q, from, to, 0, 0, limit)
+}
+
+// SearchPage is Search with a cursor, so the results page backwards the way
+// a range does.
+func (d *DB) SearchPage(ctx context.Context, connID, subject, q string, from, to, beforeTS int64, beforeSeq uint64, limit int) ([]message.NatsMessage, error) {
+	// Without the index the table holds whatever was written while it was on:
+	// asking it would answer with half the truth, which is worse than the
+	// scan below.
+	// The index has no cursor of its own, so a paged search scans -- which
+	// is the path a fragment takes anyway.
+	if d.fullText.Load() && beforeTS == 0 && strings.TrimSpace(q) != "" {
 		msgs, err := d.searchFTS(ctx, connID, subject, q, from, to, limit)
 		switch {
 		case err == nil && len(msgs) > 0:
@@ -268,6 +344,10 @@ func (d *DB) Search(ctx context.Context, connID, subject, q string, from, to int
 	needle := "%" + likePrefix(strings.ToLower(q)) + "%"
 	args := []interface{}{connID, from, to}
 	where := `conn = ? AND ts BETWEEN ? AND ?`
+	if beforeTS > 0 {
+		where += ` AND (ts < ? OR (ts = ? AND seq < ?))`
+		args = append(args, beforeTS, beforeTS, int64(beforeSeq))
+	}
 	if subject != "" {
 		where += ` AND (subject = ? OR subject LIKE ? ESCAPE '\')`
 		args = append(args, subject, likePrefix(subject)+".%")
@@ -284,6 +364,68 @@ func (d *DB) Search(ctx context.Context, connID, subject, q string, from, to int
 	}
 	defer rows.Close()
 	return scan(rows, connID)
+}
+
+// RecordedSubject is a subject the database holds messages for, with its
+// newest message. The message matters as much as the count: it is what the
+// tree shows as the preview and what the payload filter judges a subject by,
+// so a tree restored without it looks like one with missing data.
+type RecordedSubject struct {
+	Subject string
+	Count   int
+	// Last is the newest message, or nil when its payload was larger than
+	// MaxRestoredPayload -- the tree then knows the subject but not its value.
+	Last *message.Record
+}
+
+// MaxRestoredPayload bounds what a restore pulls back into memory per
+// subject. The tree keeps the newest message of every subject anyway; this
+// only stops a namespace of large payloads from being read in one go.
+const MaxRestoredPayload = 4 << 10
+
+// SubjectLoader is a history that can name the subjects it recorded for a
+// connection. The Tee implements it whenever a database is attached.
+type SubjectLoader interface {
+	RecordedSubjects(ctx context.Context, connID string, limit int) ([]RecordedSubject, error)
+}
+
+// RecordedSubjects lists the subjects of a connection with how many messages
+// each has, the largest first. It is what brings the subject tree back after
+// a restart: the messages are still on disk, so the tree should not start
+// empty and the counters should not start over.
+func (d *DB) RecordedSubjects(ctx context.Context, connID string, limit int) ([]RecordedSubject, error) {
+	// MAX(ts) picks the newest row per subject; the bare columns beside it
+	// come from that same row, which is what SQLite guarantees for a bare
+	// column next to min() or max().
+	rows, err := d.db.QueryContext(ctx, `SELECT subject, COUNT(*) AS n, MAX(ts) AS ts, seq,
+			CASE WHEN length(data) <= ? THEN data END AS data, headers
+		FROM messages WHERE conn = ? GROUP BY subject ORDER BY n DESC LIMIT ?`,
+		MaxRestoredPayload, connID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []RecordedSubject{}
+	for rows.Next() {
+		var (
+			rs      RecordedSubject
+			ts, seq int64
+			data    []byte
+			headers sql.NullString
+		)
+		if err := rows.Scan(&rs.Subject, &rs.Count, &ts, &seq, &data, &headers); err != nil {
+			return nil, err
+		}
+		if data != nil {
+			rec := &message.Record{Subject: rs.Subject, Data: data, Timestamp: ts, Sequence: uint64(seq)}
+			if headers.Valid {
+				json.Unmarshal([]byte(headers.String), &rec.Header)
+			}
+			rs.Last = rec
+		}
+		out = append(out, rs)
+	}
+	return out, rows.Err()
 }
 
 // Series returns the JSON messages of a subject in a time range, oldest
@@ -323,7 +465,7 @@ func scan(rows *sql.Rows, connID string) ([]message.NatsMessage, error) {
 
 // Stats reports the database size.
 func (d *DB) Stats() DBStats {
-	st := DBStats{Path: d.path, Dropped: d.dropped.Load(), Retention: d.retention.String(), Messages: d.count.Load()}
+	st := DBStats{Path: d.path, Dropped: d.dropped.Load(), Retention: d.Retention().String(), Messages: d.count.Load()}
 	d.db.QueryRow(`SELECT COALESCE(MIN(ts), 0) FROM messages`).Scan(&st.Oldest)
 	if fi, err := os.Stat(d.path); err == nil {
 		st.Bytes = fi.Size()
@@ -337,21 +479,85 @@ func (d *DB) Stats() DBStats {
 // Written reports how many messages the writer has committed.
 func (d *DB) Written() int64 { return d.written.Load() }
 
+// Path is the file the database lives in.
+func (d *DB) Path() string { return d.path }
+
+// Retention is how far back the database is kept.
+func (d *DB) Retention() time.Duration { return time.Duration(d.retention.Load()) }
+
+// SetRetention changes it; the writer applies it on its next cleanup tick,
+// so nothing has to be reopened.
+func (d *DB) SetRetention(keep time.Duration) { d.retention.Store(int64(keep)) }
+
+// FullText reports whether the word index is being filled.
+func (d *DB) FullText() bool { return d.fullText.Load() }
+
+// SetFullText turns the index on or off. Turning it on rebuilds it from the
+// messages already stored; turning it off empties it, because a half-filled
+// index would answer searches with a subset and call it the result.
+func (d *DB) SetFullText(on bool) error {
+	if d.fullText.Load() == on {
+		return nil
+	}
+	// Nothing may be written while the index changes underneath.
+	d.Flush()
+	if err := setFTSTrigger(d.db, on); err != nil {
+		return err
+	}
+	stmt := `INSERT INTO messages_fts(messages_fts) VALUES ('delete-all')`
+	if on {
+		stmt = `INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')`
+	}
+	if _, err := d.db.Exec(stmt); err != nil {
+		return err
+	}
+	d.fullText.Store(on)
+	return nil
+}
+
 // Tee is a Store that keeps the in-memory store as the live source and
-// copies every record to the database.
+// copies every record to the database. The database is optional and can be
+// opened and closed while the server runs (it is a setting, not only an
+// environment variable), so it sits behind an atomic pointer that the hot
+// path reads without a lock.
 type Tee struct {
 	*MemStore
-	DB *DB
+	db atomic.Pointer[DB]
 }
+
+// NewTee wraps a memory store; without a database it behaves like one.
+func NewTee(mem *MemStore) *Tee { return &Tee{MemStore: mem} }
+
+// DB returns the database messages are copied to, or nil when the history
+// is memory-only.
+func (t *Tee) DB() *DB { return t.db.Load() }
+
+// SetDB installs db (nil detaches) and returns what was there before. The
+// caller closes the old one.
+func (t *Tee) SetDB(db *DB) *DB { return t.db.Swap(db) }
 
 func (t *Tee) Append(connID string, rec *message.Record) {
 	t.MemStore.Append(connID, rec)
-	t.DB.Enqueue(connID, rec)
+	if db := t.db.Load(); db != nil {
+		db.Enqueue(connID, rec)
+	}
+}
+
+// RecordedSubjects answers from the database; without one the history is
+// memory-only and there is nothing to bring back.
+func (t *Tee) RecordedSubjects(ctx context.Context, connID string, limit int) ([]RecordedSubject, error) {
+	db := t.db.Load()
+	if db == nil {
+		return nil, nil
+	}
+	return db.RecordedSubjects(ctx, connID, limit)
 }
 
 func (t *Tee) Stats(connID string) Stats {
 	st := t.MemStore.Stats(connID)
-	db := t.DB.Stats()
-	st.DB = &db
+	if db := t.db.Load(); db != nil {
+		s := db.Stats()
+		st.DB = &s
+	}
 	return st
 }

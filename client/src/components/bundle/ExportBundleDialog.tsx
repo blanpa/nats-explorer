@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Download } from 'lucide-react';
 import { bundleUrl } from '../../lib/api.bundle';
-import { appInfo } from '../../lib/storage';
+import { useStore } from '../../store';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
 import { Field, Input, Select } from '../ui/Input';
@@ -20,7 +20,8 @@ const RANGES: { id: string; label: string; ms: number }[] = [
  * the system. The download link carries the session cookie.
  */
 export default function ExportBundleDialog({ connId, onClose, subject: initialSubject = '' }: { connId: string; onClose: () => void; subject?: string }) {
-  const [range, setRange] = useState(appInfo.historyDb ? '1h' : 'memory');
+  const historyDb = useStore(s => s.historyDb);
+  const [range, setRange] = useState(historyDb ? '1h' : 'memory');
   const [subject, setSubject] = useState(initialSubject);
   const chosen = RANGES.find(r => r.id === range) ?? RANGES[0];
   const from = chosen.ms ? Date.now() - chosen.ms : 0;
@@ -52,10 +53,10 @@ export default function ExportBundleDialog({ connId, onClose, subject: initialSu
       }
     >
       <div className="flex flex-col gap-3">
-        <Field label="Range" hint={appInfo.historyDb ? undefined : 'Without a persistent history only what is in memory can be exported.'}>
+        <Field label="Range" hint={historyDb ? undefined : 'Without a persistent history only what is in memory can be exported.'}>
           <Select value={range} onChange={e => setRange(e.target.value)}>
             {RANGES.map(r => (
-              <option key={r.id} value={r.id} disabled={!appInfo.historyDb && r.ms > 0}>
+              <option key={r.id} value={r.id} disabled={!historyDb && r.ms > 0}>
                 {r.label}
               </option>
             ))}

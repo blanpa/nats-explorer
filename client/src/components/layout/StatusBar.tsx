@@ -8,6 +8,7 @@ export default function StatusBar() {
   const active = useActiveConnection();
   const totalSubjects = useStore(s => s.totalSubjects);
   const stats = useStore(s => s.subscriptionStats);
+  const setSettingsOpen = useStore(s => s.setSettingsOpen);
 
   let throttled = 0;
   let received = 0;
@@ -46,19 +47,25 @@ export default function StatusBar() {
           <span className="font-mono tabular-nums" title="Messages per second received on the server side">
             {formatNumber(Math.round(rate))} msg/s
           </span>
-          <span
-            className="font-mono tabular-nums text-faint hidden lg:inline"
-            title="Recent messages kept on the server; the selected subject is loaded from here"
+          {/* Both figures open the setting behind them: how much history is
+              kept, and whether it survives a restart. */}
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            className="font-mono tabular-nums text-faint hover:text-fg hidden lg:inline"
+            title={`Recent messages kept on the server; the selected subject is loaded from here.${db ? '' : ' Not kept across restarts -- click to change.'}`}
           >
             {formatBytes(historyBytes)} history
-          </span>
+          </button>
           {db && (
-            <span
-              className={cn('font-mono tabular-nums hidden lg:inline', db.dropped > 0 ? 'text-warn' : 'text-faint')}
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className={cn('font-mono tabular-nums hidden lg:inline hover:text-fg', db.dropped > 0 ? 'text-warn' : 'text-faint')}
               title={`SQLite copy of the history, retention ${db.retention}${db.dropped > 0 ? `; ${formatNumber(db.dropped)} messages not persisted because the writer fell behind` : ''}`}
             >
               {formatBytes(db.bytes)} on disk
-            </span>
+            </button>
           )}
           {throttled > 0 && (
             <span

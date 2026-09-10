@@ -86,6 +86,15 @@ func (s *Store) All() (map[string]json.RawMessage, error) {
 	return out, nil
 }
 
+// Get returns one raw entry. Connection secrets are not merged back in --
+// All does that; this is for server-side settings that live in the same file.
+func (s *Store) Get(key string) (json.RawMessage, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := s.doc.Entries[key]
+	return v, ok
+}
+
 // Set stores one entry. Values must be valid JSON.
 func (s *Store) Set(key string, value json.RawMessage) error {
 	if !keyPattern.MatchString(key) {

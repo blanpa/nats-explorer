@@ -5,6 +5,8 @@
  * localStorage, and every write goes to both. Reads therefore stay synchronous
  * everywhere.
  */
+
+import { serverUrl } from './basePath';
 export interface AppInfo {
   mode: 'server' | 'desktop';
   storage: 'browser' | 'file';
@@ -79,7 +81,7 @@ async function flush() {
   pending.clear();
   for (const [key, value] of batch) {
     try {
-      const res = await fetch(`/api/settings/${encodeURIComponent(key)}`, { method: 'PUT', headers: headers(), body: JSON.stringify(value) });
+      const res = await fetch(serverUrl(`/api/settings/${encodeURIComponent(key)}`), { method: 'PUT', headers: headers(), body: JSON.stringify(value) });
       if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     } catch (err) {
       onError?.(`Could not save ${key}: ${(err as Error).message}`);
@@ -106,14 +108,14 @@ export function persist(key: string, value: unknown): void {
  */
 export async function bootstrapStorage(): Promise<boolean> {
   try {
-    const res = await fetch('/api/app');
+    const res = await fetch(serverUrl('/api/app'));
     if (!res.ok) return true;
     Object.assign(appInfo, await res.json());
   } catch {
     return true;
   }
   if (appInfo.storage !== 'file') return true;
-  const res = await fetch('/api/settings', { headers: headers() }).catch(() => null);
+  const res = await fetch(serverUrl('/api/settings'), { headers: headers() }).catch(() => null);
   if (!res) return true;
   if (res.status === 401) return false;
   if (!res.ok) return true;

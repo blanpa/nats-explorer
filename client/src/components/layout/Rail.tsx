@@ -1,4 +1,4 @@
-import { Activity, Archive, Bell, KeyRound, Layers, Moon, Network, Radio, ScrollText, Send, Server, Sun, type LucideIcon } from 'lucide-react';
+import { Activity, Archive, Bell, KeyRound, Layers, Moon, Network, Radio, ScrollText, Send, Server, Settings, Sun, type LucideIcon } from 'lucide-react';
 import { MODULES, useStore, type Module } from '../../store';
 import { useAlerts, worstSeverity } from '../../store/alerts';
 import { Tooltip } from '../ui/misc';
@@ -24,6 +24,7 @@ export default function Rail() {
   const setModule = useStore(s => s.setModule);
   const theme = useStore(s => s.theme);
   const toggleTheme = useStore(s => s.toggleTheme);
+  const setSettingsOpen = useStore(s => s.setSettingsOpen);
 
   return (
     <nav className="w-12 shrink-0 flex flex-col items-center py-2 gap-1 bg-canvas border-r border-line" aria-label="Modules">
@@ -60,6 +61,17 @@ export default function Rail() {
       })}
 
       <div className="flex-1" />
+
+      <Tooltip content="Settings">
+        <button
+          type="button"
+          onClick={() => setSettingsOpen(true)}
+          aria-label="Settings"
+          className="w-9 h-9 rounded flex items-center justify-center text-muted hover:text-fg hover:bg-field transition-colors"
+        >
+          <Settings size={17} strokeWidth={1.9} />
+        </button>
+      </Tooltip>
 
       <Tooltip content={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>
         <button

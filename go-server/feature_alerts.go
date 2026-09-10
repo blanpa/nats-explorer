@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -52,7 +51,7 @@ func init() {
 
 			save := func(w http.ResponseWriter, rules []alerts.Rule) bool {
 				if err := engine.SetRules(rules); err != nil {
-					alertsError(w, http.StatusBadRequest, err.Error())
+					featureError(w, http.StatusBadRequest, err.Error())
 					return false
 				}
 				saveAlertRules(d, rules)
@@ -61,36 +60,36 @@ func init() {
 			}
 
 			r.Get("/alerts", func(w http.ResponseWriter, req *http.Request) {
-				alertsJSON(w, map[string]interface{}{"active": engine.Active()})
+				featureJSON(w, map[string]interface{}{"active": engine.Active()})
 			})
 			r.Get("/alerts/rules", func(w http.ResponseWriter, req *http.Request) {
-				alertsJSON(w, map[string]interface{}{"rules": engine.Rules()})
+				featureJSON(w, map[string]interface{}{"rules": engine.Rules()})
 			})
 			r.Get("/alerts/events", func(w http.ResponseWriter, req *http.Request) {
 				limit := alertsEventLimit
 				if n, err := strconv.Atoi(req.URL.Query().Get("limit")); err == nil && n > 0 {
 					limit = min(n, 1000)
 				}
-				alertsJSON(w, map[string]interface{}{"events": engine.Events(limit)})
+				featureJSON(w, map[string]interface{}{"events": engine.Events(limit)})
 			})
 
 			r.Put("/alerts/rules", func(w http.ResponseWriter, req *http.Request) {
 				var body []alerts.Rule
 				if err := json.NewDecoder(http.MaxBytesReader(w, req.Body, 1<<20)).Decode(&body); err != nil {
-					alertsError(w, http.StatusBadRequest, "invalid JSON body")
+					featureError(w, http.StatusBadRequest, "invalid JSON body")
 					return
 				}
 				if !save(w, body) {
 					return
 				}
-				alertsJSON(w, map[string]interface{}{"rules": engine.Rules()})
+				featureJSON(w, map[string]interface{}{"rules": engine.Rules()})
 			})
 
 			r.Put("/alerts/rules/{id}", func(w http.ResponseWriter, req *http.Request) {
 				id := chi.URLParam(req, "id")
 				var rule alerts.Rule
 				if err := json.NewDecoder(http.MaxBytesReader(w, req.Body, 1<<20)).Decode(&rule); err != nil {
-					alertsError(w, http.StatusBadRequest, "invalid JSON body")
+					featureError(w, http.StatusBadRequest, "invalid JSON body")
 					return
 				}
 				rule.ID = id
@@ -109,7 +108,7 @@ func init() {
 				if !save(w, rules) {
 					return
 				}
-				alertsJSON(w, rule)
+				featureJSON(w, rule)
 			})
 
 			r.Delete("/alerts/rules/{id}", func(w http.ResponseWriter, req *http.Request) {
@@ -122,7 +121,7 @@ func init() {
 					}
 				}
 				if len(out) == len(rules) {
-					alertsError(w, http.StatusNotFound, "no such rule")
+					featureError(w, http.StatusNotFound, "no such rule")
 					return
 				}
 				if !save(w, out) {
@@ -136,19 +135,19 @@ func init() {
 			r.Post("/alerts/rules/{id}/test", func(w http.ResponseWriter, req *http.Request) {
 				var rule alerts.Rule
 				if err := json.NewDecoder(http.MaxBytesReader(w, req.Body, 1<<20)).Decode(&rule); err != nil {
-					alertsError(w, http.StatusBadRequest, "invalid JSON body")
+					featureError(w, http.StatusBadRequest, "invalid JSON body")
 					return
 				}
 				rule.ID = chi.URLParam(req, "id")
 				if err := alerts.Validate(&rule); err != nil {
-					alertsError(w, http.StatusBadRequest, err.Error())
+					featureError(w, http.StatusBadRequest, err.Error())
 					return
 				}
 				var prog *filter.Program
 				if rule.Expr != "" {
 					p, err := filter.Compile(rule.Expr)
 					if err != nil {
-						alertsError(w, http.StatusBadRequest, err.Error())
+						featureError(w, http.StatusBadRequest, err.Error())
 						return
 					}
 					prog = p
@@ -162,7 +161,7 @@ func init() {
 				if len(sampled) == 0 {
 					out["note"] = "nothing recorded yet for this pattern; the rule still applies to new messages"
 				}
-				alertsJSON(w, out)
+				featureJSON(w, out)
 			})
 		},
 	})
@@ -173,7 +172,7 @@ func init() {
 func testAlertRule(d *deps, rule alerts.Rule, prog *filter.Program) (sampled, matched []message.NatsMessage) {
 	for _, prefix := range alertSamplePrefixes(d, rule.Pattern) {
 		for _, st := range d.store.AllStatuses() {
-			for _, m := range d.history.Search(st.ID, prefix, "", alertsTestLimit) {
+			for _, m := range d.history.Search(st.ID, prefix, "", alertsTestLimit, 0) {
 				if !alerts.MatchSubject(rule.Pattern, m.Subject) {
 					continue
 				}
@@ -240,15 +239,4 @@ func saveAlertRules(d *deps, rules []alerts.Rule) {
 	if err := d.settings.Set(alertsKey, raw); err != nil {
 		log.Printf("alerts: cannot save rules: %v", err)
 	}
-}
-
-func alertsJSON(w http.ResponseWriter, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
-}
-
-func alertsError(w http.ResponseWriter, status int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"error": strings.TrimSpace(msg)})
 }

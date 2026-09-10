@@ -58,9 +58,9 @@ func TestDBRangeSearchSeriesAndRetention(t *testing.T) {
 	}
 
 	// Retention: rows older than the window go away at cleanup.
-	db.retention = time.Millisecond
+	db.SetRetention(time.Millisecond)
 	time.Sleep(5 * time.Millisecond)
-	if res, err := db.db.Exec(`DELETE FROM messages WHERE ts < ?`, time.Now().Add(-db.retention).UnixMilli()); err == nil {
+	if res, err := db.db.Exec(`DELETE FROM messages WHERE ts < ?`, time.Now().Add(-db.Retention()).UnixMilli()); err == nil {
 		n, _ := res.RowsAffected()
 		db.count.Add(-n)
 	}
@@ -75,7 +75,8 @@ func TestTeeKeepsMemoryLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	s := &Tee{MemStore: NewMemStore(0, 0), DB: db}
+	s := NewTee(NewMemStore(0, 0))
+	s.SetDB(db)
 	s.Append("c", &message.Record{Subject: "a", Data: []byte("x"), Timestamp: 1, Sequence: 1})
 	if got := s.Subject("c", "a", 10, 0); len(got) != 1 {
 		t.Fatalf("memory side = %+v", got)

@@ -20,6 +20,38 @@ import (
 const ftsSchemaVersion = 2
 
 // ensureFTS creates the index and, on an existing database, fills it once.
+// The index is what makes a word search over millions of persisted messages
+// instant, and it is also the most expensive part of writing them: the
+// AFTER INSERT trigger tokenises the subject and the whole payload of every
+// message. Measured on a 200-byte payload it costs about three quarters of
+// the writer's throughput (see BenchmarkWriterWithFTS), so an installation
+// that records a firehose and searches by subject can switch it off and keep
+// the scan fallback.
+
+// setFTSTrigger creates or drops the triggers that keep the index in step
+// with the messages. Both go together: an index that is not filled must not
+// be told about deletions either, because FTS5 rejects the removal of a row
+// it never indexed -- and that error would fail the delete that carried it.
+func setFTSTrigger(db *sql.DB, on bool) error {
+	if !on {
+		for _, stmt := range []string{`DROP TRIGGER IF EXISTS messages_ai`, `DROP TRIGGER IF EXISTS messages_ad`} {
+			if _, err := db.Exec(stmt); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	_, err := db.Exec(`
+		CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+			INSERT INTO messages_fts(rowid, subject, body)
+			VALUES (new.id, new.subject, CASE WHEN new.kind = 'binary' THEN '' ELSE CAST(new.data AS TEXT) END);
+		END;
+		CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+			INSERT INTO messages_fts(messages_fts, rowid, subject, body) VALUES ('delete', old.id, old.subject, '');
+		END;`)
+	return err
+}
+
 func ensureFTS(db *sql.DB) error {
 	var version int
 	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {

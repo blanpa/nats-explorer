@@ -34,7 +34,7 @@ func TestServerCloseStopsGoroutines(t *testing.T) {
 
 	dbPath := filepath.Join(t.TempDir(), "history.db")
 	// Built by hand, not through newTestServer: this test owns the shutdown.
-	app := createServer(nil, serverConfig{historyDB: dbPath, historyRetention: time.Hour})
+	app := createServer(nil, serverConfig{historyDB: dbPath, historyRetention: time.Hour, historyManaged: true})
 	srv := httptest.NewServer(app)
 	api := &apiClient{t: t, base: srv.URL}
 	api.do("POST", "/api/connect", map[string]interface{}{
