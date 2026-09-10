@@ -119,7 +119,17 @@ export const api = {
   // Message history recorded by the backend
   getHistory: (
     subject: string,
-    opts: { connId?: string; limit?: number; branchLimit?: number; before?: number; branchBefore?: number; expr?: string } = {},
+    opts: {
+      connId?: string;
+      limit?: number;
+      branchLimit?: number;
+      /** page backwards from this sequence, with beforeTs the time of the same message */
+      before?: number;
+      beforeTs?: number;
+      branchBefore?: number;
+      branchBeforeTs?: number;
+      expr?: string;
+    } = {},
   ) => {
     const q = new URLSearchParams({ subject });
     for (const [k, val] of Object.entries(opts)) if (val !== undefined) q.set(k, String(val));

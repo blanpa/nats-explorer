@@ -16,6 +16,8 @@ interface Props {
   loadingOlder?: boolean;
   /** nothing older is left to fetch */
   atOldest?: boolean;
+  /** the view is full: what is older is recorded, this list just cannot hold it */
+  atCap?: boolean;
   /** width in pixels; the pane is draggable */
   width: number;
 }
@@ -25,7 +27,7 @@ interface Props {
  * rendered newest first and pages backwards as it is scrolled, so the list
  * is not limited to what the first request brought.
  */
-export default function HistoryRail({ messages, active, onPick, onLoadOlder, loadingOlder, atOldest, width }: Props) {
+export default function HistoryRail({ messages, active, onPick, onLoadOlder, loadingOlder, atOldest, atCap, width }: Props) {
   const paging = !!onLoadOlder;
   return (
     <div className="shrink-0 border-r border-line flex flex-col min-h-0" style={{ width }}>
@@ -45,6 +47,10 @@ export default function HistoryRail({ messages, active, onPick, onLoadOlder, loa
                 <>
                   <Loader2 size={12} className="animate-spin" /> Loading older…
                 </>
+              ) : atCap ? (
+                // "No older messages" would be a lie here: the list is full,
+                // and a time range is how to reach past it.
+                <span title="Pick a time range to read further back">{`${formatCount(messages.length)} loaded, as many as this list holds`}</span>
               ) : atOldest ? (
                 'No older messages'
               ) : (

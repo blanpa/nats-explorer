@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -219,6 +220,10 @@ func (h *HistoryHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// The branch is its own list with its own cursor: it merges every
 	// subject below the node, so it runs out at a different point.
 	branchBefore, _ := strconv.ParseUint(r.URL.Query().Get("branchBefore"), 10, 64)
+	// The timestamp of the same cursor, for reading on past the edge of
+	// memory; see olderOnDisk for why the sequence alone will not do.
+	beforeTS, _ := strconv.ParseInt(r.URL.Query().Get("beforeTs"), 10, 64)
+	branchBeforeTS, _ := strconv.ParseInt(r.URL.Query().Get("branchBeforeTs"), 10, 64)
 	prg, err := exprParam(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -226,12 +231,28 @@ func (h *HistoryHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ids := h.connIDs(r)
+	db := h.db()
 	resp := HistoryResponse{Subject: subject, Messages: []message.NatsMessage{}, Branch: []message.NatsMessage{}}
 	scan := scanLimit(limit, prg, maxSubjectLimit)
 	for _, id := range ids {
-		msgs := h.History.Subject(id, subject, scan, before)
+		// Memory pages by sequence; the cursor also carries the time, and
+		// both have to hold. See olderThan.
+		msgs := olderThan(h.History.Subject(id, subject, scan, before), beforeTS, before)
 		// A full page means the store had more before the cursor.
-		resp.More = resp.More || len(msgs) == scan
+		more := len(msgs) == scan
+		if !more {
+			// Memory ran out. What is older is on disk, if a disk is kept.
+			ts, seq := beforeTS, before
+			if len(msgs) > 0 {
+				ts, seq = msgs[0].Timestamp, msgs[0].Sequence
+			}
+			var older []message.NatsMessage
+			older, more = h.olderOnDisk(r.Context(), db, id, subject, false, ts, seq, scan-len(msgs))
+			// The database answers newest first and this list is oldest
+			// first, so the page turns around and goes in front.
+			msgs = append(reversed(older), msgs...)
+		}
+		resp.More = resp.More || more
 		if prg != nil {
 			// Oldest first here, so keep the newest matches, not the first.
 			msgs = keepNewest(prg, msgs, limit)
@@ -239,8 +260,19 @@ func (h *HistoryHandler) Get(w http.ResponseWriter, r *http.Request) {
 		resp.Messages = append(resp.Messages, msgs...)
 		if branchLimit > 0 {
 			branchScan := scanLimit(branchLimit, prg, maxBranchLimit)
-			below := h.History.Branch(id, subject, branchScan, branchBefore)
-			resp.BranchMore = resp.BranchMore || len(below) == branchScan
+			below := olderThan(h.History.Branch(id, subject, branchScan, branchBefore), branchBeforeTS, branchBefore)
+			branchMore := len(below) == branchScan
+			if !branchMore {
+				ts, seq := branchBeforeTS, branchBefore
+				if n := len(below); n > 0 {
+					// Newest first, so the last one is the cursor.
+					ts, seq = below[n-1].Timestamp, below[n-1].Sequence
+				}
+				var older []message.NatsMessage
+				older, branchMore = h.olderOnDisk(r.Context(), db, id, subject, true, ts, seq, branchScan-len(below))
+				below = append(below, older...)
+			}
+			resp.BranchMore = resp.BranchMore || branchMore
 			resp.Branch = append(resp.Branch, filter.Keep(prg, below, branchLimit)...)
 		}
 	}
@@ -257,6 +289,83 @@ func (h *HistoryHandler) Get(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, resp)
+}
+
+/**
+ * olderOnDisk continues a backward page in the database, for a list that has
+ * reached the edge of what memory keeps.
+ *
+ * Memory holds the last few thousand messages of a subject, and a byte
+ * budget shared with every other subject cuts a busy one to far fewer -- on
+ * a running demo, 2 083 of 14 336. Everything before that is only on disk,
+ * and a live view that stopped at the memory edge said "no older messages"
+ * about messages it had recorded itself.
+ *
+ * The cursor is a timestamp and a sequence, not the sequence alone: sequence
+ * numbers count from one again every time a connection is opened, so a
+ * database spanning two runs holds several messages numbered 2. Ordered by
+ * time first, the pages still line up across a restart.
+ *
+ * It reads one row more than it returns, and that row is the answer to
+ * "is there more": on disk the question can be answered outright, so the
+ * view is not sent back for a page that turns out to be empty.
+ */
+func (h *HistoryHandler) olderOnDisk(
+	ctx context.Context, db *history.DB, connID, subject string, branch bool, ts int64, seq uint64, limit int,
+) (msgs []message.NatsMessage, more bool) {
+	if db == nil || limit <= 0 {
+		return nil, false
+	}
+	// Without a cursor there is nothing above to page from: read from the
+	// newest message down, which is what opening a subject that only the
+	// database remembers asks for.
+	to := ts
+	if to == 0 {
+		to = time.Now().UnixMilli()
+	}
+	msgs, err := db.RangePage(ctx, connID, subject, branch, 0, to, ts, seq, limit+1)
+	if err != nil {
+		// What memory gave is still a page: a failed read on disk narrows
+		// the answer, it does not break it.
+		log.Printf("history page from disk %s %s: %v", connID, subject, err)
+		return nil, false
+	}
+	if len(msgs) > limit {
+		return msgs[:limit], true
+	}
+	return msgs, false
+}
+
+/**
+ * olderThan keeps the messages before the cursor (timestamp, sequence). A
+ * zero timestamp means there is no cursor and nothing to cut.
+ *
+ * The memory store pages by sequence alone, and sequence numbers start over
+ * with every reconnect. So a cursor taken from a message of an earlier run
+ * -- which is what paging into the database hands back -- is a larger number
+ * than anything memory holds of the current one, and memory would answer a
+ * request for older messages with its newest. The time settles it.
+ */
+func olderThan(msgs []message.NatsMessage, ts int64, seq uint64) []message.NatsMessage {
+	if ts == 0 {
+		return msgs
+	}
+	out := msgs[:0:0]
+	for i := range msgs {
+		if m := &msgs[i]; m.Timestamp < ts || (m.Timestamp == ts && m.Sequence < seq) {
+			out = append(out, *m)
+		}
+	}
+	return out
+}
+
+// reversed turns a newest-first page around, without touching the original.
+func reversed(msgs []message.NatsMessage) []message.NatsMessage {
+	out := make([]message.NatsMessage, len(msgs))
+	for i, m := range msgs {
+		out[len(msgs)-1-i] = m
+	}
+	return out
 }
 
 // keepNewest filters an oldest-first list and keeps the last matches.

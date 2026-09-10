@@ -8,7 +8,7 @@ import { clearSubject, loadOlder, loadOlderBranch } from '../../lib/feed';
 import { byArrival, newerFirst, recentRate } from '../../lib/messages';
 import { useAsync } from '../../lib/useAsync';
 import { copyToClipboard, extractNumber, formatBytes, formatCount, formatTime, prettyJson, readSetting, writeSetting } from '../../lib/utils';
-import { HISTORY_RAIL_WIDTH, useBranchMessages, useLiveView, useStore, useSubjectMessages } from '../../store';
+import { HISTORY_RAIL_WIDTH, MAX_LOADED_MESSAGES, useBranchMessages, useLiveView, useStore, useSubjectMessages } from '../../store';
 import { Button, IconButton } from '../ui/Button';
 import { confirm } from '../ui/Dialog';
 import { Badge, EmptyState, HeaderDivider, menuClass, menuItemClass as itemClass, PaneHeader } from '../ui/misc';
@@ -208,6 +208,19 @@ function SingleSubjectView() {
   const displayIndex = display ? shownMessages.lastIndexOf(display) : -1;
   const previous = displayIndex > 0 ? shownMessages[displayIndex - 1] : null;
   const rate = recentRate(messages);
+
+  /**
+   * Paging back means looking at what happened, not at what is happening.
+   * So the first page older holds the message on screen instead of letting
+   * every arrival replace it: reading the payload of something from ten
+   * minutes ago while the viewer jumps to the newest twice a second is not
+   * reading it. The badge says it is held, and one click follows again.
+   */
+  const loadOlderHere = () => {
+    if (range) return loadOlderRange();
+    if (!pinned && latest) setSelectedMessage(latest);
+    return loadOlder(subject);
+  };
   // A selected branch (no messages of its own) shows what flows below it.
   const isBranch = shownMessages.length === 0 && shownBelow.length > 0;
   const connOf = (id?: string) => connections.find(c => c.id === id);
@@ -474,9 +487,10 @@ function SingleSubjectView() {
               active={display}
               width={railWidth}
               onPick={m => setSelectedMessage(m === latest ? null : m)}
-              onLoadOlder={range ? loadOlderRange : () => loadOlder(subject)}
+              onLoadOlder={loadOlderHere}
               loadingOlder={range ? loadingOlderRange : !!view?.loadingOlder}
               atOldest={range ? !rangedData?.more : !!view?.atOldest}
+              atCap={!range && messages.length >= MAX_LOADED_MESSAGES}
             />
             <ResizeHandle
               label="history"

@@ -81,16 +81,21 @@ export async function loadOlder(subject: string): Promise<void> {
   // The messages are oldest first, so the first of each connection is its
   // cursor. A message without a sequence (a live one that never reached the
   // history) is skipped; the next one only pages over it, it leaves no gap.
-  const cursors = new Map<string, number>();
+  //
+  // The time goes with the sequence. Past the edge of memory the server
+  // reads on from the database, and sequences count from one again with
+  // every reconnect: a database that spans two runs holds several messages
+  // numbered 2, and only the time tells them apart.
+  const cursors = new Map<string, { seq: number; ts: number }>();
   for (const m of view.messages) {
-    if (m.connId && m.sequence !== undefined && !cursors.has(m.connId)) cursors.set(m.connId, m.sequence);
+    if (m.connId && m.sequence !== undefined && !cursors.has(m.connId)) cursors.set(m.connId, { seq: m.sequence, ts: m.timestamp });
   }
   if (cursors.size === 0) return;
   state.setLoadingOlder(subject, true);
   const expr = state.subjectExpr.trim() || undefined;
   try {
     const pages = await Promise.all(
-      [...cursors].map(([connId, before]) => api.getHistory(subject, { connId, before, limit: OLDER_PAGE, branchLimit: 0, expr })),
+      [...cursors].map(([connId, c]) => api.getHistory(subject, { connId, before: c.seq, beforeTs: c.ts, limit: OLDER_PAGE, branchLimit: 0, expr })),
     );
     // A filter can empty a full page, so the server reports whether it had
     // more before the cursor instead of us counting what came back.
@@ -117,16 +122,18 @@ export async function loadOlderBranch(subject: string): Promise<void> {
   if (!view || view.loading || view.loadingOlderBranch || view.branchAtOldest) return;
   if (view.branch.length >= MAX_LOADED_MESSAGES) return;
   // Newest first, so the last message of each connection is its oldest.
-  const cursors = new Map<string, number>();
+  const cursors = new Map<string, { seq: number; ts: number }>();
   for (const m of view.branch) {
-    if (m.connId && m.sequence !== undefined) cursors.set(m.connId, m.sequence);
+    if (m.connId && m.sequence !== undefined) cursors.set(m.connId, { seq: m.sequence, ts: m.timestamp });
   }
   if (cursors.size === 0) return;
   state.setLoadingOlderBranch(subject, true);
   const expr = state.subjectExpr.trim() || undefined;
   try {
     const pages = await Promise.all(
-      [...cursors].map(([connId, branchBefore]) => api.getHistory(subject, { connId, branchBefore, limit: 1, branchLimit: MAX_BRANCH_MESSAGES, expr })),
+      [...cursors].map(([connId, c]) =>
+        api.getHistory(subject, { connId, branchBefore: c.seq, branchBeforeTs: c.ts, limit: 1, branchLimit: MAX_BRANCH_MESSAGES, expr }),
+      ),
     );
     useStore.getState().appendOlderBranch(
       subject,
