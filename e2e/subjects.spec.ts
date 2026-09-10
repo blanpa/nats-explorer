@@ -340,8 +340,11 @@ test('clearing the history of one subject leaves the others', async ({ page }) =
   await selectLeaf(page, 'a');
   await expect(page.getByText(/3 in history/)).toBeVisible({ timeout: 15_000 });
 
-  // Clear this one subject.
-  await page.getByRole('button', { name: /^Clear the history of/ }).click();
+  // Clear this one subject. The clear lives in the header's overflow menu:
+  // it is the one irreversible action there and does not belong in a row
+  // where every other click is harmless.
+  await page.getByRole('button', { name: /^More for / }).click();
+  await page.getByRole('menuitem', { name: /^Clear history/ }).click();
   await page.getByRole('button', { name: 'Clear', exact: true }).click();
   await expect(page.getByText(/History cleared/)).toBeVisible({ timeout: 10_000 });
 

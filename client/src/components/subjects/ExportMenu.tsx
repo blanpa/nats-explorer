@@ -4,12 +4,10 @@ import { useState } from 'react';
 import type { NatsMessage, StreamMessage } from 'shared';
 import { exportMessages } from '../../lib/exportMessages';
 import { Button } from '../ui/Button';
+import { menuClass, menuItemClass as itemClass } from '../ui/misc';
 import { useStore } from '../../store';
 import ExportBundleDialog from '../bundle/ExportBundleDialog';
 import ReplayDialog from './ReplayDialog';
-
-const menuClass = 'z-50 rounded border border-line bg-panel shadow-pop p-1 animate-fade-in outline-none min-w-[180px]';
-const itemClass = 'flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer outline-none text-sm data-[highlighted]:bg-field data-[disabled]:opacity-40';
 
 /** Export the given messages as a file, or replay them. */
 export default function ExportMenu({

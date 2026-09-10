@@ -261,3 +261,16 @@ export const TooltipProvider = RadixTooltip.Provider;
 export function Kbd({ children }: { children: ReactNode }) {
   return <kbd className="kbd">{children}</kbd>;
 }
+
+/**
+ * The look of a dropdown menu and its items. Three components had their own
+ * copy of these strings, which is two chances for them to drift apart.
+ */
+export const menuClass = 'z-50 rounded border border-line bg-panel shadow-pop p-1 animate-fade-in outline-none min-w-[180px]';
+export const menuItemClass =
+  'flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer outline-none text-sm data-[highlighted]:bg-field data-[disabled]:opacity-40';
+
+/** Separates groups of controls in a header row, so a row reads as groups rather than as a queue. */
+export function HeaderDivider() {
+  return <span className="w-px h-5 bg-line mx-1 shrink-0" aria-hidden />;
+}

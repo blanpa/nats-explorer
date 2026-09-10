@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import type { NatsMessage } from 'shared';
-import { Check, Copy, Diff, Eraser, FolderTree, History, LineChart, MousePointerClick, Send, X } from 'lucide-react';
+import { Check, Copy, Diff, Eraser, FolderTree, History, LineChart, MoreVertical, MousePointerClick, Send, X } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import { useCanWrite } from '../../lib/auth';
 import { clearSubject, loadOlder, loadOlderBranch } from '../../lib/feed';
@@ -10,7 +11,7 @@ import { copyToClipboard, extractNumber, formatBytes, formatCount, formatTime, p
 import { HISTORY_RAIL_WIDTH, MAX_LOADED_MESSAGES, useBranchMessages, useLiveView, useStore, useSubjectMessages } from '../../store';
 import { Button, IconButton } from '../ui/Button';
 import { confirm } from '../ui/Dialog';
-import { Badge, EmptyState, PaneHeader } from '../ui/misc';
+import { Badge, EmptyState, HeaderDivider, menuClass, menuItemClass as itemClass, PaneHeader } from '../ui/misc';
 import { toast } from '../ui/Toast';
 import DiffView from './DiffView';
 import ExportMenu from './ExportMenu';
@@ -275,18 +276,20 @@ function SingleSubjectView() {
           )}
         </div>
       </div>
+      {/* Three groups, in the order the questions come: what is this
+          subject, what is in it, what do I do with it. The one irreversible
+          action is not among them -- it sits in the overflow, because a row
+          where every other click is harmless is the wrong place to keep a
+          button that deletes from disk. */}
       <div className="flex items-center gap-1 shrink-0">
         {subject && <BookmarkButton subject={subject} />}
-        {canWrite && (
-          <IconButton label={isBranch ? `Clear the history of ${subject} and everything below it` : `Clear the history of ${subject}`} onClick={clearThis}>
-            <Eraser size={14} />
-          </IconButton>
-        )}
-        <HistorySearchInput search={search} />
-        <ExportMenu messages={isBranch ? shownBelow : shownMessages} name={range ? `${subject}-${range.label}` : subject} subject={subject} />
         <IconButton label="Copy subject" onClick={copySubject}>
           {copied ? <Check size={14} className="text-ok" /> : <Copy size={14} />}
         </IconButton>
+        <HeaderDivider />
+        <HistorySearchInput search={search} />
+        <ExportMenu messages={isBranch ? shownBelow : shownMessages} name={range ? `${subject}-${range.label}` : subject} subject={subject} />
+        <HeaderDivider />
         <Button
           variant="outline"
           icon={<Send size={13} />}
@@ -294,6 +297,22 @@ function SingleSubjectView() {
         >
           Publish here
         </Button>
+        {canWrite && (
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger asChild>
+              <IconButton label={`More for ${subject}`}>
+                <MoreVertical size={14} />
+              </IconButton>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content align="end" sideOffset={6} className={menuClass}>
+                <DropdownMenu.Item className={`${itemClass} text-danger`} onSelect={clearThis}>
+                  <Eraser size={13} /> {isBranch || shownBelow.length > 0 ? 'Clear history below…' : 'Clear history…'}
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+        )}
       </div>
     </PaneHeader>
   );
