@@ -25,6 +25,8 @@ import MessagePanel from './MessagePanel';
 import MultiSubjectView from './MultiSubjectView';
 import { findBookmark, useBookmarks } from '../../lib/bookmarks';
 import BookmarkButton from './BookmarkButton';
+import HeaderList from './HeaderList';
+import { msgId, repeatedIds } from '../../lib/natsHeaders';
 import RuleDialog from '../alerts/RuleDialog';
 import { alertRuleForSubject } from '../../lib/alerts';
 import type { AlertRule } from 'shared';
@@ -220,6 +222,10 @@ function SingleSubjectView() {
   const displayIndex = display ? shownMessages.lastIndexOf(display) : -1;
   const previous = displayIndex > 0 ? shownMessages[displayIndex - 1] : null;
   const rate = recentRate(messages);
+  // A deduplication id that occurs twice among the messages on screen is
+  // either a duplicate window that has passed, or an id that is not unique.
+  const repeatedMsgIds = repeatedIds(shownMessages);
+  const displayMsgId = msgId(display?.headers);
 
   /**
    * Reading back means looking at what happened, not at what is happening.
@@ -633,14 +639,7 @@ function SingleSubjectView() {
               {display.headers && Object.keys(display.headers).length > 0 && (
                 <div>
                   <div className="section-title mb-1">Headers</div>
-                  <div className="card divide-y divide-line/70 text-sm font-mono">
-                    {Object.entries(display.headers).map(([k, vals]) => (
-                      <div key={k} className="flex gap-3 px-3 py-1.5">
-                        <span className="text-syn-key w-48 shrink-0 truncate">{k}</span>
-                        <span className="text-syn-str break-all">{vals.join(', ')}</span>
-                      </div>
-                    ))}
-                  </div>
+                  <HeaderList headers={display.headers} repeated={!!displayMsgId && repeatedMsgIds.has(displayMsgId)} />
                 </div>
               )}
 

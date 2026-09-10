@@ -13,6 +13,7 @@ import { toast } from '../ui/Toast';
 import { useCanWrite } from '../../lib/auth';
 import StreamChart, { type ChartSpec } from './StreamChart';
 import StreamMessageRow from './StreamMessageRow';
+import { msgId, repeatedIds } from '../../lib/natsHeaders';
 import StreamMessagesToolbar from './StreamMessagesToolbar';
 
 /** Widths the table opens with; the reader's own are remembered per browser. */
@@ -90,6 +91,9 @@ export default function StreamMessages({ connId, stream, onChanged }: { connId: 
   const tail = onNewestPage ? liveMsgs.filter(m => !page || m.seq > page.pageEnd) : [];
   const messages = desc ? [...tail, ...pageMessages] : [...pageMessages, ...[...tail].reverse()];
   const liveSeqs = new Set(tail.map(m => m.seq));
+  // Two messages with one deduplication id, on a page: the window between
+  // them had passed, or the id is not unique. Either is worth pointing at.
+  const repeated = repeatedIds(messages);
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -193,6 +197,10 @@ export default function StreamMessages({ connId, stream, onChanged }: { connId: 
                   denyDelete={stream.denyDelete}
                   chartField={chart?.field ?? null}
                   charting={!!chart}
+                  repeatedId={(() => {
+                    const id = msgId(m.headers);
+                    return !!id && repeated.has(id);
+                  })()}
                   onToggle={() => setOpen(open === m.seq ? null : m.seq)}
                   onDelete={() => del(m.seq)}
                   onFieldSelect={(field, subject) =>

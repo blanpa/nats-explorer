@@ -5,6 +5,7 @@ import { IconButton } from '../ui/Button';
 import { SubjectText } from '../ui/SubjectText';
 import { toneClass } from '../ui/tone';
 import PayloadViewer from '../subjects/PayloadViewer';
+import HeaderList from '../subjects/HeaderList';
 
 interface Props {
   m: StreamMessage;
@@ -16,13 +17,15 @@ interface Props {
   /** field currently charted, to highlight it in the payload tree */
   chartField: string | null;
   charting: boolean;
+  /** its Nats-Msg-Id occurs more than once on the loaded page */
+  repeatedId?: boolean;
   onToggle: () => void;
   onDelete: () => void;
   onFieldSelect: (field: string, subject: string) => void;
 }
 
 /** One stream message: the summary row and, when open, headers and payload below it. */
-export default function StreamMessageRow({ m, open, live, canWrite, denyDelete, chartField, charting, onToggle, onDelete, onFieldSelect }: Props) {
+export default function StreamMessageRow({ m, open, live, canWrite, denyDelete, chartField, charting, repeatedId, onToggle, onDelete, onFieldSelect }: Props) {
   const p = previewPayload(m.payload, m.payloadType, 90);
   return (
     <>
@@ -54,17 +57,7 @@ export default function StreamMessageRow({ m, open, live, canWrite, denyDelete, 
         <tr>
           <td colSpan={7} className="whitespace-normal! bg-panel/60 py-3!">
             <div className="flex flex-col gap-3 max-w-[1100px]">
-              {m.headers && Object.keys(m.headers).length > 0 && (
-                <div className="text-xs font-mono">
-                  {Object.entries(m.headers).map(([k, v]) => (
-                    <div key={k}>
-                      <span className="text-syn-key">{k}</span>
-                      <span className="text-faint">: </span>
-                      <span className="text-syn-str">{v.join(', ')}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {m.headers && Object.keys(m.headers).length > 0 && <HeaderList headers={m.headers} repeated={repeatedId} compact />}
               {m.payloadType === 'json' && !charting && <div className="text-xs text-faint">Click a number to chart it over the stream.</div>}
               <PayloadViewer
                 compact

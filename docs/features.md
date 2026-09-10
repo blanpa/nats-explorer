@@ -110,7 +110,8 @@ The Alerts module lists what is firing right now, the rules with the number of s
 
 ## Message detail
 
-- JSON, raw and hex views; headers; history of the last messages; diff to the previous message
+- JSON, raw and hex views; history of the last messages; diff to the previous message
+- Headers with their meaning: the ones NATS sets explain themselves -- the deduplication key, the publish preconditions, the rollups, where a sourced message came from -- and a `Nats-Msg-Id` seen twice among the messages on screen is marked
 - Payload decoders: rules per subject pattern decode MessagePack, Protocol Buffers (paste the `.proto`, name the message type) or Avro (paste the schema) into the JSON tree; the rules are kept with the other settings
 - Click a number in the JSON to chart it over time as line, area, step, bars or dots
 - Click a point in that chart to see the message behind it: the value decides which one, so a peak opens the message that caused it. Points older than what the browser holds are fetched from the persistent history
