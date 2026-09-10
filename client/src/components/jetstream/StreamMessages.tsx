@@ -5,6 +5,7 @@ import { useAsync } from '../../lib/useAsync';
 import { useLiveWatch } from '../../lib/live';
 import { useJsDomainOverride } from '../../store';
 import { Button } from '../ui/Button';
+import { ColumnGrip, useColumnWidths } from '../ui/columns';
 import { confirm } from '../ui/Dialog';
 import { EmptyState, ErrorState, LoadingState } from '../ui/misc';
 import { toast } from '../ui/Toast';
@@ -13,12 +14,18 @@ import StreamChart, { type ChartSpec } from './StreamChart';
 import StreamMessageRow from './StreamMessageRow';
 import StreamMessagesToolbar from './StreamMessagesToolbar';
 
+/** Widths the table opens with; the reader's own are remembered per browser. */
+const DEFAULT_WIDTHS = { seq: 80, time: 112, subject: 300, size: 80 };
+
 export default function StreamMessages({ connId, stream, onChanged }: { connId: string; stream: StreamInfo; onChanged: () => void }) {
   const canWrite = useCanWrite();
   const domainOverride = useJsDomainOverride(connId);
   const [startSeq, setStartSeq] = useState<number | undefined>(undefined); // undefined = newest page
   const [limit, setLimit] = useState(50);
   const [open, setOpen] = useState<number | null>(null);
+  // Seq, time, subject and size are dragged to width; the payload column
+  // takes the rest. The two icon columns have nothing to widen.
+  const { widths, resize } = useColumnWidths('ne.streamMessageCols', DEFAULT_WIDTHS);
   const [live, setLive] = useState(false);
   const [liveMsgs, setLiveMsgs] = useState<StreamMessage[]>([]);
   const [chart, setChart] = useState<ChartSpec | null>(null);
@@ -115,21 +122,42 @@ export default function StreamMessages({ connId, stream, onChanged }: { connId: 
           <table className="table table-fixed">
             <colgroup>
               <col className="w-8" />
-              <col className="w-20" />
-              <col className="w-28" />
-              <col className="w-[34%]" />
+              <col style={{ width: widths.seq }} />
+              <col style={{ width: widths.time }} />
+              <col style={{ width: widths.subject }} />
+              {/* Payload takes what the others leave. */}
               <col />
-              <col className="w-20" />
+              <col style={{ width: widths.size }} />
               <col className="w-10" />
             </colgroup>
             <thead>
+              {/*
+                The header cells are `sticky`, and that is already a
+                containing block: the grips position themselves against the
+                cell without a `relative` that would undo the stickiness.
+              */}
               <tr>
                 <th />
-                <th className="num">Seq</th>
-                <th>Time</th>
-                <th>Subject</th>
+                <th className="num">
+                  Seq
+                  <ColumnGrip {...resize('seq')} />
+                </th>
+                <th>
+                  Time
+                  <ColumnGrip {...resize('time')} />
+                </th>
+                <th>
+                  Subject
+                  <ColumnGrip {...resize('subject')} />
+                </th>
                 <th>Payload</th>
-                <th className="num">Size</th>
+                {/* Size sits between the flexible payload column and the
+                    fixed one holding the delete button, so its right edge
+                    cannot move: the line to grab is the one on its left. */}
+                <th className="num">
+                  Size
+                  <ColumnGrip {...resize('size', 'left')} />
+                </th>
                 <th />
               </tr>
             </thead>

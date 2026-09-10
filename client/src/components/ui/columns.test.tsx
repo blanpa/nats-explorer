@@ -74,9 +74,13 @@ describe('column widths', () => {
     expect(widths()).toBe('100/60');
   });
 
-  it('puts the grip on the side it was asked for', () => {
+  it('puts the grip on the side it was asked for, inside the cell', () => {
     render(<Table />);
-    expect(screen.getByTestId('grip-time').className).toContain('-right-2');
-    expect(screen.getByTestId('grip-size').className).toContain('-left-3');
+    // Inside, not straddling: the half of a straddling grip that reaches
+    // into the next cell is only clickable while nothing paints over it.
+    expect(screen.getByTestId('grip-time').className).toContain('right-0');
+    expect(screen.getByTestId('grip-time').className).toContain('justify-end');
+    expect(screen.getByTestId('grip-size').className).toContain('left-0');
+    expect(screen.getByTestId('grip-size').className).toContain('justify-start');
   });
 });

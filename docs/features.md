@@ -143,6 +143,7 @@ When the newer half of the messages looks different from the older half, the sec
 - Consumers: list, create, delete, state, and pause/resume -- a paused consumer delivers nothing until its deadline and resumes by itself (NATS 2.11)
 - KV/Object backing streams (`KV_*`, `OBJ_*`) hidden by default behind a toggle
 - Jump to a point in time in a stream, export the page, replay it
+- The message table's seq, time, subject and size columns are dragged to width by the line between the headers; a double-click restores the default and the widths are remembered
 - A number in an opened message charts that field over the last 500 to 50 000 messages of the stream, for the row's subject or across all subjects, read and downsampled by the backend (`GET /api/streams/{name}/series`)
 - **JetStream domains**: a connection can carry a `jsDomain` or API prefix (leaf nodes behind a hub and vice versa), and the JetStream, KV and Object Store panes have a domain switch for ad-hoc changes
 

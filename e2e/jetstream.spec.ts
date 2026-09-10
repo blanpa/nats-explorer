@@ -22,6 +22,23 @@ test('stream overview, newest page, chart, live tail, consumers', async ({ page 
   const rows = page.locator('tbody tr');
   await expect(rows).toHaveCount(5);
   await expect(rows.first()).toContainText(`${subjectRoot}.orders.5`); // newest first
+
+  // The columns of the message table are dragged to width, like the ones of
+  // the subject message list.
+  const subjectHead = page.locator('thead th').filter({ hasText: 'Subject' });
+  const width = async () => (await subjectHead.boundingBox())!.width;
+  const before = await width();
+  const grip = subjectHead.locator('span[title^="Drag to resize"]');
+  const box = (await grip.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 80, box.y + box.height / 2, { steps: 6 });
+  await page.mouse.up();
+  await expect.poll(width).toBeGreaterThan(before + 50);
+  // A double click puts it back where it started.
+  await grip.dblclick();
+  await expect.poll(width).toBeLessThan(before + 10);
+
   await rows.first().click();
   await expect(page.locator('.jv')).toContainText('"total"');
   // A number in the payload charts the field over the stream, for the row's subject.

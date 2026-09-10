@@ -63,13 +63,23 @@ export function useColumnWidths<K extends string>(key: string, defaults: ColumnW
  * The drag grip on one edge of a header cell. It is taller than the text so
  * there is something to aim at: the line it draws is the column boundary,
  * and a boundary you cannot hit is not a control.
+ *
+ * The area lies inside its own cell and the line sits on the edge, rather
+ * than the area straddling the edge. Straddling looks the same and is not:
+ * the half that reaches into the next cell is only clickable while nothing
+ * paints over it, and in a table of sticky header cells the next one does.
+ * Measured on the JetStream message table, a grip 16 pixels wide could be
+ * hit across six of them, all of them left of the line it draws.
  */
 export function ColumnGrip({ side = 'right', ...props }: React.HTMLAttributes<HTMLSpanElement> & { side?: GripSide }) {
   return (
     // Mouse-only affordance; the widths have keyboard-free defaults.
     <span
       aria-hidden
-      className={cn('absolute -top-2 -bottom-2 w-4 cursor-col-resize group/grip flex justify-center', side === 'left' ? '-left-3' : '-right-2')}
+      className={cn(
+        'absolute -top-2 -bottom-2 w-5 cursor-col-resize group/grip flex',
+        side === 'left' ? 'left-0 justify-start' : 'right-0 justify-end',
+      )}
       title="Drag to resize, double-click to reset"
       {...props}
     >
