@@ -83,7 +83,7 @@ func TestServerGlobalSearchAndRollups(t *testing.T) {
 		t.Fatalf("scoped search = %d", len(search.Messages))
 	}
 
-	// A long range is answered from the minute buckets.
+	// The minute buckets, asked for outright.
 	now := time.Now().UnixMilli()
 	var series struct {
 		Points  [][2]float64 `json:"points"`
@@ -91,15 +91,38 @@ func TestServerGlobalSearchAndRollups(t *testing.T) {
 		Source  string       `json:"source"`
 	}
 	api.do("GET", q("/api/history/series", map[string]string{
-		"subject": "s.plant.temp", "field": "temp",
+		"subject": "s.plant.temp", "field": "temp", "rollup": "1",
 		"from": fmt.Sprint(now - 48*3600*1000), "to": fmt.Sprint(now + 60000),
 	}), nil, &series)
 	if series.Source != "rollup" {
-		t.Fatalf("a two-day range should come from rollups, got %q", series.Source)
+		t.Fatalf("rollup=1 should come from rollups, got %q", series.Source)
 	}
 	if series.Samples != 4 || len(series.Points) == 0 {
 		t.Fatalf("rollup series = %+v", series)
 	}
+	// Left to itself over the same range, it reads the messages instead:
+	// these four fall in one minute, and one bucket is one instant, which
+	// is a chart with no width. The way out is the messages, which have the
+	// real times.
+	var auto struct {
+		Points [][2]float64 `json:"points"`
+		Source string       `json:"source"`
+	}
+	api.do("GET", q("/api/history/series", map[string]string{
+		"subject": "s.plant.temp", "field": "temp",
+		"from": fmt.Sprint(now - 48*3600*1000), "to": fmt.Sprint(now + 60000),
+	}), nil, &auto)
+	if auto.Source == "rollup" {
+		t.Fatal("a range whose buckets span one minute was answered from them anyway")
+	}
+	// The messages themselves, not the one bucket they reduce to. They were
+	// published in a loop and share a millisecond, so this series has no
+	// width either -- but it is the four values, and the chart says so
+	// rather than drawing a line of no length.
+	if len(auto.Points) != 4 {
+		t.Fatalf("the fallback = %+v, want the four messages", auto.Points)
+	}
+
 	// The bucket keeps the extremes of the minute.
 	var lo, hi float64 = 1e9, -1e9
 	for _, p := range series.Points {

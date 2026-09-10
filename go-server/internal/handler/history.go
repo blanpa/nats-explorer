@@ -607,7 +607,11 @@ func (h *HistoryHandler) Series(w http.ResponseWriter, r *http.Request) {
 	// A long range is answered from the minute buckets. An expression has to
 	// see the messages, so it keeps the message path.
 	ranged0, ranged1, isRanged := timeRange(r)
-	wantRollup := r.URL.Query().Get("rollup") == "1" || (isRanged && time.Duration(ranged1-ranged0)*time.Millisecond > rollupFrom)
+	// Asking for the buckets outright is an answer in itself: a caller that
+	// says rollup=1 wants what the writer kept, however little of it there
+	// is, and is not helped by the fallback below.
+	askedRollup := r.URL.Query().Get("rollup") == "1"
+	wantRollup := askedRollup || (isRanged && time.Duration(ranged1-ranged0)*time.Millisecond > rollupFrom)
 	if db != nil && isRanged && wantRollup && prg == nil {
 		points := make([][2]float64, 0, 256)
 		samples := 0
@@ -630,14 +634,15 @@ func (h *HistoryHandler) Series(w http.ResponseWriter, r *http.Request) {
 		if agg == AggRate {
 			points = rateOf(points)
 		}
-		// The minute buckets only answer if they span more than one minute.
+		// Chosen for the range, the minute buckets only answer if they span
+		// more than one minute.
 		// A subject with three messages in one minute reduces to a single
 		// bucket, and a chart of one instant has no width: the reader picks
 		// "All", the range is long, and nothing is drawn. Whatever is there
 		// is few enough to read as messages, and the messages have the real
 		// times. The same way out covers a range whose rollups have been
 		// pruned while the messages are still kept.
-		if spansTime(points) {
+		if askedRollup || spansTime(points) {
 			writeJSON(w, SeriesResponse{Subject: subject, Field: field, Points: points, Samples: samples, Source: "rollup", Agg: agg})
 			return
 		}
