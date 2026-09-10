@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { serverUrl } from './basePath';
 
 export type AuthMode = 'none' | 'token' | 'users';
 export type Role = 'admin' | 'viewer' | '';
@@ -23,7 +24,7 @@ interface AuthState extends AuthInfo {
 }
 
 async function fetchAuth(): Promise<AuthInfo> {
-  const res = await fetch('/api/auth');
+  const res = await fetch(serverUrl('/api/auth'));
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return (await res.json()) as AuthInfo;
 }
@@ -49,7 +50,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     }
   },
   login: async body => {
-    const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const res = await fetch(serverUrl('/api/login'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!res.ok) {
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       throw new Error(data.error || `${res.status} ${res.statusText}`);
@@ -58,7 +59,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     set({ authenticated: true, required: false, user: id.user, role: id.role });
   },
   logout: async () => {
-    await fetch('/api/logout', { method: 'POST' }).catch(() => undefined);
+    await fetch(serverUrl('/api/logout'), { method: 'POST' }).catch(() => undefined);
     set({ authenticated: false, required: get().mode !== 'none', user: '', role: '' });
   },
   setRequired: b => set({ required: b, ...(b ? { authenticated: false } : {}) }),

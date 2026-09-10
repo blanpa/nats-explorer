@@ -1,3 +1,4 @@
+import { serverUrl, socketUrl } from './basePath';
 import type { WsClientCommand, WsEventOf, WsEventType, WsServerEvent, NatsMessage } from 'shared';
 import type { FlatNode } from '../components/subjects/tree';
 import type { FromWorker, ToWorker, TreeView, WsStatus } from '../worker/protocol';
@@ -24,6 +25,9 @@ class WsClient {
   private feedListeners = new Set<(msgs: NatsMessage[]) => void>();
   private view: TreeView | null = null;
   status: WsStatus = 'closed';
+  /** The endpoint of the last attempt; shown when the backend is unreachable,
+   *  because behind a reverse proxy the URL is the whole story. */
+  endpoint = '';
 
   private ensureWorker(): Worker {
     if (this.worker) return this.worker;
@@ -59,14 +63,14 @@ class WsClient {
   }
 
   private url(): string {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${window.location.host}/ws`;
+    return socketUrl();
   }
 
   connect(): void {
     // ne.wire = "json" switches the frames back to JSON, e.g. to compare.
     const binary = readSetting<string>('ne.wire', 'msgpack') !== 'json';
-    this.post({ type: 'connect', url: this.url(), binary });
+    this.endpoint = this.url();
+    this.post({ type: 'connect', url: this.endpoint, binary, authUrl: serverUrl('/api/auth') });
   }
 
   disconnect(): void {

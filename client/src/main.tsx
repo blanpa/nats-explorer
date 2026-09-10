@@ -35,7 +35,7 @@ async function rehydrate() {
     { useSavedRequests },
     { loadSavedConnections },
     { loadSavedRequests },
-    { useStore },
+    { useStore, EXPLORER_WIDTH, HISTORY_RAIL_WIDTH, readWidth },
     { applyTheme, readTheme },
     { readSetting },
     { useDecoders },
@@ -60,7 +60,9 @@ async function rehydrate() {
   useStore.setState({
     theme,
     hideSystemSubjects: readSetting('ne.hideSystemSubjects', true),
-    explorerWidth: Math.max(220, Math.min(800, readSetting('ne.explorerWidth', 340))),
+    treePreview: readSetting('ne.treePreview', false),
+    explorerWidth: readWidth('ne.explorerWidth', EXPLORER_WIDTH),
+    historyRailWidth: readWidth('ne.historyRailWidth', HISTORY_RAIL_WIDTH),
   });
 }
 

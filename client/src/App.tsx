@@ -7,8 +7,9 @@ import Rail from './components/layout/Rail';
 import Explorer from './components/layout/Explorer';
 import Detail from './components/layout/Detail';
 import StatusBar from './components/layout/StatusBar';
-import ResizeHandle from './components/layout/ResizeHandle';
+import ExplorerResizeHandle from './components/layout/ResizeHandle';
 import ConnectionDialog from './components/connection/ConnectionDialog';
+import SettingsDialog from './components/layout/SettingsDialog';
 import LoginDialog from './components/connection/LoginDialog';
 import { useAuth } from './lib/auth';
 import { ConfirmHost } from './components/ui/Dialog';
@@ -38,7 +39,7 @@ export default function App() {
           {hasExplorer && (
             <>
               <Explorer />
-              <ResizeHandle />
+              <ExplorerResizeHandle />
             </>
           )}
           <Detail />
@@ -46,6 +47,7 @@ export default function App() {
         <StatusBar />
       </div>
       <ConnectionDialog />
+      <SettingsDialog />
       <LoginDialog />
       <ConfirmHost />
       <Toaster />

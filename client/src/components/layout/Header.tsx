@@ -54,7 +54,7 @@ export default function Header() {
       <div className="flex-1" />
 
       {!wsOnline && (
-        <Badge tone="danger" title="The NATS Explorer backend is not reachable. Reconnecting…">
+        <Badge tone="danger" title={`The NATS Explorer backend is not reachable at ${wsClient.endpoint || 'the websocket endpoint'}. Reconnecting…`}>
           <WifiOff size={11} /> Backend offline
         </Badge>
       )}

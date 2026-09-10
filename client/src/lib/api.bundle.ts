@@ -1,3 +1,4 @@
+import { serverUrl } from './basePath';
 import { request } from './api';
 
 /** What an exported bundle says about itself. */
@@ -41,14 +42,14 @@ export function bundleUrl({ connId, from, to, subject, limit }: BundleRange): st
   if (to) p.set('to', String(to));
   if (subject?.trim()) p.set('subject', subject.trim());
   if (limit) p.set('limit', String(limit));
-  return `/api/bundle?${p.toString()}`;
+  return serverUrl(`/api/bundle?${p.toString()}`);
 }
 
 export const bundleApi = {
   open: async (file: File) => {
     const form = new FormData();
     form.append('file', file);
-    const res = await fetch('/api/bundle/import', { method: 'POST', body: form });
+    const res = await fetch(serverUrl('/api/bundle/import'), { method: 'POST', body: form });
     if (!res.ok) {
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       throw new Error(data.error || `${res.status} ${res.statusText}`);
