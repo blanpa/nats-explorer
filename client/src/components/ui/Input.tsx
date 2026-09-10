@@ -90,8 +90,19 @@ export function Field({ label, hint, htmlFor, className, children, required }: F
   );
 }
 
+interface SearchInputProps extends InputProps {
+  /**
+   * Text to show faintly after what has been typed, which Tab or the right
+   * arrow accepts. It is an offer, never a correction: it only ever adds to
+   * the end, so the letters already on screen do not move.
+   */
+  suggestion?: string;
+  onAcceptSuggestion?: () => void;
+}
+
 /** A filter field: "/" focuses it from anywhere, Escape clears it. */
-export function SearchInput({ className, ...rest }: InputProps) {
+export function SearchInput({ className, suggestion, onAcceptSuggestion, ...rest }: SearchInputProps) {
+  const typed = String(rest.value ?? '');
   return (
     <div className={cn('relative', className)}>
       <svg
@@ -109,14 +120,35 @@ export function SearchInput({ className, ...rest }: InputProps) {
         <circle cx="11" cy="11" r="7" />
         <path d="m21 21-4.3-4.3" />
       </svg>
+      {/* The ghost sits behind the field and repeats what was typed in
+          transparent text, so the suggestion lands exactly where the cursor
+          is whatever the font does. It must carry the same box as the input
+          for that to hold. */}
+      {suggestion && (
+        <div aria-hidden className="absolute inset-0 pointer-events-none input input-sm pl-7 border-transparent bg-transparent overflow-hidden whitespace-pre">
+          <span className="invisible">{typed}</span>
+          <span className="text-faint">{suggestion}</span>
+        </div>
+      )}
       <input
         type="search"
-        className="input input-sm pl-7"
+        // A subject is not prose: the red underline under every filter term
+        // says nothing, and the ghost has to sit on clean text.
+        spellCheck={false}
+        autoComplete="off"
+        className={cn('input input-sm pl-7', suggestion && 'bg-transparent')}
         {...rest}
         data-filter
         onKeyDown={e => {
           rest.onKeyDown?.(e);
-          if (e.key === 'Escape' && !e.defaultPrevented) {
+          if (e.defaultPrevented) return;
+          const atEnd = e.currentTarget.selectionStart === e.currentTarget.value.length;
+          if (suggestion && atEnd && (e.key === 'Tab' || e.key === 'ArrowRight')) {
+            e.preventDefault();
+            onAcceptSuggestion?.();
+            return;
+          }
+          if (e.key === 'Escape') {
             if (e.currentTarget.value) rest.onChange?.({ ...e, target: { ...e.currentTarget, value: '' } } as unknown as React.ChangeEvent<HTMLInputElement>);
             else e.currentTarget.blur();
           }

@@ -11,6 +11,7 @@ import { SearchInput } from '../ui/Input';
 import { choose } from '../ui/Dialog';
 import { EmptyState, PaneHeader } from '../ui/misc';
 import { toneClass } from '../ui/tone';
+import { completionFor } from './completeFilter';
 import { ancestorsOf, type FlatNode } from './tree';
 import BookmarksPanel from './BookmarksPanel';
 import PayloadFilter from './PayloadFilter';
@@ -108,6 +109,16 @@ export default function SubjectTree() {
   const flat = useStore(s => s.treeRows);
   const systemCount = useStore(s => s.systemCount);
   const filter = useStore(s => s.subjectFilter);
+  // What the box offers to finish. The rows are the subjects the server has
+  // sent for this view, which is exactly what a completion may promise.
+  const suggestion = useMemo(
+    () =>
+      completionFor(
+        filter,
+        flat.map(r => r.subject),
+      ),
+    [filter, flat],
+  );
   const setFilter = useStore(s => s.setSubjectFilter);
   const hideSystem = useStore(s => s.hideSystemSubjects);
   const setHideSystem = useStore(s => s.setHideSystemSubjects);
@@ -301,9 +312,11 @@ export default function SubjectTree() {
         <SearchInput
           value={filter}
           onChange={e => setFilter(e.target.value)}
+          suggestion={suggestion}
+          onAcceptSuggestion={() => setFilter(filter + suggestion)}
           placeholder="Filter subjects…  /"
           aria-label="Filter subjects"
-          title="Press / to focus, Escape to clear"
+          title="Press / to focus, Tab to complete, Escape to clear"
         />
       </div>
 
