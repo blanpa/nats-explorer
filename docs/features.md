@@ -27,6 +27,12 @@ nav_order: 3
 - Selecting a branch shows the recent messages of everything below it
 - Large subject spaces cost what is on screen, not what the server sees: see [Performance](#performance)
 
+## Following a message
+
+A request and its reply, an order and its shipment, a saga across five services: the messages belong together and live on different subjects, and what ties them is a value inside them. "Follow this message…" in the overflow menu offers the values that could be it -- the `Nats-Msg-Id` first, then the fields whose name reads like an id, then other strings, because a guess is what that is -- searches the recorded history for it across every subject, and lists the hits in time order with the gap between each.
+
+The gap is the point: a chain that reads `+12 ms`, `+8 ms`, `+4.2 s` says where it waited. A row opens its subject. Only recorded messages can be followed, so a subject nobody was subscribed to has none.
+
 ## What matches a subject
 
 The overflow menu of a subject asks the question a wildcard makes hard: what would one concrete message on it actually run into? The answer is one dialog -- the connection's subscriptions that cover it, the streams that store it and through which of their own patterns, the consumers that would see it and how many filter it out, the alert rules that watch it, and the pinned schema that judges it. The subject can be edited in place, so it answers for one that has never been sent.

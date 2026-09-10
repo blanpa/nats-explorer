@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import type { NatsMessage } from 'shared';
-import { Bell, Check, Copy, Crosshair, Diff, Eraser, FolderTree, History, LineChart, MoreVertical, MousePointerClick, Send, X } from 'lucide-react';
+import { Bell, Check, Copy, Crosshair, Route, Diff, Eraser, FolderTree, History, LineChart, MoreVertical, MousePointerClick, Send, X } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import { useCanWrite } from '../../lib/auth';
 import { clearSubject, loadOlder, loadOlderBranch } from '../../lib/feed';
@@ -27,6 +27,7 @@ import { findBookmark, useBookmarks } from '../../lib/bookmarks';
 import BookmarkButton from './BookmarkButton';
 import HeaderList from './HeaderList';
 import MatchDialog from './MatchDialog';
+import TraceDialog from './TraceDialog';
 import { msgId, repeatedIds } from '../../lib/natsHeaders';
 import { isDelayField } from '../../lib/payloadTime';
 import RuleDialog from '../alerts/RuleDialog';
@@ -121,6 +122,8 @@ function SingleSubjectView() {
   const [alertDraft, setAlertDraft] = useState<AlertRule | null>(null);
   // "Who would receive this?" for the subject on screen.
   const [matching, setMatching] = useState<string | null>(null);
+  // The message on screen, followed through the other subjects it touched.
+  const [tracing, setTracing] = useState<NatsMessage | null>(null);
   const { data: rangedData, setData: setRangedData } = ranged;
 
   // Pages backwards through the range, the same way the live history does:
@@ -435,6 +438,11 @@ function SingleSubjectView() {
               <DropdownMenu.Item className={itemClass} onSelect={() => setMatching(subject)}>
                 <Crosshair size={13} /> What matches this subject?…
               </DropdownMenu.Item>
+              {display && (
+                <DropdownMenu.Item className={itemClass} onSelect={() => setTracing(display)}>
+                  <Route size={13} /> Follow this message…
+                </DropdownMenu.Item>
+              )}
               {canWrite && (
                 <>
                   <DropdownMenu.Item className={itemClass} onSelect={() => setAlertDraft(alertRuleForSubject(subject, isBranch || shownBelow.length > 0))}>
@@ -451,6 +459,7 @@ function SingleSubjectView() {
         </DropdownMenu.Root>
         {alertDraft && <RuleDialog rule={alertDraft} onClose={() => setAlertDraft(null)} />}
         {matching !== null && <MatchDialog subject={matching} onClose={() => setMatching(null)} />}
+        {tracing && <TraceDialog message={tracing} onClose={() => setTracing(null)} />}
       </div>
     </PaneHeader>
   );
