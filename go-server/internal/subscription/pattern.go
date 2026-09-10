@@ -1,8 +1,9 @@
 package subscription
 
 import (
-	"strings"
 	"sync/atomic"
+
+	"nats-explorer/internal/subject"
 )
 
 // PatternStats are the counters of one subscribed pattern.
@@ -44,18 +45,5 @@ func (p *patternStat) stats(samples int) PatternStats {
 	return st
 }
 
-// matchSubject reports whether a subject matches a NATS pattern: "*"
-// matches one token, ">" the rest of the subject (at least one token).
-func matchSubject(pattern, subject string) bool {
-	pt := strings.Split(pattern, ".")
-	st := strings.Split(subject, ".")
-	for i, p := range pt {
-		if p == ">" {
-			return i == len(pt)-1 && len(st) > i
-		}
-		if i >= len(st) || (p != "*" && p != st[i]) {
-			return false
-		}
-	}
-	return len(pt) == len(st)
-}
+// matchSubject reports whether a subject matches a NATS pattern.
+func matchSubject(pattern, subj string) bool { return subject.Match(pattern, subj) }

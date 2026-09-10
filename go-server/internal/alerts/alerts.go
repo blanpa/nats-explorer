@@ -19,6 +19,7 @@ import (
 
 	"nats-explorer/internal/filter"
 	"nats-explorer/internal/message"
+	"nats-explorer/internal/subject"
 )
 
 // Rule is one alert definition.
@@ -500,31 +501,9 @@ func (e *Engine) Forget(connID string) {
 	e.signal()
 }
 
-// MatchSubject reports whether a subject matches a NATS pattern: "*" matches
-// one token, ">" the rest (at least one token).
-func MatchSubject(pattern, subject string) bool {
-	pt := strings.Split(pattern, ".")
-	st := strings.Split(subject, ".")
-	for i, p := range pt {
-		if p == ">" {
-			return i == len(pt)-1 && len(st) > i
-		}
-		if i >= len(st) || (p != "*" && p != st[i]) {
-			return false
-		}
-	}
-	return len(pt) == len(st)
-}
+// MatchSubject reports whether a subject matches a NATS pattern.
+func MatchSubject(pattern, subj string) bool { return subject.Match(pattern, subj) }
 
 // LiteralPrefix returns the leading literal tokens of a pattern, the branch a
 // history lookup can start from; empty when the pattern starts with a wildcard.
-func LiteralPrefix(pattern string) string {
-	var toks []string
-	for _, t := range strings.Split(pattern, ".") {
-		if t == "*" || t == ">" {
-			break
-		}
-		toks = append(toks, t)
-	}
-	return strings.Join(toks, ".")
-}
+func LiteralPrefix(pattern string) string { return subject.LiteralPrefix(pattern) }
