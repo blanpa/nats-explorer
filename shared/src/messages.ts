@@ -111,6 +111,12 @@ export interface HistoryDbStats {
   oldest: number;
   /** messages not persisted because the writer fell behind */
   dropped: number;
+  /** messages the persist filter left out on purpose */
+  filtered: number;
+  /** bytes waiting to be written, out of `queueBytes` */
+  queued: number;
+  /** how much of a burst the writer buffers before it drops */
+  queueBytes: number;
   retention: string;
 }
 
@@ -127,6 +133,11 @@ export interface HistoryPersistence {
   retention: string;
   /** the word index behind the search over the persistent history */
   fullText?: boolean;
+  /** CEL expression deciding what is written to disk; empty keeps everything */
+  filter?: string;
+  /** how much of a burst the writer buffers, and what it may be raised to */
+  queueBytes?: number;
+  maxQueueBytes?: number;
   db?: HistoryDbStats;
 }
 

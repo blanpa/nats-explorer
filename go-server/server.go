@@ -81,6 +81,13 @@ type serverConfig struct {
 	// writer is then several times faster and a search falls back to a scan.
 	// Negated so the zero value is the behaviour everyone expects.
 	historyNoFullText bool
+	// historyFilter is the CEL expression deciding what reaches the disk
+	// copy; empty writes everything. It is the cheapest answer to a writer
+	// that cannot keep up, because what it excludes never takes up buffer.
+	historyFilter string
+	// historyQueueBytes is how much of a burst the writer buffers; 0 is the
+	// default.
+	historyQueueBytes int64
 	// open the saved connections flagged for it when the server starts
 	autoConnect bool
 	// basePath mounts everything under a prefix ("/nats"), for a reverse

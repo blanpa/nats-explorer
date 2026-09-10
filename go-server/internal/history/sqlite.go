@@ -13,6 +13,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"nats-explorer/internal/filter"
 	"nats-explorer/internal/message"
 )
 
@@ -38,6 +39,7 @@ type DB struct {
 	queueBytes  atomic.Int64
 	queueBudget atomic.Int64
 	dropped     atomic.Int64
+	filtered    atomic.Int64
 	written     atomic.Int64
 	count       atomic.Int64
 	stop        chan struct{}
@@ -60,8 +62,15 @@ type DBStats struct {
 	// Oldest message kept, unix ms; 0 when empty.
 	Oldest int64 `json:"oldest"`
 	// Messages not persisted because the writer fell behind.
-	Dropped   int64  `json:"dropped"`
-	Retention string `json:"retention"`
+	Dropped int64 `json:"dropped"`
+	// Filtered is what the persist filter excluded on purpose. It is
+	// counted apart from Dropped: one is a choice, the other is a loss,
+	// and a status that mixes them cannot be read.
+	Filtered int64 `json:"filtered"`
+	// Queued is what is waiting to be written, out of QueueBytes.
+	Queued     int64  `json:"queued"`
+	QueueBytes int64  `json:"queueBytes"`
+	Retention  string `json:"retention"`
 }
 
 const (
@@ -148,6 +157,9 @@ func (d *DB) Enqueue(connID string, rec *message.Record) {
 // queuedOverhead is what a pending record costs beyond its payload: the
 // record itself, the queue entry and the pointer in the channel.
 const queuedOverhead = 128
+
+// QueueBytesLimit is the budget the queue is bounded by.
+func (d *DB) QueueBytesLimit() int64 { return d.queueBudget.Load() }
 
 // SetQueueBytes changes how much of a burst is buffered. For tests and
 // benchmarks; the default suits the memory the history already uses.
@@ -465,7 +477,15 @@ func scan(rows *sql.Rows, connID string) ([]message.NatsMessage, error) {
 
 // Stats reports the database size.
 func (d *DB) Stats() DBStats {
-	st := DBStats{Path: d.path, Dropped: d.dropped.Load(), Retention: d.Retention().String(), Messages: d.count.Load()}
+	st := DBStats{
+		Path:       d.path,
+		Dropped:    d.dropped.Load(),
+		Filtered:   d.filtered.Load(),
+		Queued:     d.queueBytes.Load(),
+		QueueBytes: d.queueBudget.Load(),
+		Retention:  d.Retention().String(),
+		Messages:   d.count.Load(),
+	}
 	d.db.QueryRow(`SELECT COALESCE(MIN(ts), 0) FROM messages`).Scan(&st.Oldest)
 	if fi, err := os.Stat(d.path); err == nil {
 		st.Bytes = fi.Size()
@@ -523,6 +543,11 @@ func (d *DB) SetFullText(on bool) error {
 type Tee struct {
 	*MemStore
 	db atomic.Pointer[DB]
+	// persist decides what reaches the database. Nil means everything, and
+	// that is the only state in which the hot path pays nothing for it. The
+	// memory store is never filtered: the live feed and the tree have to
+	// show what actually arrives, whatever is kept on disk.
+	persist atomic.Pointer[filter.Program]
 }
 
 // NewTee wraps a memory store; without a database it behaves like one.
@@ -538,9 +563,30 @@ func (t *Tee) SetDB(db *DB) *DB { return t.db.Swap(db) }
 
 func (t *Tee) Append(connID string, rec *message.Record) {
 	t.MemStore.Append(connID, rec)
-	if db := t.db.Load(); db != nil {
-		db.Enqueue(connID, rec)
+	db := t.db.Load()
+	if db == nil {
+		return
 	}
+	// The filter runs before the queue, not in the writer: the point of it
+	// is that what it excludes never takes up queue budget, so a burst of
+	// uninteresting subjects cannot push out the ones being kept.
+	if p := t.persist.Load(); p != nil && !p.Match(rec) {
+		db.filtered.Add(1)
+		return
+	}
+	db.Enqueue(connID, rec)
+}
+
+// SetPersistFilter installs the expression that decides what is written to
+// disk; nil or an empty program keeps everything.
+func (t *Tee) SetPersistFilter(p *filter.Program) { t.persist.Store(p) }
+
+// PersistFilter is the installed expression, empty when everything is kept.
+func (t *Tee) PersistFilter() string {
+	if p := t.persist.Load(); p != nil {
+		return p.Expr
+	}
+	return ""
 }
 
 // RecordedSubjects answers from the database; without one the history is

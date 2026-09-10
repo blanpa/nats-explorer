@@ -40,7 +40,7 @@ func TestPersistenceToggle(t *testing.T) {
 		t.Fatalf("database created while switched off: %v", err)
 	}
 
-	if err := p.Set(true, 2*time.Hour, true, false); err != nil {
+	if err := p.Set(PersistenceRequest{Enabled: true, Retention: 2 * time.Hour, FullText: true, Purge: false}); err != nil {
 		t.Fatal(err)
 	}
 	if !saved.Enabled || saved.Retention != "2h0m0s" || saved.FullText == nil || !*saved.FullText {
@@ -59,7 +59,7 @@ func TestPersistenceToggle(t *testing.T) {
 	}
 
 	// Changing the retention keeps the same database.
-	if err := p.Set(true, 30*time.Minute, true, false); err != nil {
+	if err := p.Set(PersistenceRequest{Enabled: true, Retention: 30 * time.Minute, FullText: true, Purge: false}); err != nil {
 		t.Fatal(err)
 	}
 	if tee.DB() != db || db.Retention() != 30*time.Minute {
@@ -67,7 +67,7 @@ func TestPersistenceToggle(t *testing.T) {
 	}
 
 	// Off again: the file stays, appends keep working.
-	if err := p.Set(false, 30*time.Minute, true, false); err != nil {
+	if err := p.Set(PersistenceRequest{Enabled: false, Retention: 30 * time.Minute, FullText: true, Purge: false}); err != nil {
 		t.Fatal(err)
 	}
 	tee.Append("c1", rec("a.b", `{"v":3}`, 3))
@@ -82,7 +82,7 @@ func TestPersistenceToggle(t *testing.T) {
 	}
 
 	// On again: what was written before is still there.
-	if err := p.Set(true, time.Hour, true, false); err != nil {
+	if err := p.Set(PersistenceRequest{Enabled: true, Retention: time.Hour, FullText: true, Purge: false}); err != nil {
 		t.Fatal(err)
 	}
 	msgs, err = tee.DB().Range(context.Background(), "c1", "a.b", false, from, time.Now().UnixMilli(), 10)
@@ -102,7 +102,7 @@ func TestPersistencePurge(t *testing.T) {
 	defer p.Close()
 	tee.Append("c1", rec("a.b", "x", 1))
 	tee.DB().Flush()
-	if err := p.Set(false, time.Hour, true, true); err != nil {
+	if err := p.Set(PersistenceRequest{Enabled: false, Retention: time.Hour, FullText: true, Purge: true}); err != nil {
 		t.Fatal(err)
 	}
 	for _, suffix := range []string{"", "-wal", "-shm"} {
@@ -122,7 +122,7 @@ func TestPersistenceNotEditable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer p.Close()
-	if err := p.Set(false, time.Hour, true, false); err != ErrManaged {
+	if err := p.Set(PersistenceRequest{Enabled: false, Retention: time.Hour, FullText: true, Purge: false}); err != ErrManaged {
 		t.Fatalf("managed Set = %v", err)
 	}
 	if st := p.Status(); !st.Managed || !st.Enabled || st.DB == nil {
@@ -136,7 +136,7 @@ func TestPersistenceNotEditable(t *testing.T) {
 	if st := none.Status(); st.Supported || st.Reason == "" {
 		t.Fatalf("unsupported status = %+v", st)
 	}
-	if err := none.Set(true, time.Hour, true, false); err != ErrUnsupported {
+	if err := none.Set(PersistenceRequest{Enabled: true, Retention: time.Hour, FullText: true, Purge: false}); err != ErrUnsupported {
 		t.Fatalf("unsupported Set = %v", err)
 	}
 }
@@ -176,7 +176,7 @@ func TestPersistenceRetentionBounds(t *testing.T) {
 	}
 	defer p.Close()
 	for _, d := range []time.Duration{time.Second, 2 * MaxRetention} {
-		if err := p.Set(true, d, true, false); err == nil {
+		if err := p.Set(PersistenceRequest{Enabled: true, Retention: d, FullText: true, Purge: false}); err == nil {
 			t.Fatalf("retention %s accepted", d)
 		}
 	}
@@ -208,7 +208,7 @@ func TestFullTextCanBeSwitched(t *testing.T) {
 
 	// Off: the message written afterwards is not indexed, so the search has
 	// to scan -- and still find both.
-	if err := p.Set(true, time.Hour, false, false); err != nil {
+	if err := p.Set(PersistenceRequest{Enabled: true, Retention: time.Hour, FullText: false, Purge: false}); err != nil {
 		t.Fatal(err)
 	}
 	if db.FullText() {
@@ -223,7 +223,7 @@ func TestFullTextCanBeSwitched(t *testing.T) {
 
 	// On again: the index is rebuilt from what is stored, including what
 	// arrived while it was off.
-	if err := p.Set(true, time.Hour, true, false); err != nil {
+	if err := p.Set(PersistenceRequest{Enabled: true, Retention: time.Hour, FullText: true, Purge: false}); err != nil {
 		t.Fatal(err)
 	}
 	found, err = db.Search(context.Background(), "c1", "", "nachkalibriert", from, time.Now().UnixMilli(), 10)

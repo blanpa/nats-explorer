@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"nats-explorer/internal/auth"
+	"nats-explorer/internal/filter"
 	"nats-explorer/internal/history"
 	"nats-explorer/internal/settings"
 )
@@ -97,6 +98,26 @@ func main() {
 	// HISTORY_FTS=0 drops the word index of the persistent history: the
 	// writer is then several times faster and a search scans instead.
 	cfg.historyNoFullText = os.Getenv("HISTORY_FTS") == "0"
+	// HISTORY_FILTER is a CEL expression over the same variables as a
+	// payload filter; only messages it accepts are written to disk. It is
+	// the one knob that lowers the write rate itself rather than making the
+	// writer faster, so a firehose with a handful of interesting subjects
+	// costs the disk almost nothing.
+	if expr := os.Getenv("HISTORY_FILTER"); expr != "" {
+		if _, err := filter.Compile(expr); err != nil {
+			log.Fatalf("HISTORY_FILTER: %v", err)
+		}
+		cfg.historyFilter = expr
+	}
+	// HISTORY_QUEUE_BYTES is how much of a burst the writer buffers before
+	// it starts dropping.
+	if v := os.Getenv("HISTORY_QUEUE_BYTES"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n < history.MinQueueBytes || n > history.MaxQueueBytes {
+			log.Fatalf("HISTORY_QUEUE_BYTES: %q is not a size between %d and %d", v, history.MinQueueBytes, history.MaxQueueBytes)
+		}
+		cfg.historyQueueBytes = n
+	}
 	if path := os.Getenv("HISTORY_DB"); path != "" {
 		cfg.historyDB = path
 		cfg.historyManaged = true

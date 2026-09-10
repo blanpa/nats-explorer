@@ -62,6 +62,10 @@ func writeMetrics(w http.ResponseWriter, statuses []connection.Status, managers 
 		metric("nats_explorer_history_db_messages", "Messages in the SQLite history.", "gauge", fmt.Sprintf("nats_explorer_history_db_messages %d", st.Messages))
 		metric("nats_explorer_history_db_bytes", "Size of the SQLite history on disk.", "gauge", fmt.Sprintf("nats_explorer_history_db_bytes %d", st.Bytes))
 		metric("nats_explorer_history_db_dropped_total", "Messages not persisted because the writer fell behind.", "counter", fmt.Sprintf("nats_explorer_history_db_dropped_total %d", st.Dropped))
+		// Apart from dropped: what the persist filter left out is a choice,
+		// not a loss, and an alert on the two together would fire on both.
+		metric("nats_explorer_history_db_filtered_total", "Messages not persisted because the persist filter excluded them.", "counter", fmt.Sprintf("nats_explorer_history_db_filtered_total %d", st.Filtered))
+		metric("nats_explorer_history_db_queued_bytes", "Bytes waiting to be written to the SQLite history.", "gauge", fmt.Sprintf("nats_explorer_history_db_queued_bytes %d", st.Queued))
 	}
 	io.WriteString(w, b.String())
 }

@@ -174,7 +174,7 @@ export const api = {
   /** Whether the history is also written to SQLite, and how far back it is kept. */
   getHistoryPersistence: () => request<HistoryPersistence>('/history/persistence'),
   /** Switches the SQLite copy on or off; `purge` deletes the file with it. */
-  setHistoryPersistence: (input: { enabled: boolean; retention?: string; fullText?: boolean; purge?: boolean }) =>
+  setHistoryPersistence: (input: { enabled: boolean; retention?: string; fullText?: boolean; filter?: string; queueBytes?: number; purge?: boolean }) =>
     request<HistoryPersistence>('/history/persistence', { method: 'PUT', ...json(input) }),
 
   // Publish / request

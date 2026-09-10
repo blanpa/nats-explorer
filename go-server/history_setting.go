@@ -22,7 +22,9 @@ func openHistoryDB(tee *history.Tee, cfg serverConfig) *history.Persistence {
 		// The word index is on unless a stored choice or the environment
 		// says otherwise: searching is what most installations want, and
 		// the ones recording a firehose can trade it for write throughput.
-		FullText: !cfg.historyNoFullText,
+		FullText:   !cfg.historyNoFullText,
+		Filter:     cfg.historyFilter,
+		QueueBytes: cfg.historyQueueBytes,
 	}
 	if cfg.settings != nil && !cfg.historyManaged {
 		if raw, ok := cfg.settings.Get(history.SettingsKey); ok {
@@ -46,6 +48,9 @@ func openHistoryDB(tee *history.Tee, cfg serverConfig) *history.Persistence {
 		log.Printf("Persistent history stays off: %v", err)
 	case tee.DB() != nil:
 		log.Printf("Persistent history in %s (retention %s)", cfg.historyDB, tee.DB().Retention())
+		if expr := tee.PersistFilter(); expr != "" {
+			log.Printf("Persisting only messages matching %s", expr)
+		}
 	}
 	return p
 }

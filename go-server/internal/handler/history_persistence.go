@@ -35,11 +35,16 @@ func (h *HistoryHandler) SetPersistence(w http.ResponseWriter, r *http.Request) 
 		// FullText fills the word index behind the search over the persistent
 		// history. Absent means on: it is what an older client expects.
 		FullText *bool `json:"fullText"`
+		// Filter decides what is written to disk. Empty keeps everything;
+		// absent (an older client) leaves the current one as it is.
+		Filter *string `json:"filter"`
+		// QueueBytes is the writer's buffer; absent or 0 keeps the current one.
+		QueueBytes int64 `json:"queueBytes"`
 		// Purge deletes the database file when switching off, so the stored
 		// payloads really are gone.
 		Purge bool `json:"purge"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -53,7 +58,18 @@ func (h *HistoryHandler) SetPersistence(w http.ResponseWriter, r *http.Request) 
 		retention = d
 	}
 	fullText := body.FullText == nil || *body.FullText
-	if err := h.Persist.Set(body.Enabled, retention, fullText, body.Purge); err != nil {
+	req := history.PersistenceRequest{
+		Enabled:    body.Enabled,
+		Retention:  retention,
+		FullText:   fullText,
+		Filter:     h.Persist.Status().Filter,
+		QueueBytes: body.QueueBytes,
+		Purge:      body.Purge,
+	}
+	if body.Filter != nil {
+		req.Filter = *body.Filter
+	}
+	if err := h.Persist.Set(req); err != nil {
 		status := http.StatusBadRequest
 		switch {
 		case errors.Is(err, history.ErrManaged), errors.Is(err, history.ErrUnsupported):
