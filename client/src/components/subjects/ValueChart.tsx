@@ -173,6 +173,25 @@ export default function ValueChart({ series, height = 160, onPick, marker, type,
     );
   }
 
+  let t0 = Number.POSITIVE_INFINITY;
+  let t1 = Number.NEGATIVE_INFINITY;
+  for (const d of drawable) {
+    if (d.points[0].t < t0) t0 = d.points[0].t;
+    if (d.points[d.points.length - 1].t > t1) t1 = d.points[d.points.length - 1].t;
+  }
+
+  // Every value at one instant is not a line. Drawn anyway it is a column
+  // of zero width against the left edge, which reads as an empty chart --
+  // and that is what a long range over a subject with a handful of messages
+  // used to look like, when the minute buckets reduced them all to one.
+  if (t0 === t1) {
+    return (
+      <div ref={wrapRef} className="text-xs text-muted py-6 text-center">
+        Every value of <span className="font-mono text-syn-num">{series.map(s => s.field).join(', ')}</span> falls on one instant · nothing to draw over time
+      </div>
+    );
+  }
+
   const pad = { top: 14, right: 14, bottom: 22, left: 56 };
   const w = width - pad.left - pad.right;
   const h = height - pad.top - pad.bottom;
@@ -194,12 +213,6 @@ export default function ValueChart({ series, height = 160, onPick, marker, type,
     axisMax += 1;
   }
 
-  let t0 = Number.POSITIVE_INFINITY;
-  let t1 = Number.NEGATIVE_INFINITY;
-  for (const d of drawable) {
-    if (d.points[0].t < t0) t0 = d.points[0].t;
-    if (d.points[d.points.length - 1].t > t1) t1 = d.points[d.points.length - 1].t;
-  }
   const tRange = Math.max(1, t1 - t0);
   const x = (t: number) => pad.left + ((t - t0) / tRange) * w;
 

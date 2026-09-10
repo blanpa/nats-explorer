@@ -54,7 +54,7 @@ A message that does not have the field simply does not match; a broken expressio
 
 The search field over the recorded history looks at a subject and everything below it, or across every subject: the toggle sits in the results line. Clicking a hit shows its payload under the list, with a button to open the subject it came from; the same holds for the list of a branch and for several subjects watched at once. With a persistent history the search runs on a full-text index, so a word or a prefix like `convey*` is fast even over days; a fragment that the index cannot express falls back to a scan and still finds it.
 
-Charts over more than six hours are drawn from minute aggregates that the writer keeps alongside the messages: minimum, maximum and average per minute and numeric field. A week of data is then a few hundred points instead of a few hundred thousand, and the chart says "per minute" when it shows them.
+Charts over more than six hours are drawn from minute aggregates -- unless the aggregates of that range span a single minute, in which case there is nothing to reduce and the messages are read instead, with their real times. They are aggregates that the writer keeps alongside the messages: minimum, maximum and average per minute and numeric field. A week of data is then a few hundred points instead of a few hundred thousand, and the chart says "per minute" when it shows them.
 
 ## Alerts
 

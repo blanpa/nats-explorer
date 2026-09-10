@@ -523,6 +523,12 @@ type SeriesResponse struct {
 	Agg Aggregation `json:"agg"`
 }
 
+// spansTime says whether a series covers more than one instant, which is
+// what it takes to draw it over time.
+func spansTime(points [][2]float64) bool {
+	return len(points) > 1 && points[0][0] != points[len(points)-1][0]
+}
+
 // rollupPoints turns one stored minute into the points the aggregation asks
 // for. min, max, sum and count are stored; the average is derived from the
 // sum. Rate differences the minute's maximum, because the last value of a
@@ -600,8 +606,17 @@ func (h *HistoryHandler) Series(w http.ResponseWriter, r *http.Request) {
 		if agg == AggRate {
 			points = rateOf(points)
 		}
-		writeJSON(w, SeriesResponse{Subject: subject, Field: field, Points: points, Samples: samples, Source: "rollup", Agg: agg})
-		return
+		// The minute buckets only answer if they span more than one minute.
+		// A subject with three messages in one minute reduces to a single
+		// bucket, and a chart of one instant has no width: the reader picks
+		// "All", the range is long, and nothing is drawn. Whatever is there
+		// is few enough to read as messages, and the messages have the real
+		// times. The same way out covers a range whose rollups have been
+		// pruned while the messages are still kept.
+		if spansTime(points) {
+			writeJSON(w, SeriesResponse{Subject: subject, Field: field, Points: points, Samples: samples, Source: "rollup", Agg: agg})
+			return
+		}
 	}
 
 	var samples [][2]float64

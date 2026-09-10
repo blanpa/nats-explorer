@@ -126,6 +126,23 @@ describe('ValueChart', () => {
     expect(container.querySelectorAll('path')).toHaveLength(2);
   });
 
+  it('says when everything falls on one instant instead of drawing a hairline', () => {
+    // Three messages inside one minute reduce to one bucket over a long
+    // range; drawn over a time span of zero they are a column of no width
+    // against the left edge, which reads as an empty chart.
+    const oneMoment: ChartSeries = {
+      field: 'n',
+      color: colorForIndex(0),
+      points: [
+        { t: 5000, v: 0 },
+        { t: 5000, v: 2 },
+      ],
+    };
+    const { container } = render(<ValueChart series={[oneMoment]} type="line" />);
+    expect(container.textContent).toContain('one instant');
+    expect(container.querySelector('svg')).toBeNull();
+  });
+
   it('says what it is still waiting for', () => {
     const { container } = render(<ValueChart series={[{ ...temp, points: [{ t: 1, v: 1 }] }]} type="line" />);
     expect(container.textContent).toContain('Collecting data points');

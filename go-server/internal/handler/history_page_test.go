@@ -144,3 +144,82 @@ func TestGetBranchReadsPastMemory(t *testing.T) {
 		t.Fatal("branch says there is nothing older, with four on disk")
 	}
 }
+
+// A long range is answered from the minute buckets, because a week of
+// messages is too many points to move. But a subject with three messages in
+// one minute reduces to a single bucket, and a chart of one instant has no
+// width: picking "All" drew nothing at all. The buckets only answer when
+// they span more than one of them.
+func TestSeriesFallsBackToMessagesWhenTheRollupsSpanOneMinute(t *testing.T) {
+	base := time.Now().Add(-time.Hour).Truncate(time.Minute).UnixMilli()
+	db, err := history.OpenDB(filepath.Join(t.TempDir(), "h.db"), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	tee := history.NewTee(history.NewMemStore(1<<20, 3))
+	tee.SetDB(db)
+	// Three messages a quarter second apart: one minute bucket, three times.
+	for i := 0; i < 3; i++ {
+		tee.Append("c", &message.Record{
+			Subject:   "e2e.wipe.b",
+			Data:      []byte(`{"n":` + strconv.Itoa(i) + `}`),
+			Timestamp: base + int64(i)*250,
+			Sequence:  uint64(i + 1),
+		})
+	}
+	db.Flush()
+	h := &HistoryHandler{History: tee, Tee: tee}
+
+	rec := httptest.NewRecorder()
+	q := "subject=e2e.wipe.b&connId=c&field=n&from=0&to=" + strconv.FormatInt(time.Now().UnixMilli(), 10) + "&points=600"
+	h.Series(rec, httptest.NewRequest("GET", "/api/history/series?"+q, nil))
+	if rec.Code != 200 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp SeriesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Source == "rollup" {
+		t.Fatalf("answered from one minute bucket: %+v", resp.Points)
+	}
+	if len(resp.Points) != 3 {
+		t.Fatalf("points = %v, want the three messages", resp.Points)
+	}
+	if resp.Points[0][0] == resp.Points[len(resp.Points)-1][0] {
+		t.Fatalf("points still share one instant: %v", resp.Points)
+	}
+}
+
+// Enough minutes to describe, and the buckets do the describing.
+func TestSeriesUsesTheRollupsOverSeveralMinutes(t *testing.T) {
+	base := time.Now().Add(-24 * time.Hour).Truncate(time.Minute).UnixMilli()
+	db, err := history.OpenDB(filepath.Join(t.TempDir(), "h.db"), 48*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	tee := history.NewTee(history.NewMemStore(1<<20, 3))
+	tee.SetDB(db)
+	for i := 0; i < 10; i++ {
+		tee.Append("c", &message.Record{
+			Subject:   "plant.temp",
+			Data:      []byte(`{"n":` + strconv.Itoa(i) + `}`),
+			Timestamp: base + int64(i)*int64(time.Minute/time.Millisecond),
+			Sequence:  uint64(i + 1),
+		})
+	}
+	db.Flush()
+	h := &HistoryHandler{History: tee, Tee: tee}
+	rec := httptest.NewRecorder()
+	q := "subject=plant.temp&connId=c&field=n&from=0&to=" + strconv.FormatInt(time.Now().UnixMilli(), 10) + "&points=600"
+	h.Series(rec, httptest.NewRequest("GET", "/api/history/series?"+q, nil))
+	var resp SeriesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Source != "rollup" {
+		t.Fatalf("read the messages where ten minutes of buckets would do: %+v", resp)
+	}
+}
