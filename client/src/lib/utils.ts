@@ -199,3 +199,11 @@ export function readSetting<T>(key: string, fallback: T): T {
 export function writeSetting(key: string, value: unknown): void {
   persist(key, value);
 }
+
+/** Seconds in a Go duration string like "72h0m0s"; 0 when it cannot be read. */
+export function parseGoDuration(d: string): number {
+  const units: Record<string, number> = { ns: 1e-9, µs: 1e-6, us: 1e-6, ms: 1e-3, s: 1, m: 60, h: 3600 };
+  let total = 0;
+  for (const [, num, unit] of d.matchAll(/(\d+(?:\.\d+)?)(ns|µs|us|ms|h|m|s)/g)) total += Number(num) * units[unit];
+  return total;
+}

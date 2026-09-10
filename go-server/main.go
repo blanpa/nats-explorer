@@ -89,8 +89,11 @@ func main() {
 	// reaches; without HISTORY_DB it is the starting value of the setting.
 	cfg.historyRetention = history.DefaultRetention
 	if r := os.Getenv("HISTORY_RETENTION"); r != "" {
+		// "0" keeps every message: nothing is deleted by age. That is a
+		// real answer for a recording made on purpose, and the only way to
+		// say it, so it is not treated as a mistyped duration.
 		d, err := time.ParseDuration(r)
-		if err != nil || d <= 0 {
+		if err != nil || d < 0 {
 			log.Fatalf("HISTORY_RETENTION: %q is not a duration", r)
 		}
 		cfg.historyRetention = d

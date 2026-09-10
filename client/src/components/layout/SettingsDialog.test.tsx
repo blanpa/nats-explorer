@@ -4,7 +4,8 @@ import type { HistoryPersistence } from 'shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAuth } from '../../lib/auth';
 import { useStore } from '../../store';
-import SettingsDialog, { parseGoDuration } from './SettingsDialog';
+import { parseGoDuration } from '../../lib/utils';
+import SettingsDialog from './SettingsDialog';
 
 const getHistoryPersistence = vi.fn<() => Promise<HistoryPersistence>>();
 type SetInput = { enabled: boolean; retention?: string; fullText?: boolean; filter?: string; queueBytes?: number; purge?: boolean };
@@ -141,6 +142,23 @@ describe('SettingsDialog', () => {
     fireEvent.change(screen.getByLabelText('Write buffer'), { target: { value: String(256 << 20) } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(setHistoryPersistence).toHaveBeenCalledWith(saved({ filter: 'subject.startsWith("orders.")', queueBytes: 256 << 20 })));
+  });
+
+  it('keeps every message when the retention is set to forever', async () => {
+    getHistoryPersistence.mockResolvedValue(status({ enabled: true, db: dbStats() }));
+    render(<SettingsDialog />);
+    fireEvent.change(await screen.findByLabelText('Keep messages for'), { target: { value: '0s' } });
+    // "Older messages are deleted once a minute" would be the opposite of true.
+    expect(screen.getByText(/Nothing is deleted by age/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(setHistoryPersistence).toHaveBeenCalledWith(saved({ retention: '0s' })));
+  });
+
+  it('shows a backend retention of zero as forever', async () => {
+    getHistoryPersistence.mockResolvedValue(status({ enabled: true, retention: '0s', db: dbStats() }));
+    render(<SettingsDialog />);
+    expect(await screen.findByLabelText('Keep messages for')).toHaveValue('0s');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
   });
 
   it('reports an installation configured by HISTORY_DB instead of editing it', async () => {

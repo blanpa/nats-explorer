@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"nats-explorer/internal/message"
 )
 
 // The filter decides what reaches the disk, never what the live view shows:
@@ -160,4 +162,58 @@ func mustJSON(t *testing.T, v any) json.RawMessage {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+// A zero retention keeps every message: the cleanup tick deletes nothing.
+// It is the setting for a recording made on purpose, and the one that
+// cannot be undone by waiting, so it has to be asked for exactly.
+func TestRetentionForever(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history.db")
+	tee := NewTee(NewMemStore(0, 0))
+	var saved PersistenceConfig
+	p, err := NewPersistence(tee, PersistenceOptions{
+		Path: path, Retention: Forever, Enabled: true, FullText: true,
+		Save: func(c PersistenceConfig) error { saved = c; return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	if got := tee.DB().Retention(); got != Forever {
+		t.Fatalf("retention = %s, want forever (it must not fall back to the default)", got)
+	}
+
+	// A message older than any sane retention survives the cleanup tick.
+	old := &message.Record{Subject: "a.b", Data: []byte("1"), Timestamp: time.Now().Add(-3000 * time.Hour).UnixMilli(), Sequence: 1}
+	tee.Append("c1", old)
+	tee.DB().Flush()
+	tee.DB().cleanup()
+	if n := tee.DB().Stats().Messages; n != 1 {
+		t.Fatalf("messages = %d after a cleanup, want the old one kept", n)
+	}
+
+	// And it can be chosen and taken back from the UI.
+	if err := p.Set(PersistenceRequest{Enabled: true, Retention: Forever, FullText: true}); err != nil {
+		t.Fatal(err)
+	}
+	if saved.Retention != "0s" || p.Status().Retention != "0s" {
+		t.Fatalf("saved = %q, status = %q, want 0s", saved.Retention, p.Status().Retention)
+	}
+	var opts PersistenceOptions
+	opts.Retention = DefaultRetention
+	opts.ParseConfig(mustJSON(t, saved))
+	if opts.Retention != Forever {
+		t.Fatalf("parsed retention = %s, want forever to survive a restart", opts.Retention)
+	}
+	if err := p.Set(PersistenceRequest{Enabled: true, Retention: time.Hour, FullText: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := tee.DB().Retention(); got != time.Hour {
+		t.Fatalf("retention = %s, want it back to an hour", got)
+	}
+
+	// Between zero and the minimum is still a mistyped duration, not forever.
+	if err := p.Set(PersistenceRequest{Enabled: true, Retention: time.Second, FullText: true}); err == nil {
+		t.Fatal("a one-second retention was accepted")
+	}
 }

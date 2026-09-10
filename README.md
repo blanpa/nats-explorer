@@ -251,7 +251,7 @@ See [docs/review-2026-09.md](docs/review-2026-09.md) for the findings of the Sep
 | `AUTH_USERS`  | --      | Users file (`name:role:bcrypt-hash`, roles `admin` / `viewer`); the UI shows a login, viewers are read-only. `nats-explorer hash-password` prints a hash. |
 | `HISTORY_MB`  | `256`   | Memory budget for the recorded message history the UI pulls from |
 | `HISTORY_DB`  | --      | SQLite file for a persistent copy of the history, always on and not changeable from the UI. Without it a `STORAGE_DIR` server can switch the copy on in the settings (`<STORAGE_DIR>/history.db`) |
-| `HISTORY_RETENTION` | `72h` | How far back the persistent copy reaches; without `HISTORY_DB` the starting value of the setting |
+| `HISTORY_RETENTION` | `72h` | How far back the persistent copy reaches, `0` for everything; without `HISTORY_DB` the starting value of the setting |
 | `HISTORY_FTS` | `1`     | `0` drops the full-text index of the persistent history: much faster writes, searches scan instead |
 | `HISTORY_FILTER` | –       | CEL expression deciding what is written to disk; empty writes everything |
 | `HISTORY_QUEUE_BYTES` | `67108864` | How much of a burst the writer buffers before it drops from the disk copy |

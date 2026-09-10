@@ -219,17 +219,24 @@ func (d *DB) writer() {
 			flush()
 		case <-cleanup.C:
 			flush()
-			if keep := d.Retention(); keep > 0 {
-				if res, err := d.db.Exec(`DELETE FROM messages WHERE ts < ?`, time.Now().Add(-keep).UnixMilli()); err == nil {
-					if n, _ := res.RowsAffected(); n > 0 {
-						d.count.Add(-n)
-					}
-				}
-			}
-			if d.rollupKeep > 0 {
-				d.db.Exec(`DELETE FROM rollups WHERE minute < ?`, time.Now().Add(-d.rollupKeep).UnixMilli())
+			d.cleanup()
+		}
+	}
+}
+
+// cleanup deletes what has aged out. A zero retention is Forever: nothing
+// is deleted by age, and the database grows until the disk does not allow
+// it -- which is the point of asking for it.
+func (d *DB) cleanup() {
+	if keep := d.Retention(); keep > 0 {
+		if res, err := d.db.Exec(`DELETE FROM messages WHERE ts < ?`, time.Now().Add(-keep).UnixMilli()); err == nil {
+			if n, _ := res.RowsAffected(); n > 0 {
+				d.count.Add(-n)
 			}
 		}
+	}
+	if d.rollupKeep > 0 {
+		d.db.Exec(`DELETE FROM rollups WHERE minute < ?`, time.Now().Add(-d.rollupKeep).UnixMilli())
 	}
 }
 

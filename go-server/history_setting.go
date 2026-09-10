@@ -47,7 +47,11 @@ func openHistoryDB(tee *history.Tee, cfg serverConfig) *history.Persistence {
 	case err != nil:
 		log.Printf("Persistent history stays off: %v", err)
 	case tee.DB() != nil:
-		log.Printf("Persistent history in %s (retention %s)", cfg.historyDB, tee.DB().Retention())
+		if keep := tee.DB().Retention(); keep == history.Forever {
+			log.Printf("Persistent history in %s (every message kept, no retention)", cfg.historyDB)
+		} else {
+			log.Printf("Persistent history in %s (retention %s)", cfg.historyDB, keep)
+		}
 		if expr := tee.PersistFilter(); expr != "" {
 			log.Printf("Persisting only messages matching %s", expr)
 		}

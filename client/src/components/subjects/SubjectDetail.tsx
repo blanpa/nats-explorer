@@ -338,7 +338,7 @@ function SingleSubjectView() {
         {listMessage && <MessagePanel message={listMessage} onClose={() => setListMessage(null)} onOpenSubject={revealSubject} />}
         <div className="shrink-0 px-4 py-2 text-xs text-faint flex items-center gap-1.5 border-t border-line">
           <FolderTree size={12} /> Showing {formatCount(shownBelow.length)} messages below <span className="font-mono">{subject}</span>
-          {range ? ` in the last ${range.label}` : ', newest first'}. Click a row to see the message, "Open subject" to go there.
+          {range ? ` in ${range.prose}` : ', newest first'}. Click a row to see the message, "Open subject" to go there.
         </div>
         <PublishDrawer />
       </div>
@@ -380,7 +380,7 @@ function SingleSubjectView() {
             ) : (range ? ranged.error : view?.error) ? (
               <EmptyState compact title="History unavailable" description={(range ? ranged.error : view?.error) ?? undefined} />
             ) : range ? (
-              <EmptyState compact title="Nothing recorded in this range" description={`No message on this subject between the bounds of ${range.label}.`} />
+              <EmptyState compact title="Nothing recorded in this range" description={`No message on this subject in ${range.prose}.`} />
             ) : (
               <EmptyState compact title="Waiting for a message on this subject" />
             )

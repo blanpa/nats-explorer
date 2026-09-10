@@ -47,9 +47,17 @@ const SettingsKey = "ne.historyDb.v1"
 const (
 	// MinRetention keeps a mistyped value from emptying the database on the
 	// next cleanup tick; MaxRetention is well past what a message log needs.
+	// Between them, or Forever.
 	MinRetention     = time.Minute
 	MaxRetention     = 365 * 24 * time.Hour
 	DefaultRetention = 72 * time.Hour
+
+	// Forever keeps every message: the cleanup tick deletes nothing and the
+	// database grows until the disk is full. It is a real answer for an
+	// audit log or a recording made on purpose, so it is offered -- but it
+	// is the one setting here that cannot be undone by waiting, which is
+	// why it is not a duration anyone can arrive at by typing.
+	Forever = time.Duration(0)
 
 	// MinQueueBytes still holds a batch; MaxQueueBytes is where buffering a
 	// burst turns into holding the whole burst in memory, which is the
@@ -118,7 +126,7 @@ func (o *PersistenceOptions) ParseConfig(raw json.RawMessage) {
 		return
 	}
 	o.Enabled = c.Enabled
-	if d, err := time.ParseDuration(c.Retention); err == nil && d >= MinRetention && d <= MaxRetention {
+	if d, err := time.ParseDuration(c.Retention); err == nil && validRetention(d) {
 		o.Retention = d
 	}
 	if c.FullText != nil {
@@ -141,7 +149,9 @@ func (o *PersistenceOptions) ParseConfig(raw json.RawMessage) {
 // options ask for it. An error means the database could not be opened; the
 // controller is usable either way and reports the history as memory-only.
 func NewPersistence(tee *Tee, o PersistenceOptions) (*Persistence, error) {
-	if o.Retention <= 0 {
+	// Only a negative duration is nonsense; zero is Forever and has to
+	// survive this, or the setting could never be stored.
+	if o.Retention < 0 {
 		o.Retention = DefaultRetention
 	}
 	if o.QueueBytes < MinQueueBytes || o.QueueBytes > MaxQueueBytes {
@@ -249,8 +259,8 @@ func (p *Persistence) Set(req PersistenceRequest) error {
 		return ErrManaged
 	case p.path == "":
 		return ErrUnsupported
-	case req.Retention < MinRetention || req.Retention > MaxRetention:
-		return fmt.Errorf("retention must be between %s and %s", MinRetention, MaxRetention)
+	case !validRetention(req.Retention):
+		return fmt.Errorf("retention must be between %s and %s, or zero to keep everything", MinRetention, MaxRetention)
 	case req.QueueBytes < MinQueueBytes || req.QueueBytes > MaxQueueBytes:
 		return fmt.Errorf("the write buffer must be between %s and %s", formatBytes(MinQueueBytes), formatBytes(MaxQueueBytes))
 	}
@@ -305,6 +315,11 @@ func (p *Persistence) Set(req PersistenceRequest) error {
 		})
 	}
 	return nil
+}
+
+// validRetention accepts a duration in range, or Forever.
+func validRetention(d time.Duration) bool {
+	return d == Forever || (d >= MinRetention && d <= MaxRetention)
 }
 
 // formatBytes renders a budget the way the message about it reads best.

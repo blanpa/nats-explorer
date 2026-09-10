@@ -4,7 +4,7 @@ import type { HistoryPersistence } from 'shared';
 import { api, errorMessage } from '../../lib/api';
 import { useCanWrite } from '../../lib/auth';
 import { useAsync } from '../../lib/useAsync';
-import { formatBytes, formatDateTime, formatNumber } from '../../lib/utils';
+import { formatBytes, formatDateTime, formatNumber, parseGoDuration } from '../../lib/utils';
 import { useStore } from '../../store';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
@@ -20,15 +20,10 @@ const RETENTIONS = [
   { value: '72h', label: '3 days' },
   { value: '168h', label: '7 days' },
   { value: '720h', label: '30 days' },
+  { value: '8760h', label: '1 year' },
+  // Zero is what the backend reads as "delete nothing".
+  { value: '0s', label: 'Forever (never delete)' },
 ];
-
-/** Seconds in a Go duration string like "72h0m0s"; 0 when it cannot be read. */
-export function parseGoDuration(d: string): number {
-  const units: Record<string, number> = { ns: 1e-9, µs: 1e-6, us: 1e-6, ms: 1e-3, s: 1, m: 60, h: 3600 };
-  let total = 0;
-  for (const [, num, unit] of d.matchAll(/(\d+(?:\.\d+)?)(ns|µs|us|ms|h|m|s)/g)) total += Number(num) * units[unit];
-  return total;
-}
 
 /** Write buffers offered, in bytes. Bigger absorbs a longer burst and costs that much RAM. */
 const BUFFERS = [
@@ -139,7 +134,14 @@ function HistorySection() {
             onChange={e => set({ enabled: e.target.checked })}
           />
           {enabled && (
-            <Field label="Keep messages for" hint="Older messages are deleted once a minute.">
+            <Field
+              label="Keep messages for"
+              hint={
+                retention === '0s'
+                  ? 'Nothing is deleted by age. The file grows until the disk is full -- watch the size below, and narrow what is written if it grows faster than you want.'
+                  : 'Older messages are deleted once a minute.'
+              }
+            >
               <Select value={retention} disabled={!editable || saving} onChange={e => set({ retention: e.target.value })}>
                 {RETENTIONS.every(r => r.value !== retention) && <option value={retention}>{data.retention}</option>}
                 {RETENTIONS.map(r => (

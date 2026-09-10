@@ -1,6 +1,6 @@
 import { CalendarClock, X } from 'lucide-react';
 import { useState } from 'react';
-import { cn } from '../../lib/utils';
+import { cn, parseGoDuration } from '../../lib/utils';
 import { useStore } from '../../store';
 import { Button, IconButton } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -8,16 +8,34 @@ import { Input } from '../ui/Input';
 export interface TimeRange {
   from: number;
   to: number;
+  /** Short, for the button and the badge: "1 h", "All". */
   label: string;
+  /**
+   * How the range reads in a sentence. "the last 1 h" works for a preset
+   * reaching back from now; "the last All" does not, and neither does "the
+   * last 10.9.2026 - 11.9.2026".
+   */
+  prose: string;
 }
 
-const PRESETS: { label: string; minutes: number }[] = [
+const PRESETS: { label: string; minutes: number; prose?: string }[] = [
   { label: '15 min', minutes: 15 },
   { label: '1 h', minutes: 60 },
   { label: '6 h', minutes: 360 },
   { label: '24 h', minutes: 1440 },
   { label: '7 d', minutes: 10080 },
+  { label: '30 d', minutes: 43200 },
+  // Everything the database still holds. With no retention that is every
+  // message ever recorded, and a preset is the only way to ask for it
+  // without typing a start date.
+  { label: 'All', minutes: 0, prose: 'the recorded history' },
 ];
+
+/** A zero retention means nothing is deleted; "retention 0s" would not say that. */
+function retentionLabel(retention: string): string {
+  const forever = retention === '' || parseGoDuration(retention) === 0;
+  return forever ? 'Persistent history, every message kept' : `Persistent history, retention ${retention}`;
+}
 
 const toLocalInput = (ms: number) => {
   const d = new Date(ms - new Date().getTimezoneOffset() * 60000);
@@ -37,30 +55,31 @@ export default function RangePicker({ range, onChange }: { range: TimeRange | nu
   const [to, setTo] = useState(() => toLocalInput(Date.now()));
   if (!historyDb) return null;
 
-  const pick = (minutes: number, label: string) => {
+  const pick = (p: { label: string; minutes: number; prose?: string }) => {
     setCustom(false);
-    onChange({ from: Date.now() - minutes * 60_000, to: Date.now(), label });
+    onChange({
+      from: p.minutes === 0 ? 0 : Date.now() - p.minutes * 60_000,
+      to: Date.now(),
+      label: p.label,
+      prose: p.prose ?? `the last ${p.label}`,
+    });
   };
   const applyCustom = () => {
     const f = new Date(from).getTime();
     const t = new Date(to).getTime();
     if (!Number.isFinite(f) || !Number.isFinite(t) || t <= f) return;
-    onChange({ from: f, to: t, label: `${new Date(f).toLocaleString()} – ${new Date(t).toLocaleString()}` });
+    const label = `${new Date(f).toLocaleString()} – ${new Date(t).toLocaleString()}`;
+    onChange({ from: f, to: t, label, prose: label });
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-1" title={`Persistent history, retention ${retention}`}>
+    <div className="flex flex-wrap items-center gap-1" title={retentionLabel(retention)}>
       <CalendarClock size={13} className="text-muted mr-0.5" />
       <button type="button" className={cn('btn btn-xs', range === null ? 'btn-primary' : 'btn-outline')} onClick={() => onChange(null)}>
         Live
       </button>
       {PRESETS.map(p => (
-        <button
-          key={p.label}
-          type="button"
-          className={cn('btn btn-xs', range?.label === p.label ? 'btn-primary' : 'btn-outline')}
-          onClick={() => pick(p.minutes, p.label)}
-        >
+        <button key={p.label} type="button" className={cn('btn btn-xs', range?.label === p.label ? 'btn-primary' : 'btn-outline')} onClick={() => pick(p)}>
           {p.label}
         </button>
       ))}
