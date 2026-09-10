@@ -253,6 +253,8 @@ See [docs/review-2026-09.md](docs/review-2026-09.md) for the findings of the Sep
 | `HISTORY_DB`  | --      | SQLite file for a persistent copy of the history, always on and not changeable from the UI. Without it a `STORAGE_DIR` server can switch the copy on in the settings (`<STORAGE_DIR>/history.db`) |
 | `HISTORY_RETENTION` | `72h` | How far back the persistent copy reaches; without `HISTORY_DB` the starting value of the setting |
 | `HISTORY_FTS` | `1`     | `0` drops the full-text index of the persistent history: much faster writes, searches scan instead |
+| `HISTORY_FILTER` | –       | CEL expression deciding what is written to disk; empty writes everything |
+| `HISTORY_QUEUE_BYTES` | `67108864` | How much of a burst the writer buffers before it drops from the disk copy |
 | `ROLLUP_RETENTION` | `2160h` | With a persistent history: how long the minute aggregates behind long-range charts are kept |
 | `STORAGE_DIR` | --      | Keep connections, templates and preferences on the server instead of the browser; `NO_KEYRING=1` forces the `secrets.json` fallback |
 | `BASE_PATH`   | --      | Serve everything under a prefix (`/nats`), for a reverse proxy that does not strip it |

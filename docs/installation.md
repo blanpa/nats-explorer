@@ -92,6 +92,8 @@ cd nats-explorer && ./nats-explorer
 | `HISTORY_DB` | unset | Path of a SQLite file; every message is also written there, and the UI can load time ranges from it (`from`/`to` on the history endpoints, the range picker in the subject detail). Set, it is always on and the UI cannot change it; unset, a `STORAGE_DIR` server offers `<STORAGE_DIR>/history.db` as a setting (off until switched on) |
 | `HISTORY_RETENTION` | `72h` | Rows older than this are deleted once a minute (Go duration, e.g. `24h`, `168h`). Without `HISTORY_DB` it is the starting value of the setting, which then wins once changed |
 | `HISTORY_FTS` | `1` | `0` drops the full-text index of the persistent history: the writer becomes several times faster and a search scans instead of using the index. Also a setting in the UI |
+| `HISTORY_FILTER` | – | A CEL expression over the same variables as a payload filter; only messages it accepts are written to disk. The one setting that lowers the write rate itself instead of making the writer faster. Also a setting in the UI |
+| `HISTORY_QUEUE_BYTES` | `67108864` | How much of a burst the writer buffers before it drops from the disk copy. Also a setting in the UI |
 | `ROLLUP_RETENTION` | `2160h` | With a persistent history: how long the minute aggregates behind long-range charts are kept (90 days by default; they are far smaller than the messages) |
 | `HISTORY_MB` | `256` | Memory budget for the recorded message history the UI pulls from (all connections together; the process gets a soft memory limit of twice that plus 128 MB) |
 
