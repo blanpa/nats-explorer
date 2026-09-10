@@ -18,12 +18,13 @@ nav_order: 3
 
 - Numeric fields of the latest message as sparklines with the current value; the history rail is open by default
 - Keyboard: `/` focuses the filter of the current module, Escape clears it, `j`/`k` walk the subject tree, arrow keys expand and collapse
+- The explorer and the history rail are dragged to width by the handle on their edge; a double-click resets, and both widths are remembered
 - Watch several subjects at once: Ctrl/Cmd-click adds subjects to the selection; the detail pane then shows the latest value and rate of each and one list of everything arriving on any of them, newest first
-- Subjects split by `.` into a virtualized tree with inline value preview, message count and rate per subject and per branch. The server keeps the tree and sends a tab only the branches it has expanded; the filter runs on the server over the whole namespace, so very large subject spaces cost what is on screen
+- Subjects split by `.` into a virtualized tree with message count and rate per subject and per branch, and on a branch the number of subjects with messages below it -- so a collapsed branch says how much is under it. The quote icon in the header adds the last payload next to each subject; it is off by default and, off, is not sent over the socket at all. The server keeps the tree and sends a tab only the branches it has expanded; the filter runs on the server over the whole namespace, so very large subject spaces cost what is on screen
 - Filter with several words, keyboard navigation, expand/collapse all
 - System roots (`$JS`, `$KV`, `$SYS`, `_INBOX`, …) hidden by default behind a toggle
 - Selecting a branch shows the recent messages of everything below it
-- Built for large subject spaces: the server sends a flat delta of changed subjects with short payload previews, the browser rebuilds the hierarchy; the interval backs off for very large trees
+- Built for large subject spaces: the server sends a flat delta of changed subjects (with short payload previews only when a tab shows them), the browser rebuilds the hierarchy; the interval backs off for very large trees
 
 ## Bookmarks
 
@@ -31,7 +32,7 @@ The star in the subject header keeps a subject, with an optional name, group and
 
 ## Clearing the history
 
-The eraser in the subject header forgets the recorded messages of that subject. On a branch it takes everything below it as well, and the confirmation says which of the two is about to happen. The rest of the recorded history stays. Both the memory and the persistent copy are cleared, so a time range does not bring the messages back, and the subject leaves the tree until it sends again. The eraser in the Subjects pane header still clears everything at once.
+The eraser in the subject header forgets the recorded messages of that subject. On a branch it takes everything below it as well, and the confirmation says which of the two is about to happen. The rest of the recorded history stays. Both the memory and the persistent copy are cleared, so a time range does not bring the messages back, and the subject leaves the tree until it sends again. The eraser in the Subjects pane header clears everything at once, after a confirmation: every recorded message of every connection, in memory and on disk, and the subject tree with them. A tree row that says three thousand messages with nothing behind it says less than an empty tree; subjects come back as they send again.
 
 ## Payload filter
 
@@ -78,12 +79,16 @@ Every subject carries a derived schema under its payload: which fields the JSON 
 
 When the newer half of the messages looks different from the older half, the section is marked with drift and the changed fields say what happened: a type that changed, a field that is no longer sent, or one that just appeared. That catches a device or gateway whose output silently changed, which otherwise only surfaces when something downstream breaks. Drift needs at least five messages per half, so an optional field or an integer that becomes a decimal is never reported as a change.
 
+**Pin as expected** turns the description into a reference. A pinned schema belongs to a subject pattern and is checked against every message from then on: `valid` and `violations` become available in every CEL expression, so `!valid` narrows the subject tree, the history, a time range and the search to the messages that do not match, and the same expression is a complete alert rule. The panel says how many of the sampled messages fail and jumps to them, and the publish form warns before sending a payload that would not match. Types and required fields are enforced; observed ranges are not, because a range from 200 samples is not a rule, and an unknown field only counts when the schema was pinned strict.
+
+**Copy as** puts the schema on the clipboard in a form another project can use: a **JSON Schema** (draft 2020-12) for validators and code generators, or a **TypeScript interface** to paste into a consumer. Fields present in every message become `required`, the others optional; a string field with a small set of observed values becomes an enumeration; observed ranges and how often a field appeared are written as descriptions, not as constraints -- a range seen in 200 messages is not a rule. Both carry a header saying what they were derived from. `GET /api/schema?subject=…` returns the same data as raw JSON for scripts.
+
 ## JetStream
 
 <img src="{{ '/screenshots/jetstream-light.png' | relative_url }}" alt="A stream with its limits, configuration and placement, in the light theme" loading="lazy">
 
 - Streams: list, create, edit, purge, delete; page through messages from the newest sequence; live tail; delete single messages
-- Consumers: list, create, delete, state
+- Consumers: list, create, delete, state, and pause/resume -- a paused consumer delivers nothing until its deadline and resumes by itself (NATS 2.11)
 - KV/Object backing streams (`KV_*`, `OBJ_*`) hidden by default behind a toggle
 - **JetStream domains**: a connection can carry a `jsDomain` or API prefix (leaf nodes behind a hub and vice versa), and the JetStream, KV and Object Store panes have a domain switch for ad-hoc changes
 
@@ -176,13 +181,18 @@ Every write under `/api` is recorded with the account, the object it acted on, t
 
 ## Performance
 
-- The browser only receives the messages of the subject or branch it looks at; the backend records every message in a bounded history (`HISTORY_MB`, default 256 MB, 1000 messages per subject) that is fetched on selection. Traffic and browser memory scale with what is on screen
+- The browser only receives the messages of the subject or branch it looks at; the backend records every message in a bounded history (`HISTORY_MB`, default 256 MB, 10 000 messages per subject) that is fetched on selection. Traffic and browser memory scale with what is on screen
+- The history rail holds 1000 messages and pages backwards as it is scrolled, 500 at a time from memory and 2000 at a time from the persistent copy, up to 10 000 in the tab
+- The list below a branch, the search results and the merged list of several watched subjects page the same way, 200 at a time. Each has its own cursor: a node's own messages run out at a different point than everything below it, and a search at yet another
+- With the history on disk, connecting restores the recorded subjects into the tree with their message count and their newest message, so a restart does not start with an empty namespace and the payload filter works on those subjects right away. The count is what the database still holds, so it follows the retention. The rest of the messages stay on disk: the live view of a restored subject is empty until it sends again, and the range picker reads the recorded ones
 - Per tab at most 50 msg/s per subject and 2000 msg/s in total reach the browser; the first message of a subject per second wins over repeats
 - The websocket lives in a web worker that decodes MessagePack frames, keeps the tree and coalesces the feed; the main thread only renders. Message batching (100 ms), compressed frames, virtualized tree, history and branch lists
-- Persistent history (`HISTORY_DB`): a SQLite copy with retention; the subject detail has a range picker (15 min to 7 days or custom) that loads messages, search results and chart series from it. A range is shown in the same view as the live feed, only with the messages of that period: the same history rail, payload viewer, trends, chart and schema
+- Persistent history: a SQLite copy with retention, on by default in the desktop app and a setting (gear in the rail) everywhere the server has a directory of its own; `HISTORY_DB` pins it. The subject detail has a range picker (15 min to 7 days or custom) that loads messages, search results and chart series from it. A range is shown in the same view as the live feed, only with the messages of that period: the same history rail, payload viewer, trends, chart and schema
 - Search over the recorded history of a subject and everything below it, by subject or payload text; export the loaded messages as JSON or CSV; replay them through the publish API with a pause and an optional subject rewrite
 - Stream messages: jump to a point in time, export the page, replay it; consumers can be edited after creation
 - Charts fetch their field downsampled from the server's history (up to 10 000 messages per subject) and append live values
 - Stream messages can be charted too: a number in an opened message charts that field over the last 500 to 50 000 messages of the stream, for the row's subject or across all subjects, read and downsampled by the backend (`GET /api/streams/{name}/series`)
 - Module switches are served from a result cache and refreshed in the background
 - Measured under 5 000 subjects at 20 000 msg/s with the tree fully expanded: backend around 9 % CPU, browser main thread around 4 % busy, no long tasks, 21 MB JS heap; with the default view (first level open) 1.5 % and 6 MB
+- Nothing is dropped on the way in: 5 000 000 messages at 340 000 msg/s over 5 000 subjects were all counted and recorded, at about one of eight cores. The limit in that test was the publisher, not the explorer
+- The persistent copy is the slower path, because it writes to disk. With the full-text index it sustains roughly 25 000 msg/s, without it four times that (`go test -bench BenchmarkTuning ./internal/history/`). A burst above that rate is buffered in memory -- 64 MB, a few hundred thousand small messages -- and only what does not fit is dropped, counted, and shown in amber in the status bar. Sustained overload cannot be buffered away: a queue that keeps growing postpones the loss and pays for it in memory

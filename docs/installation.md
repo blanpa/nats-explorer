@@ -28,6 +28,8 @@ NATS Explorer runs as a desktop application, as a Docker container, or as a stan
 
 `settings.json` holds connections, request templates and preferences. Credentials (tokens, passwords, NKey seeds, credentials files, TLS keys) go to the system keyring (Secret Service, Keychain, Credential Manager); where none is available they are written to `secrets.json`, readable only by your user. Back up the directory to keep your setup; delete it to start fresh.
 
+`history.db` next to it holds the recorded messages, so the history survives a restart. It is on by default and keeps 3 days; the gear at the bottom of the rail opens the settings, where it can be given another retention, switched off, or deleted from disk. Switched off, the history is what fits in memory and is gone when the app closes.
+
 ---
 
 ## Docker
@@ -84,11 +86,13 @@ cd nats-explorer && ./nats-explorer
 | `AUTH_USERS` | unset | Path of a users file (`name:role:bcrypt-hash` per line, roles `admin` and `viewer`). The UI asks for a login; viewers see everything but cannot publish or change anything. `nats-explorer hash-password` prints a hash |
 | `STORAGE_DIR` | unset | Keep connections, templates and preferences in this directory instead of the browser (single-user servers). Same layout as the desktop app. Saved connections marked "Connect when the server starts" are opened by the backend at start |
 | `NO_KEYRING` | unset | With `STORAGE_DIR`: always use `secrets.json` instead of the system keyring |
+| `BASE_PATH` | unset | Serve the UI, the API and the websocket under a prefix, e.g. `/nats`. For a reverse proxy that forwards the prefix instead of stripping it; no rewrite rule is needed, the app builds every URL with it |
 | `PPROF` | unset | When set, Go's profiler is served under `/debug/pprof` (load investigations only) |
 | `SOURCE_URL` | this project | Where the source of this build is offered. The status bar and the login dialog link it as "source"; unset, it points at this project at the commit or tag the binary was built from. Set it when you deploy a version you changed -- see [License]({{ site.baseurl }}{% link license.md %}) |
-| `HISTORY_DB` | unset | Path of a SQLite file; every message is also written there, and the UI can load time ranges from it (`from`/`to` on the history endpoints, the range picker in the subject detail) |
-| `HISTORY_RETENTION` | `72h` | With `HISTORY_DB`: rows older than this are deleted once a minute (Go duration, e.g. `24h`, `168h`) |
-| `ROLLUP_RETENTION` | `2160h` | With `HISTORY_DB`: how long the minute aggregates behind long-range charts are kept (90 days by default; they are far smaller than the messages) |
+| `HISTORY_DB` | unset | Path of a SQLite file; every message is also written there, and the UI can load time ranges from it (`from`/`to` on the history endpoints, the range picker in the subject detail). Set, it is always on and the UI cannot change it; unset, a `STORAGE_DIR` server offers `<STORAGE_DIR>/history.db` as a setting (off until switched on) |
+| `HISTORY_RETENTION` | `72h` | Rows older than this are deleted once a minute (Go duration, e.g. `24h`, `168h`). Without `HISTORY_DB` it is the starting value of the setting, which then wins once changed |
+| `HISTORY_FTS` | `1` | `0` drops the full-text index of the persistent history: the writer becomes several times faster and a search scans instead of using the index. Also a setting in the UI |
+| `ROLLUP_RETENTION` | `2160h` | With a persistent history: how long the minute aggregates behind long-range charts are kept (90 days by default; they are far smaller than the messages) |
 | `HISTORY_MB` | `256` | Memory budget for the recorded message history the UI pulls from (all connections together; the process gets a soft memory limit of twice that plus 128 MB) |
 
 ### Accounts and roles

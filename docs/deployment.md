@@ -128,6 +128,59 @@ nats-explorer.example.com {
 }
 ```
 
+### Under a subpath
+
+To serve it at `https://tools.example.com/nats/` instead of its own host, start
+the server with `BASE_PATH=/nats` and forward the prefix as it is. No rewrite
+rule: the server answers on the prefix and writes it into the page, so the UI
+builds every URL -- API, websocket, assets -- with it.
+
+```nginx
+location /nats/ {
+    proxy_pass http://127.0.0.1:3002;   # note: no trailing path, the prefix stays
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+}
+```
+
+A proxy that strips the prefix instead (`proxy_pass http://127.0.0.1:3002/`)
+needs no `BASE_PATH`, but then the browser's asset URLs no longer match; keep
+the prefix.
+
+---
+
+## Kubernetes (Helm)
+
+The chart in `deploy/helm/nats-explorer` installs the server with an optional
+volume and ingress:
+
+```bash
+helm install nats-explorer ./deploy/helm/nats-explorer \
+  --set persistence.enabled=true \
+  --set config.persistHistory=true \
+  --set ingress.enabled=true \
+  --set ingress.host=nats-explorer.example.com
+```
+
+The ingress path becomes `BASE_PATH`, so `--set ingress.path=/nats` serves it
+under a subpath of an existing host without a rewrite annotation. Connections
+and the recorded history need `persistence.enabled`; without it both live in
+the pod and the browser and are gone on restart.
+
+**One replica.** Each pod subscribes to NATS itself and records what it sees,
+so two pods would answer browsers with different halves of the history. The
+chart defaults to one and warns when told otherwise.
+
+| Value | Default | What it does |
+|:-- |:-- |:-- |
+| `persistence.enabled` | `false` | A volume for `STORAGE_DIR`: connections, templates, preferences |
+| `config.persistHistory` | `false` | The SQLite copy of the history on that volume |
+| `config.historyMb` | `256` | Memory budget for the recorded history |
+| `ingress.path` | `/` | Anything else is passed as `BASE_PATH` |
+| `auth.mode` | `none` | `token` (from `auth.token` or `auth.secretName`) or `users` (`auth.usersSecretName`) |
+
 ---
 
 ## If you changed the code

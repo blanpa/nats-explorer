@@ -92,7 +92,7 @@ Releases are produced by `.github/workflows/release.yml` on every `v*` tag: the 
 - **Payload filter** -- A [CEL](https://cel.dev/) expression such as `payload.temp > 80` keeps only the subjects whose last message matches, and narrows the message list, the search, time ranges and charts with it
 - **Derived schema** -- The fields of a subject's JSON payloads with types, presence, ranges and examples, read from the recorded messages, with a marker when newer messages drift from older ones
 - **Alerts** -- Rules watch a subject pattern for an expression that holds or for a subject that fell silent, with severities, an optional webhook and a dry run against the recorded messages; they run in the backend, so they keep working with no browser open
-- **Persistent history** -- `HISTORY_DB` keeps a SQLite copy of every message with retention; a range picker (15 min to 7 days) shows any period in the same view as the live feed
+- **Persistent history** -- A SQLite copy of every message with a retention, so the history survives a restart; a range picker (15 min to 7 days) shows any period in the same view as the live feed. On in the desktop app, a setting in the UI everywhere else, or fixed with `HISTORY_DB`
 - **Search** -- Over one subject and everything below it, or across every subject, answered by a full-text index when a persistent history is configured
 - **Long-range charts** -- Minute aggregates behind the scenes, so a week of data is a few hundred points
 - **Bookmarks** -- Keep a subject with a name, group and note, and get back to it even when it is filtered out
@@ -250,9 +250,12 @@ See [docs/review-2026-09.md](docs/review-2026-09.md) for the findings of the Sep
 | `AUTH_TOKEN`  | --      | When set, every API and websocket request needs the token (`Authorization: Bearer`, `X-Auth-Token` or `?token=`); the UI asks for it once and keeps a session cookie. |
 | `AUTH_USERS`  | --      | Users file (`name:role:bcrypt-hash`, roles `admin` / `viewer`); the UI shows a login, viewers are read-only. `nats-explorer hash-password` prints a hash. |
 | `HISTORY_MB`  | `256`   | Memory budget for the recorded message history the UI pulls from |
-| `HISTORY_DB`  | --      | SQLite file for a persistent copy of the history; `HISTORY_RETENTION` (default `72h`) bounds it |
-| `ROLLUP_RETENTION` | `2160h` | With `HISTORY_DB`: how long the minute aggregates behind long-range charts are kept |
+| `HISTORY_DB`  | --      | SQLite file for a persistent copy of the history, always on and not changeable from the UI. Without it a `STORAGE_DIR` server can switch the copy on in the settings (`<STORAGE_DIR>/history.db`) |
+| `HISTORY_RETENTION` | `72h` | How far back the persistent copy reaches; without `HISTORY_DB` the starting value of the setting |
+| `HISTORY_FTS` | `1`     | `0` drops the full-text index of the persistent history: much faster writes, searches scan instead |
+| `ROLLUP_RETENTION` | `2160h` | With a persistent history: how long the minute aggregates behind long-range charts are kept |
 | `STORAGE_DIR` | --      | Keep connections, templates and preferences on the server instead of the browser; `NO_KEYRING=1` forces the `secrets.json` fallback |
+| `BASE_PATH`   | --      | Serve everything under a prefix (`/nats`), for a reverse proxy that does not strip it |
 | `PPROF`       | --      | When set, Go's profiler is served under `/debug/pprof` |
 | `SOURCE_URL`  | this project | Where the source of this build is offered; the UI links it as "source". Set it when you deploy a modified version ([AGPL](https://blanpa.github.io/nats-explorer/license.html)) |
 
