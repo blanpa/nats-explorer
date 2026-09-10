@@ -247,7 +247,7 @@ func (h *HistoryHandler) Get(w http.ResponseWriter, r *http.Request) {
 				ts, seq = msgs[0].Timestamp, msgs[0].Sequence
 			}
 			var older []message.NatsMessage
-			older, more = h.olderOnDisk(r.Context(), db, id, subject, false, ts, seq, scan-len(msgs))
+			older, more = h.olderOnDisk(r.Context(), db, id, subject, scopeThisSubject, ts, seq, scan-len(msgs))
 			// The database answers newest first and this list is oldest
 			// first, so the page turns around and goes in front.
 			msgs = append(reversed(older), msgs...)
@@ -269,7 +269,7 @@ func (h *HistoryHandler) Get(w http.ResponseWriter, r *http.Request) {
 					ts, seq = below[n-1].Timestamp, below[n-1].Sequence
 				}
 				var older []message.NatsMessage
-				older, branchMore = h.olderOnDisk(r.Context(), db, id, subject, true, ts, seq, branchScan-len(below))
+				older, branchMore = h.olderOnDisk(r.Context(), db, id, subject, scopeBelowSubject, ts, seq, branchScan-len(below))
 				below = append(below, older...)
 			}
 			resp.BranchMore = resp.BranchMore || branchMore
@@ -291,6 +291,15 @@ func (h *HistoryHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp)
 }
 
+// Which list a disk page continues: the subject's own, or the merged one of
+// everything under it.
+type diskScope int
+
+const (
+	scopeThisSubject diskScope = iota
+	scopeBelowSubject
+)
+
 /**
  * olderOnDisk continues a backward page in the database, for a list that has
  * reached the edge of what memory keeps.
@@ -311,7 +320,7 @@ func (h *HistoryHandler) Get(w http.ResponseWriter, r *http.Request) {
  * view is not sent back for a page that turns out to be empty.
  */
 func (h *HistoryHandler) olderOnDisk(
-	ctx context.Context, db *history.DB, connID, subject string, branch bool, ts int64, seq uint64, limit int,
+	ctx context.Context, db *history.DB, connID, subject string, scope diskScope, ts int64, seq uint64, limit int,
 ) (msgs []message.NatsMessage, more bool) {
 	if db == nil || limit <= 0 {
 		return nil, false
@@ -323,7 +332,14 @@ func (h *HistoryHandler) olderOnDisk(
 	if to == 0 {
 		to = time.Now().UnixMilli()
 	}
-	msgs, err := db.RangePage(ctx, connID, subject, branch, 0, to, ts, seq, limit+1)
+	var err error
+	if scope == scopeBelowSubject {
+		// Strictly below: the list under a node is its own list, and the
+		// node's own messages already have one beside it.
+		msgs, err = db.RangeBelowPage(ctx, connID, subject, 0, to, ts, seq, limit+1)
+	} else {
+		msgs, err = db.RangePage(ctx, connID, subject, false, 0, to, ts, seq, limit+1)
+	}
 	if err != nil {
 		// What memory gave is still a page: a failed read on disk narrows
 		// the answer, it does not break it.
@@ -643,7 +659,7 @@ func (h *HistoryHandler) Series(w http.ResponseWriter, r *http.Request) {
 				if len(msgs) > 0 {
 					ts, seq = msgs[0].Timestamp, msgs[0].Sequence
 				}
-				older, _ := h.olderOnDisk(r.Context(), db, id, subject, false, ts, seq, want)
+				older, _ := h.olderOnDisk(r.Context(), db, id, subject, scopeThisSubject, ts, seq, want)
 				msgs = append(reversed(older), msgs...)
 			}
 		}

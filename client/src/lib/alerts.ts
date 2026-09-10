@@ -17,6 +17,17 @@ export function newAlertRule(partial: Partial<AlertRule> = {}): AlertRule {
 }
 
 /**
+ * A rule for the subject on screen: the subject itself, or everything under
+ * it when a branch is selected. Written from the Alerts module the pattern
+ * has to be typed out, and a subject like
+ * `uns.acme.factory-berlin.assembly.line-1` is where a token gets lost.
+ */
+export function alertRuleForSubject(subject: string, branch = false): AlertRule {
+  const pattern = branch ? `${subject}.>` : subject;
+  return newAlertRule({ pattern, name: pattern });
+}
+
+/**
  * Checks a rule the way the backend does, so the dialog can say what is
  * wrong before the request goes out. Returns null when the rule is good.
  */

@@ -327,6 +327,34 @@ func (d *DB) Range(ctx context.Context, connID, subject string, branch bool, fro
 // instead of asking for one ever larger limit. A zero beforeTS starts at the
 // newest message.
 func (d *DB) RangePage(ctx context.Context, connID, subject string, branch bool, from, to, beforeTS int64, beforeSeq uint64, limit int) ([]message.NatsMessage, error) {
+	scope := scopeSubject
+	if branch {
+		scope = scopeWithBelow
+	}
+	return d.rangePage(ctx, connID, subject, scope, from, to, beforeTS, beforeSeq, limit)
+}
+
+// RangeBelowPage is RangePage over what is strictly below a subject. The
+// list under a branch is its own list: a node's own messages are shown
+// beside it, not in it, and counting them twice is how a leaf ends up
+// looking like a branch of itself.
+func (d *DB) RangeBelowPage(ctx context.Context, connID, subject string, from, to, beforeTS int64, beforeSeq uint64, limit int) ([]message.NatsMessage, error) {
+	return d.rangePage(ctx, connID, subject, scopeBelow, from, to, beforeTS, beforeSeq, limit)
+}
+
+// What a page covers: one subject, one subject and everything under it, or
+// only what is under it.
+type rangeScope int
+
+const (
+	scopeSubject rangeScope = iota
+	scopeWithBelow
+	scopeBelow
+)
+
+func (d *DB) rangePage(
+	ctx context.Context, connID, subject string, scope rangeScope, from, to, beforeTS int64, beforeSeq uint64, limit int,
+) ([]message.NatsMessage, error) {
 	where := `conn = ? AND ts BETWEEN ? AND ?`
 	args := []interface{}{connID, from, to}
 	if beforeTS > 0 {
@@ -335,10 +363,14 @@ func (d *DB) RangePage(ctx context.Context, connID, subject string, branch bool,
 		where += ` AND (ts < ? OR (ts = ? AND seq < ?))`
 		args = append(args, beforeTS, beforeTS, int64(beforeSeq))
 	}
-	if branch {
+	switch scope {
+	case scopeWithBelow:
 		where += ` AND (subject = ? OR subject LIKE ? ESCAPE '\')`
 		args = append(args, subject, likePrefix(subject)+".%")
-	} else {
+	case scopeBelow:
+		where += ` AND subject LIKE ? ESCAPE '\'`
+		args = append(args, likePrefix(subject)+".%")
+	default:
 		where += ` AND subject = ?`
 		args = append(args, subject)
 	}

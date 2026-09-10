@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import type { NatsMessage } from 'shared';
-import { Check, Copy, Diff, Eraser, FolderTree, History, LineChart, MoreVertical, MousePointerClick, Send, X } from 'lucide-react';
+import { Bell, Check, Copy, Diff, Eraser, FolderTree, History, LineChart, MoreVertical, MousePointerClick, Send, X } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import { useCanWrite } from '../../lib/auth';
 import { clearSubject, loadOlder, loadOlderBranch } from '../../lib/feed';
@@ -25,6 +25,9 @@ import MessagePanel from './MessagePanel';
 import MultiSubjectView from './MultiSubjectView';
 import { findBookmark, useBookmarks } from '../../lib/bookmarks';
 import BookmarkButton from './BookmarkButton';
+import RuleDialog from '../alerts/RuleDialog';
+import { alertRuleForSubject } from '../../lib/alerts';
+import type { AlertRule } from 'shared';
 import PayloadViewer from './PayloadViewer';
 import { messageForPoint, windowFor } from './pickMessage';
 import PublishDrawer from './PublishDrawer';
@@ -107,6 +110,11 @@ function SingleSubjectView() {
   const [loadingOlderRange, setLoadingOlderRange] = useState(false);
   // How far an export has got while it pages the range in.
   const [exportProgress, setExportProgress] = useState<number | null>(null);
+  // A rule being written for this subject, from the subject rather than
+  // from the Alerts module: the pattern is the thing on screen, and typing
+  // it out again is where a subject like uns.acme.factory-berlin.assembly
+  // gets a token wrong.
+  const [alertDraft, setAlertDraft] = useState<AlertRule | null>(null);
   const { data: rangedData, setData: setRangedData } = ranged;
 
   // Pages backwards through the range, the same way the live history does:
@@ -401,6 +409,10 @@ function SingleSubjectView() {
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
               <DropdownMenu.Content align="end" sideOffset={6} className={menuClass}>
+                <DropdownMenu.Item className={itemClass} onSelect={() => setAlertDraft(alertRuleForSubject(subject, isBranch || shownBelow.length > 0))}>
+                  <Bell size={13} /> {isBranch || shownBelow.length > 0 ? 'Alert on this branch…' : 'Alert on this subject…'}
+                </DropdownMenu.Item>
+                <DropdownMenu.Separator className="h-px bg-line my-1" />
                 <DropdownMenu.Item className={`${itemClass} text-danger`} onSelect={clearThis}>
                   <Eraser size={13} /> {isBranch || shownBelow.length > 0 ? 'Clear history below…' : 'Clear history…'}
                 </DropdownMenu.Item>
@@ -408,6 +420,7 @@ function SingleSubjectView() {
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
         )}
+        {alertDraft && <RuleDialog rule={alertDraft} onClose={() => setAlertDraft(null)} />}
       </div>
     </PaneHeader>
   );

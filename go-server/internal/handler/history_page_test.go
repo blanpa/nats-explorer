@@ -145,6 +145,27 @@ func TestGetBranchReadsPastMemory(t *testing.T) {
 	}
 }
 
+// A leaf has nothing below it, and reading past memory must not invent it.
+// The database can answer "this subject and everything under it" in one
+// query, and taking that for the list under a node fills a leaf's branch
+// list with its own messages -- which then reads as a branch of itself.
+func TestGetBranchOfALeafStaysEmpty(t *testing.T) {
+	base := time.Now().Add(-time.Hour).UnixMilli()
+	tee := pagedStore(t, "plant.line1.temp", 10, base, 1)
+	h := &HistoryHandler{History: tee, Tee: tee}
+	resp := page(t, h, "subject=plant.line1.temp&connId=c&limit=1&branchLimit=50")
+	if len(resp.Branch) != 0 {
+		t.Fatalf("branch of a leaf = %d messages on %s, want none", len(resp.Branch), resp.Branch[0].Subject)
+	}
+	if resp.BranchMore {
+		t.Fatal("branch of a leaf offers another page")
+	}
+	// The subject's own list is unaffected.
+	if len(resp.Messages) == 0 {
+		t.Fatal("the leaf lost its own messages")
+	}
+}
+
 // A long range is answered from the minute buckets, because a week of
 // messages is too many points to move. But a subject with three messages in
 // one minute reduces to a single bucket, and a chart of one instant has no
