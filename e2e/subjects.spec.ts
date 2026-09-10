@@ -103,9 +103,17 @@ test('subscriptions change while connected', async ({ page }) => {
   await expect(page.getByRole('treeitem').filter({ hasText: 'yes' }).first()).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole('treeitem').filter({ hasText: 'live' })).toHaveCount(0);
 
-  // Back to everything for the tests that follow.
+  // Removing the last pattern leaves the connection with none: the catch-all
+  // is the one subscription nobody can afford on a busy cluster, so it does
+  // not come back by itself.
   await page.getByRole('button', { name: `Unsubscribe ${subjectRoot}.narrow.>`, exact: true }).click();
-  await expect(page.locator('[aria-label="Subscriptions"]').getByText('>', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Subscriptions no subscriptions/ })).toBeVisible();
+  await expect(page.getByText(/this connection receives nothing/)).toBeVisible();
+
+  // Back to everything for the tests that follow -- by asking for it.
+  await add.fill('>');
+  await add.press('Enter');
+  await expect(page.getByRole('button', { name: 'Unsubscribe >', exact: true })).toBeVisible({ timeout: 10_000 });
 
   expect(errors, errors.join('\n')).toEqual([]);
 });

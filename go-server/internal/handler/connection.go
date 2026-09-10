@@ -69,9 +69,10 @@ func normalizeSubjects(in []string) ([]string, error) {
 		seen[s] = true
 		out = append(out, s)
 	}
-	if len(out) == 0 {
-		out = []string{">"}
-	}
+	// An empty list stays empty. Handing back ">" would make the one
+	// subscription nobody can afford on a busy cluster the only one that
+	// cannot be removed, and a connection that listens to nothing is a
+	// real thing to want: publishing, JetStream and KV need no feed.
 	return out, nil
 }
 

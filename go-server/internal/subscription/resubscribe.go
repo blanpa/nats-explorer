@@ -17,9 +17,8 @@ import (
 // Subjects still covered keep their history, counters and tree nodes; the
 // others are dropped. A manager that is not running is started instead.
 func (m *Manager) SetSubjects(nc *nats.Conn, subjects []string) error {
-	if len(subjects) == 0 {
-		subjects = []string{">"}
-	}
+	// No patterns means no subscriptions: everything collected so far is
+	// forgotten below and nothing new arrives until one is added.
 	m.mu.Lock()
 	if !m.running {
 		m.mu.Unlock()

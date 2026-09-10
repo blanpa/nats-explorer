@@ -115,9 +115,6 @@ func (m *Managed) status() Status {
 		SysError:      m.SysError,
 		LastError:     lastErr,
 	}
-	if len(st.Subscriptions) == 0 {
-		st.Subscriptions = []string{">"}
-	}
 	if nc == nil {
 		return st
 	}

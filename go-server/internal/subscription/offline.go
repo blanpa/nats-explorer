@@ -43,11 +43,9 @@ func (m *Manager) StartOffline(subjects []string) {
 	m.rateIdx = 0
 	m.running = true
 	m.stopCh = make(chan struct{})
-	if len(subjects) > 0 {
-		m.Subjects = subjects
-	} else {
-		m.Subjects = []string{">"}
-	}
+	// A manager with no patterns runs and receives nothing, which is what
+	// a connection with every subscription removed asked for.
+	m.Subjects = subjects
 	patterns := make([]*patternStat, len(m.Subjects))
 	for i, subj := range m.Subjects {
 		patterns[i] = &patternStat{pattern: subj}

@@ -35,13 +35,15 @@ function parsePatterns(text: string): string[] {
 
 /** Switches a live connection to new patterns and remembers them in the saved connection. */
 async function applyPatterns(conn: ConnectionStatus, own: string[], sys: Set<SystemTopicKey>): Promise<void> {
-  const subs = [...(own.length ? own : ['>']), ...SYSTEM_TOPICS.filter(t => sys.has(t.key)).map(t => t.subject)];
+  // An empty list stays empty. Putting ">" back would make the one pattern
+  // nobody can afford on a busy cluster the only one that cannot be removed.
+  const subs = [...own, ...SYSTEM_TOPICS.filter(t => sys.has(t.key)).map(t => t.subject)];
   await api.setSubscriptions(conn.id, subs);
   const saved = useSavedConnections.getState().items.find(i => i.id === conn.id);
   if (saved) {
     const sysTopics: Partial<Record<SystemTopicKey, boolean>> = {};
     for (const t of SYSTEM_TOPICS) sysTopics[t.key] = sys.has(t.key);
-    useSavedConnections.getState().upsert({ ...saved, subscriptions: own.length ? own : ['>'], sysTopics });
+    useSavedConnections.getState().upsert({ ...saved, subscriptions: own, sysTopics });
   }
   // Subjects that are still covered keep their history; the backend drops
   // only what no pattern matches any more, and the feed picks that up.
@@ -58,7 +60,7 @@ function ConnectionSubscriptions({ conn, showName }: { conn: ConnectionStatus; s
   const stats = useStore(s => s.subscriptionStats.get(conn.id)?.patterns);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
-  const subs = conn.subscriptions?.length ? conn.subscriptions : ['>'];
+  const subs = conn.subscriptions ?? [];
   const { own, sys } = splitPatterns(subs);
   const statOf = (pattern: string) => stats?.find(p => p.pattern === pattern);
 
@@ -105,6 +107,13 @@ function ConnectionSubscriptions({ conn, showName }: { conn: ConnectionStatus; s
         <div className="flex items-center gap-1.5 px-2 pt-1 text-xs text-muted">
           <span className="status-dot shrink-0 w-1.5! h-1.5!" style={{ background: conn.color }} />
           <span className="truncate">{conn.name}</span>
+        </div>
+      )}
+      {/* Listening to nothing is a state worth naming: an empty tree beside
+          an empty panel otherwise reads as a broken connection. */}
+      {subs.length === 0 && (
+        <div className="px-2 py-1.5 text-xs text-muted">
+          No subscriptions — this connection receives nothing. Add a pattern below, or <code className="font-mono">&gt;</code> for everything.
         </div>
       )}
       {subs.map(pattern => {
@@ -202,7 +211,7 @@ export default function SubscriptionsPanel() {
   const stats = useStore(s => s.subscriptionStats);
   const connected = connections.filter(c => c.connected);
   // Open by itself only when something other than the catch-all is subscribed.
-  const custom = connected.some(c => (c.subscriptions ?? ['>']).join() !== '>');
+  const custom = connected.some(c => (c.subscriptions ?? []).join() !== '>');
   const [open, setOpen] = useState<boolean | null>(() => readSetting<boolean | null>(OPEN_KEY, null));
   const isOpen = open ?? custom;
   if (connected.length === 0) return null;
@@ -211,8 +220,10 @@ export default function SubscriptionsPanel() {
     writeSetting(OPEN_KEY, !isOpen);
     setOpen(!isOpen);
   };
-  const summary = connected.flatMap(c => (c.subscriptions?.length ? c.subscriptions : ['>'])).join(', ');
-  const patternCount = connected.reduce((n, c) => n + (c.subscriptions?.length || 1), 0);
+  // What is actually subscribed, not a stand-in for it: counting an empty
+  // list as one pattern is how "no subscriptions" reads as "1 pattern".
+  const summary = connected.flatMap(c => c.subscriptions ?? []).join(', ') || 'nothing subscribed';
+  const patternCount = connected.reduce((n, c) => n + (c.subscriptions?.length ?? 0), 0);
   let subjects = 0;
   for (const c of connected) subjects += stats.get(c.id)?.subjects ?? 0;
 
@@ -230,7 +241,13 @@ export default function SubscriptionsPanel() {
         {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         <span className="font-semibold shrink-0">Subscriptions</span>
         <span className="ml-auto tabular-nums text-faint shrink-0">
-          {patternCount} pattern{patternCount === 1 ? '' : 's'} · {formatNumber(subjects)} subject{subjects === 1 ? '' : 's'}
+          {patternCount === 0 ? (
+            <span className="text-warn">no subscriptions</span>
+          ) : (
+            <>
+              {patternCount} pattern{patternCount === 1 ? '' : 's'} · {formatNumber(subjects)} subject{subjects === 1 ? '' : 's'}
+            </>
+          )}
         </span>
       </button>
       {isOpen && connected.map(conn => <ConnectionSubscriptions key={conn.id} conn={conn} showName={connected.length > 1} />)}

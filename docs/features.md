@@ -157,6 +157,7 @@ The monitoring URL defaults to port 8222 of the first server and can be set per 
 - Optional system-account credentials for the Cluster module
 - Monitoring URL, JetStream domain / API prefix per connection
 - "Connect when the server starts": with `STORAGE_DIR` the backend opens marked connections itself, so history and metrics collect without a browser
+- Every pattern can be removed, `>` included: a connection then receives nothing and says so, which is what publishing, JetStream or KV work needs on a busy cluster. Opening a connection without naming any pattern still subscribes to `>`
 - Changing the subscriptions keeps what the other patterns collected: only the subjects that no pattern covers any more are forgotten, and the persistent history keeps even those
 - Subscriptions are managed live in the Subjects pane: one row per pattern with the subjects it matches and its message rate, a field to add patterns (comma or space separated; adding a concrete pattern replaces the catch-all `>`), an X to unsubscribe, and toggles for the system subjects ($SYS, $JS, $KV, $SRV). Every change applies at once without reconnecting and is remembered in the saved connection
 

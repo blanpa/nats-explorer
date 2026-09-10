@@ -82,3 +82,32 @@ describe('SubscriptionsPanel', () => {
     expect(screen.getByTitle('Unsubscribe orders.>')).not.toBeVisible();
   });
 });
+
+describe('removing every subscription', () => {
+  it('really removes the wildcard instead of putting it back', async () => {
+    useStore.setState({ connections: [conn({ subscriptions: ['>'] })] });
+    render(<SubscriptionsPanel />);
+    fireEvent.click(screen.getByRole('button', { name: /^Subscriptions/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Unsubscribe >' }));
+    // The wildcard is the one pattern nobody can afford on a busy cluster;
+    // sending ['>'] back would make it the only one that cannot go.
+    await waitFor(() => expect(setSubscriptions).toHaveBeenCalledWith('c1', []));
+  });
+
+  it('says that nothing is subscribed rather than showing a count', async () => {
+    useStore.setState({ connections: [conn({ subscriptions: [] })] });
+    render(<SubscriptionsPanel />);
+    // Exact text, so the longer explanation below it is not what matches.
+    expect(screen.getByText('no subscriptions')).toBeInTheDocument();
+    // A connection listening to nothing opens the panel by itself: that is
+    // the state most in need of explaining.
+    expect(await screen.findByText(/this connection receives nothing/)).toBeInTheDocument();
+  });
+
+  it('keeps the system toggles working with no own pattern', async () => {
+    useStore.setState({ connections: [conn({ subscriptions: [] })] });
+    render(<SubscriptionsPanel />);
+    fireEvent.click(await screen.findByRole('button', { name: /\$JS/ }));
+    await waitFor(() => expect(setSubscriptions).toHaveBeenCalledWith('c1', ['$JS.>']));
+  });
+});

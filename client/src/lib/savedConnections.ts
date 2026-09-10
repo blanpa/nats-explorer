@@ -119,7 +119,9 @@ export function persistSavedConnections(items: SavedConnection[]) {
 
 /** Builds the payload for POST /api/connect, merging system subjects. */
 export function toConnectionConfig(saved: SavedConnection): ConnectionConfig {
-  const subs = saved.subscriptions.length ? [...saved.subscriptions] : ['>'];
+  // Kept as it is: a connection whose patterns were all removed reconnects
+  // listening to nothing, rather than to everything.
+  const subs = [...saved.subscriptions];
   for (const st of SYSTEM_TOPICS) {
     if (saved.sysTopics?.[st.key] && !subs.includes(st.subject)) subs.push(st.subject);
   }
