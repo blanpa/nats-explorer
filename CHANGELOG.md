@@ -4,6 +4,19 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-10
+
+Debugging, mostly. A subject now says what would receive it, a message can be
+followed through the subjects it touched, a stream names the sequences it does
+not have, a consumer names the message it is stuck on, and the headers NATS
+sets explain themselves. Charts carry several fields at once with seven
+reductions, zoom by dragging, and can chart the delay between the producer's
+clock and this one. The history reads past the edge of memory into the
+database, keeps messages forever if asked, and leaves in six shapes. And the
+interface has one accent colour, a logo that says what the tool is, and its
+explanations on the controls they explain instead of underneath them.
+
+
 ### Added
 - **Follow one message through the subjects it touched.** A request and its reply, an order and its shipment, a saga across five services: the messages belong together and live on different subjects, and what ties them is a value inside them. "Follow this message…" offers the values that could be that -- the deduplication header first, then the fields whose name reads like an id -- searches the recorded history for it across every subject, and lists the hits in time order with the gap between each. The gap is where "it stopped here" is visible; a row opens its subject.
 - **How long a message took to get here.** Most payloads carry the producer's own clock -- `"timestamp": "2026-09-10T18:05:54.703Z"`, or an epoch number -- and the explorer knows when it arrived. The difference is a figure nothing else in the stack reports: producer plus network plus server. It appears as its own card in the trend strip and charts like any other field, with the seven reductions. A value only counts as the producer's clock when it lands near the message's own time; a stored date from another decade is not one. A negative delay is shown rather than clamped -- a producer whose clock runs ahead is a problem, not a healthy zero.
@@ -175,5 +188,6 @@ The first release that ships as an installable desktop application. Everything b
 
 Initial web UI: subject tree, message detail, JetStream, Key-Value, Object Store, services, monitoring, multi-connection, Docker and cross-compiled server binaries.
 
+[0.4.0]: https://github.com/blanpa/nats-explorer/releases/tag/v0.4.0
 [0.3.0]: https://github.com/blanpa/nats-explorer/releases/tag/v0.3.0
 [0.2.0]: https://github.com/blanpa/nats-explorer/releases/tag/v0.2.0
