@@ -23,6 +23,20 @@ test('stream overview, newest page, chart, live tail, consumers', async ({ page 
   await expect(rows).toHaveCount(5);
   await expect(rows.first()).toContainText(`${subjectRoot}.orders.5`); // newest first
 
+  // Every sequence once, and in order. A page used to be fetched in
+  // batches that could replay after a restart, which put a copy of the
+  // first message at the end and left the newest one out.
+  const seqOf = () => rows.evaluateAll(trs => trs.map(tr => Number(tr.children[1]?.textContent)));
+  const desc = await seqOf();
+  expect(new Set(desc).size).toBe(desc.length);
+  expect(desc).toEqual([...desc].sort((a, b) => b - a));
+
+  // Seq sorts the other way round on a click, and back.
+  await page.getByRole('button', { name: /^Seq/ }).click();
+  await expect.poll(seqOf).toEqual([...desc].sort((a, b) => a - b));
+  await page.getByRole('button', { name: /^Seq/ }).click();
+  await expect.poll(seqOf).toEqual(desc);
+
   // The columns of the message table are dragged to width, like the ones of
   // the subject message list.
   const subjectHead = page.locator('thead th').filter({ hasText: 'Subject' });

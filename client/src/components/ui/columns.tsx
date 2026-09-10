@@ -80,7 +80,14 @@ export function ColumnGrip({ side = 'right', ...props }: React.HTMLAttributes<HT
       title="Drag to resize, double-click to reset"
       {...props}
     >
-      <span className="w-px h-full bg-line group-hover/grip:bg-accent group-active/grip:bg-accent" />
+      {/*
+        The line is short at rest and runs the length of the table while it
+        is being aimed at or dragged, so the boundary you are moving is the
+        one you can see. A rule down every column all the time would draw a
+        grid nobody asked for; a stub that stops under the header reads as
+        one that was meant to go further.
+      */}
+      <span className="w-px h-full pointer-events-none bg-line group-hover/grip:h-[100vh] group-hover/grip:bg-accent group-active/grip:h-[100vh] group-active/grip:bg-accent" />
     </span>
   );
 }

@@ -117,7 +117,8 @@ export default function MonitoringDashboard() {
           <Badge tone={healthz ? (healthy ? 'ok' : 'danger') : 'neutral'}>
             {healthz ? (healthy ? 'healthy' : healthz.error || healthz.status) : 'health unknown'}
           </Badge>
-          <ServerName name={varz.server_name} className="font-medium" />
+          {/* The band has a line for it; an ID hidden behind a tooltip is not readable and not copyable. */}
+          <ServerName name={varz.server_name} className="font-medium" full />
           <span className="text-muted font-mono text-xs">
             v{varz.version} · {varz.go} · {varz.host}:{varz.port}
           </span>

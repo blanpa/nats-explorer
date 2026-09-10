@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ArrowDown, ArrowUp } from 'lucide-react';
 import type { StreamInfo, StreamMessage, StreamMessagesPage } from 'shared';
 import { api, errorMessage } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
@@ -26,6 +27,9 @@ export default function StreamMessages({ connId, stream, onChanged }: { connId: 
   // Seq, time, subject and size are dragged to width; the payload column
   // takes the rest. The two icon columns have nothing to widen.
   const { widths, resize } = useColumnWidths('ne.streamMessageCols', DEFAULT_WIDTHS);
+  // Newest first, the way a stream is usually read; ascending follows the
+  // sequence, which is the order things happened in.
+  const [desc, setDesc] = useState(true);
   const [live, setLive] = useState(false);
   const [liveMsgs, setLiveMsgs] = useState<StreamMessage[]>([]);
   const [chart, setChart] = useState<ChartSpec | null>(null);
@@ -80,9 +84,11 @@ export default function StreamMessages({ connId, stream, onChanged }: { connId: 
     }
   };
 
-  const pageMessages = page ? [...page.messages].reverse() : [];
+  // The server answers a page in sequence order; the tail collects newest
+  // first. Whichever way the table is sorted, the two have to meet.
+  const pageMessages = page ? (desc ? [...page.messages].reverse() : page.messages) : [];
   const tail = onNewestPage ? liveMsgs.filter(m => !page || m.seq > page.pageEnd) : [];
-  const messages = [...tail, ...pageMessages];
+  const messages = desc ? [...tail, ...pageMessages] : [...pageMessages, ...[...tail].reverse()];
   const liveSeqs = new Set(tail.map(m => m.seq));
 
   return (
@@ -138,8 +144,16 @@ export default function StreamMessages({ connId, stream, onChanged }: { connId: 
               */}
               <tr>
                 <th />
-                <th className="num">
-                  Seq
+                <th className="num" aria-sort={desc ? 'descending' : 'ascending'}>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 hover:text-fg"
+                    onClick={() => setDesc(v => !v)}
+                    title={desc ? 'Sorted newest first — click for oldest first' : 'Sorted oldest first — click for newest first'}
+                  >
+                    Seq
+                    {desc ? <ArrowDown size={11} /> : <ArrowUp size={11} />}
+                  </button>
                   <ColumnGrip {...resize('seq')} />
                 </th>
                 <th>

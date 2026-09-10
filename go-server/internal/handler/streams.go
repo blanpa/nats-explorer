@@ -615,25 +615,38 @@ func fetchRange(ctx context.Context, js jetstream.JetStream, stream string, star
 
 	want := int(end - startSeq + 1)
 	out := make([]map[string]interface{}, 0, want)
+	// The sequence of the next message that belongs in the page. An ordered
+	// consumer starts over from OptStartSeq whenever it has to recreate
+	// itself, so a second fetch can replay what the first already handed
+	// over -- a page that asked for eight came back as seven messages and a
+	// copy of the first, with the newest one missing. What was already
+	// taken is known by its number, not by how many arrived.
+	next := startSeq
 	for len(out) < want {
-		batch, err := oc.FetchNoWait(want - len(out))
+		// The whole range every time, not the remainder: after a replay the
+		// batch has to be large enough to hold what is skipped as well.
+		batch, err := oc.FetchNoWait(want)
 		if err != nil {
 			return nil, err
 		}
-		got := 0
+		added := 0
 		for msg := range batch.Messages() {
-			got++
 			item, seq := StreamMsgToMap(msg)
 			if seq > end {
 				return out, nil
 			}
+			if seq < next {
+				continue // replayed after a restart; already in the page
+			}
 			out = append(out, item)
+			next = seq + 1
+			added++
 		}
 		if batch.Error() != nil {
 			return nil, batch.Error()
 		}
-		if got == 0 {
-			break // stream ends early (deleted tail) or nothing pending
+		if added == 0 {
+			break // stream ends early (deleted tail), or the fetch only replayed
 		}
 	}
 	return out, nil
