@@ -49,11 +49,13 @@
   --color-ok: rgb(var(--ok));
   --color-warn: rgb(var(--warn));
   --color-danger: rgb(var(--danger));
-  --color-syn-key: rgb(var(--syn-key));
+  /* JSON keys are the interface blue, and a null is simply muted text:
+     two aliases rather than two more colours to keep in step. */
+  --color-syn-key: rgb(var(--info));
   --color-syn-str: rgb(var(--syn-str));
   --color-syn-num: rgb(var(--syn-num));
   --color-syn-bool: rgb(var(--syn-bool));
-  --color-syn-null: rgb(var(--syn-null));
+  --color-syn-null: rgb(var(--fg-muted));
 
   --shadow-pop: 0 8px 30px rgb(0 0 0 / 0.35), 0 1px 0 rgb(255 255 255 / 0.04) inset;
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.2);
@@ -107,7 +109,7 @@
 
   --fg: 227 232 239;
   --fg-muted: 139 151 168;
-  --fg-faint: 92 106 124;
+  --fg-faint: 114 130 150;   /* 4.6:1 on --bg-1; it is the most used ink */
 
   --accent: 46 196 165;
   --accent-fg: 6 32 26;
@@ -116,11 +118,9 @@
   --warn: 245 181 63;
   --danger: 242 96 122;
 
-  --syn-key: 124 197 255;
   --syn-str: 232 160 107;
   --syn-num: 167 214 139;
   --syn-bool: 201 156 255;
-  --syn-null: 139 151 168;
 
   --selection: rgb(var(--accent) / 0.28);
   --scroll-thumb: rgb(255 255 255 / 0.12);
@@ -140,20 +140,18 @@
 
   --fg: 26 32 41;
   --fg-muted: 92 105 121;
-  --fg-faint: 138 151 168;
+  --fg-faint: 102 117 137;
 
   --accent: 14 156 130;
   --accent-fg: 255 255 255;
-  --info: 43 127 217;
-  --ok: 34 163 90;
-  --warn: 201 138 18;
-  --danger: 214 64 90;
+  --info: 37 118 205;
+  --ok: 28 133 74;
+  --warn: 157 107 14;
+  --danger: 212 56 83;
 
-  --syn-key: 11 98 196;
   --syn-str: 180 80 29;
   --syn-num: 47 125 50;
   --syn-bool: 91 63 214;
-  --syn-null: 138 151 168;
 
   --selection: rgb(var(--accent) / 0.22);
   --scroll-thumb: rgb(0 0 0 / 0.16);
