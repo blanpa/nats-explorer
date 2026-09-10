@@ -111,7 +111,7 @@ Rules are evaluated on the record hook of every subscription manager, throttled 
 
 ### Changing subscriptions (`internal/subscription/resubscribe.go`)
 
-`SetSubjects` swaps the NATS subscriptions of a running manager instead of restarting it: patterns that stay keep their `patternStat`, and `forgetUnmatched` drops exactly the subjects no pattern covers, from the shards, the tree and the in-memory history. Removing a subject also removes it from the shards' pending change list, otherwise the next tree sync looks up a subject that is gone. Every tab's view is marked dirty so the difference, including the removals, reaches the browser.
+`SetSubjects` swaps the NATS subscriptions of a running manager instead of restarting it, and nothing is forgotten: patterns that stay keep their `patternStat`, and the subjects of the pattern that went keep their tree node, their counters and their messages. The tree is what the connection has received, not what it is listening to at this instant -- a subject that arrived is a fact, and unsubscribing only stops the next message. Emptying the tree is `Forget`/`ForgetAll`, behind the clear action that asks first.
 
 ### Payload filter (`internal/filter/`)
 

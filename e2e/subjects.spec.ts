@@ -101,7 +101,13 @@ test('subscriptions change while connected', async ({ page }) => {
   const filter = page.getByPlaceholder('Filter subjects…');
   await filter.fill(subjectRoot); // filtering shows every level
   await expect(page.getByRole('treeitem').filter({ hasText: 'yes' }).first()).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByRole('treeitem').filter({ hasText: 'live' })).toHaveCount(0);
+  // The new pattern receives; the removed one does not. What it collected
+  // before it was removed stays: the tree is what this connection has seen,
+  // not what it is listening to at this instant. `live.temp` arrived in an
+  // earlier test and is still there; `live.no` was published just now and
+  // never reached us.
+  await expect(page.locator('.tree-label').filter({ hasText: /^temp$/ }).first()).toBeVisible();
+  await expect(page.locator('.tree-label').filter({ hasText: /^no$/ })).toHaveCount(0);
 
   // Removing the last pattern leaves the connection with none: the catch-all
   // is the one subscription nobody can afford on a busy cluster, so it does

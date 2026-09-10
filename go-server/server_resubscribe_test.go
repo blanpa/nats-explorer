@@ -8,8 +8,9 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-// Adding a subscription must not cost what the other patterns collected.
-// The subjects of a pattern that goes away are dropped, nothing else.
+// Changing the subscriptions must not cost what was already collected --
+// neither by the patterns that stayed nor by the one that went. What a
+// connection received is a fact; unsubscribing only stops the next message.
 func TestServerSubscriptionChangeKeepsHistory(t *testing.T) {
 	ns := startNATS(t)
 	srv := newTestServer(t, serverConfig{})
@@ -70,15 +71,16 @@ func TestServerSubscriptionChangeKeepsHistory(t *testing.T) {
 		t.Fatalf("an untouched pattern stopped receiving: %d", got)
 	}
 
-	// Removing a pattern takes its subjects, and only those.
+	// Removing a pattern stops the feed and keeps the record.
 	if st := api.do("PUT", "/api/connections/c1/subscriptions", map[string]interface{}{
 		"subscriptions": []string{"keep.>", "extra.>"},
 	}, nil); st != 200 {
 		t.Fatalf("removing a pattern: %d", st)
 	}
 	time.Sleep(300 * time.Millisecond)
-	if got := count("drop.two"); got != 0 {
-		t.Errorf("the dropped subject still has %d messages", got)
+	before := count("drop.two")
+	if before != 3 {
+		t.Errorf("unsubscribing threw away what drop.two had collected: %d of 3 left", before)
 	}
 	if got := count("keep.one"); got != 5 {
 		t.Errorf("removing a pattern cost keep.one: %d messages left", got)
@@ -86,11 +88,11 @@ func TestServerSubscriptionChangeKeepsHistory(t *testing.T) {
 	if got := count("extra.three"); got != 2 {
 		t.Errorf("removing a pattern cost extra.three: %d messages left", got)
 	}
-	// A message on the removed pattern no longer arrives.
+	// New messages on the removed pattern do not arrive; the old ones stay.
 	publish("drop.two", 2)
 	time.Sleep(400 * time.Millisecond)
-	if got := count("drop.two"); got != 0 {
-		t.Errorf("the removed pattern still receives: %d", got)
+	if got := count("drop.two"); got != before {
+		t.Errorf("drop.two = %d messages after unsubscribing, want the %d it already had", got, before)
 	}
 
 	// The counters of the connection reflect what is left.

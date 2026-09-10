@@ -19,7 +19,11 @@ func feedManager(t *testing.T, m *Manager, subject, payload string, seq uint64) 
 
 // Changing the subscriptions must only cost the subjects that no pattern
 // covers any more: adding one keeps everything, removing one takes its own.
-func TestForgetUnmatchedKeepsTheRest(t *testing.T) {
+// Narrowing the patterns must not erase what was already seen. The tree is
+// what this connection has received, not what it is listening to at this
+// instant: a subject that arrived is a fact, and unsubscribing is not a
+// statement that it never happened.
+func TestSetSubjectsKeepsWhatWasSeen(t *testing.T) {
 	m := NewManager("c1")
 	m.History = history.NewMemStore(0, 0)
 	m.mu.Lock()
@@ -38,49 +42,48 @@ func TestForgetUnmatchedKeepsTheRest(t *testing.T) {
 	m.tree.refresh()
 	m.mu.Unlock()
 
-	if got := len(m.History.Subject("c1", "orders.new", 10, 0)); got != 1 {
-		t.Fatalf("history before the change = %d", got)
+	has := func(subject string) bool {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		_, ok := m.tree.nodes[subject]
+		return ok
+	}
+	messages := func(subject string) int { return len(m.History.Subject("c1", subject, 10, 0)) }
+
+	if messages("orders.new") != 1 || !has("temp.line1") {
+		t.Fatal("the manager did not collect what the test needs")
 	}
 
-	// Adding a pattern keeps everything.
-	m.mu.Lock()
-	m.Subjects = []string{"orders.>", "temp.>", "alarms.>"}
-	m.mu.Unlock()
-	m.forgetUnmatched(m.Subjects)
-	if got := len(m.History.Subject("c1", "orders.new", 10, 0)); got != 1 {
-		t.Fatalf("adding a pattern dropped the history of orders.new (%d left)", got)
+	ns := startNATS(t)
+	nc, err := nats.Connect(ns.ClientURL())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := len(m.History.Subject("c1", "temp.line1", 10, 0)); got != 1 {
-		t.Fatalf("adding a pattern dropped the history of temp.line1 (%d left)", got)
+	defer nc.Close()
+
+	// Dropping temp.> leaves everything it collected in place.
+	if err := m.SetSubjects(nc, []string{"orders.>"}); err != nil {
+		t.Fatal(err)
 	}
-	m.mu.Lock()
-	_, treeHasTemp := m.tree.nodes["temp.line1"]
-	m.mu.Unlock()
-	if !treeHasTemp {
-		t.Fatal("adding a pattern removed a subject from the tree")
+	if got := messages("temp.line1"); got != 1 {
+		t.Errorf("unsubscribing dropped the history of temp.line1 (%d left)", got)
+	}
+	if !has("temp.line1") || !has("temp") {
+		t.Error("unsubscribing removed the subject from the tree")
+	}
+	if !has("orders.new") {
+		t.Error("a subject that is still subscribed left the tree")
+	}
+	if n := m.subjectCount.Load(); n != 3 {
+		t.Errorf("subject count = %d, want all 3 that were seen", n)
 	}
 
-	// Removing one takes its subjects and nothing else.
-	m.forgetUnmatched([]string{"orders.>"})
-	if got := len(m.History.Subject("c1", "temp.line1", 10, 0)); got != 0 {
-		t.Errorf("temp.line1 should be gone, %d messages left", got)
+	// And removing every pattern keeps the lot.
+	if err := m.SetSubjects(nc, nil); err != nil {
+		t.Fatal(err)
 	}
-	if got := len(m.History.Subject("c1", "orders.new", 10, 0)); got != 1 {
-		t.Errorf("orders.new must survive, %d messages left", got)
-	}
-	m.mu.Lock()
-	_, stillThere := m.tree.nodes["temp.line1"]
-	_, rootGone := m.tree.nodes["temp"]
-	_, ordersThere := m.tree.nodes["orders.new"]
-	m.mu.Unlock()
-	if stillThere || rootGone {
-		t.Error("the tree still carries the dropped subject or its empty branch")
-	}
-	if !ordersThere {
-		t.Error("the tree lost a subject that is still subscribed")
-	}
-	if n := m.subjectCount.Load(); n != 2 {
-		t.Errorf("subject count = %d, want 2", n)
+	if !has("orders.new") || !has("temp.line1") || messages("orders.new") != 1 {
+		t.Error("removing every pattern emptied the tree")
 	}
 }
 

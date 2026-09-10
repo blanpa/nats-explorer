@@ -9,13 +9,18 @@ import (
 // Changing the subscriptions of a running connection used to stop the
 // manager and start it over, which threw away the subject tree, the counters
 // and the recorded history of everything, including the patterns that did
-// not change. Adding one pattern must not cost what the others collected, so
-// SetSubjects swaps the subscriptions and then forgets exactly the subjects
-// that no pattern covers any more.
+// not change.
+//
+// Nothing is thrown away now. The tree is what this connection has seen, not
+// what it is listening to at this instant: a subject that arrived is a fact,
+// and narrowing the patterns is not a statement that it never happened.
+// Subjects no longer covered simply stop growing -- their rate falls to zero
+// and their messages stay readable. Emptying the tree is its own action, and
+// asks first.
 
-// SetSubjects replaces the subscribed patterns on a running manager.
-// Subjects still covered keep their history, counters and tree nodes; the
-// others are dropped. A manager that is not running is started instead.
+// SetSubjects replaces the subscribed patterns on a running manager. Every
+// subject keeps its history, counters and tree node, covered or not. A
+// manager that is not running is started instead.
 func (m *Manager) SetSubjects(nc *nats.Conn, subjects []string) error {
 	// No patterns means no subscriptions: everything collected so far is
 	// forgotten below and nothing new arrives until one is added.
@@ -70,7 +75,6 @@ func (m *Manager) SetSubjects(nc *nats.Conn, subjects []string) error {
 	m.subs = subs
 	m.mu.Unlock()
 
-	m.forgetUnmatched(subjects)
 	m.emitTree()
 	return nil
 }
@@ -135,67 +139,6 @@ func (m *Manager) recountSubjects() {
 		sh.mu.Unlock()
 	}
 	m.subjectCount.Store(n)
-}
-
-// forgetUnmatched drops every subject no pattern covers any more, from the
-// shards, the tree and the in-memory history. The persistent history keeps
-// them: it is meant to outlive what a connection currently listens to.
-func (m *Manager) forgetUnmatched(patterns []string) {
-	covered := func(subject string) bool {
-		for _, p := range patterns {
-			if matchSubject(p, subject) {
-				return true
-			}
-		}
-		return false
-	}
-
-	var gone []string
-	for _, sh := range m.shards {
-		sh.mu.Lock()
-		dropped := map[string]struct{}{}
-		for subject := range sh.subjects {
-			if !covered(subject) {
-				gone = append(gone, subject)
-				dropped[subject] = struct{}{}
-				delete(sh.subjects, subject)
-				delete(sh.active, subject)
-			}
-		}
-		// The pending change list still names them; the tree sync would
-		// look them up and find nothing.
-		if len(dropped) > 0 && len(sh.dirty) > 0 {
-			kept := sh.dirty[:0]
-			for _, subject := range sh.dirty {
-				if _, isGone := dropped[subject]; !isGone {
-					kept = append(kept, subject)
-				}
-			}
-			sh.dirty = kept
-		}
-		sh.mu.Unlock()
-	}
-	if len(gone) == 0 {
-		return
-	}
-	m.recountSubjects()
-
-	m.mu.Lock()
-	for _, subject := range gone {
-		m.tree.remove(subject)
-	}
-	// The visible set changed for every tab, so each one recomputes its
-	// difference and learns what left.
-	for _, cl := range m.clients {
-		cl.view.dirty = true
-	}
-	m.mu.Unlock()
-
-	if m.History != nil {
-		if dropper, ok := m.History.(interface{ DropSubjects(string, []string) }); ok {
-			dropper.DropSubjects(m.ConnID, gone)
-		}
-	}
 }
 
 // ForgetAll empties the tree, the per-subject counters and the pattern
