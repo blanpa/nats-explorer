@@ -223,3 +223,63 @@ func TestSeriesUsesTheRollupsOverSeveralMinutes(t *testing.T) {
 		t.Fatalf("read the messages where ten minutes of buckets would do: %+v", resp)
 	}
 }
+
+// The live chart read memory alone. A subject last seen before a restart
+// has its messages on disk only, so the chart said "collecting data points"
+// while the payloads of those very messages sat on screen beside it.
+func TestSeriesLiveReadsTheRecordedHistory(t *testing.T) {
+	base := time.Now().Add(-time.Hour).UnixMilli()
+	db, err := history.OpenDB(filepath.Join(t.TempDir(), "h.db"), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	// Written before this run: on disk, and never in this memory store.
+	for i := 0; i < 3; i++ {
+		db.Enqueue("c", &message.Record{
+			Subject:   "e2e.wipe.b",
+			Data:      []byte(`{"n":` + strconv.Itoa(i) + `}`),
+			Timestamp: base + int64(i)*250,
+			Sequence:  uint64(i + 1),
+		})
+	}
+	db.Flush()
+	tee := history.NewTee(history.NewMemStore(1<<20, 3))
+	tee.SetDB(db)
+	h := &HistoryHandler{History: tee, Tee: tee}
+
+	rec := httptest.NewRecorder()
+	h.Series(rec, httptest.NewRequest("GET", "/api/history/series?subject=e2e.wipe.b&connId=c&field=n&points=600", nil))
+	var resp SeriesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Points) != 3 {
+		t.Fatalf("live series = %v, want the three recorded messages", resp.Points)
+	}
+	// What the browser appends its live values after: the newest message by
+	// the clock, not the largest number.
+	if resp.Last != 3 {
+		t.Fatalf("last = %d, want the sequence of the newest message", resp.Last)
+	}
+}
+
+// After a reconnect the numbers start over, so the largest one belongs to
+// the older run. Handing that back would tell the browser to ignore every
+// live message until the count caught up.
+func TestSeriesLastIsTheNewestNotTheLargest(t *testing.T) {
+	base := time.Now().Add(-time.Hour).UnixMilli()
+	mem := history.NewMemStore(1<<20, 100)
+	mem.Append("c", &message.Record{Subject: "plant.temp", Data: []byte(`{"n":1}`), Timestamp: base, Sequence: 16624})
+	mem.Append("c", &message.Record{Subject: "plant.temp", Data: []byte(`{"n":2}`), Timestamp: base + 1000, Sequence: 1})
+	h := &HistoryHandler{History: mem}
+	rec := httptest.NewRecorder()
+	h.Series(rec, httptest.NewRequest("GET", "/api/history/series?subject=plant.temp&connId=c&field=n&points=600", nil))
+	var resp SeriesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Last != 1 {
+		t.Fatalf("last = %d, want 1: the newest message by the clock", resp.Last)
+	}
+}

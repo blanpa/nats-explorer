@@ -24,19 +24,21 @@ describe('mergePoints', () => {
     size: 1,
     sequence: seq,
   });
-  it('appends only live messages newer than the series', () => {
+  it('appends only the live messages the series does not already cover', () => {
+    // Where the answer ends is a time, not a sequence number: the numbers
+    // start over with every reconnect, the clock does not.
     const series: HistorySeries = {
       subject: 's',
       field: 'a.b',
       points: [
-        [1, 10],
-        [2, 20],
+        [1001, 10],
+        [1005, 50],
       ],
       samples: 2,
       last: 5,
     };
     const out = mergePoints(series, [msg(4, 40), msg(5, 50), msg(6, 60)], 'a.b');
-    expect(out.map(p => p.v)).toEqual([10, 20, 60]);
+    expect(out.map(p => p.v)).toEqual([10, 50, 60]);
   });
   it('falls back to the live messages without a series', () => {
     expect(mergePoints(null, [msg(1, 1), msg(2, 2)], 'a.b').map(p => p.v)).toEqual([1, 2]);

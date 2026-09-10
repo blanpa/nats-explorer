@@ -621,6 +621,7 @@ func (h *HistoryHandler) Series(w http.ResponseWriter, r *http.Request) {
 
 	var samples [][2]float64
 	var last uint64
+	var lastTS int64
 	from, to, ranged := timeRange(r)
 	for _, id := range h.connIDs(r) {
 		var msgs []message.NatsMessage
@@ -632,11 +633,27 @@ func (h *HistoryHandler) Series(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			msgs = h.History.Subject(id, subject, history.DefaultMaxPerSubject, 0)
+			// Memory holds the newest few thousand messages of a subject,
+			// and for a subject last seen before a restart it holds none:
+			// a live chart that read memory alone drew nothing while the
+			// payloads of those very messages sat on screen beside it.
+			if want := history.DefaultMaxPerSubject - len(msgs); want > 0 {
+				var ts int64
+				var seq uint64
+				if len(msgs) > 0 {
+					ts, seq = msgs[0].Timestamp, msgs[0].Sequence
+				}
+				older, _ := h.olderOnDisk(r.Context(), db, id, subject, false, ts, seq, want)
+				msgs = append(reversed(older), msgs...)
+			}
 		}
 		for i := range msgs {
 			m := msgs[i]
-			if m.Sequence > last {
-				last = m.Sequence
+			// The newest message by the clock, not the largest number:
+			// sequences restart with every reconnect, and this is what the
+			// browser appends its live values after.
+			if m.Timestamp > lastTS || (m.Timestamp == lastTS && m.Sequence > last) {
+				lastTS, last = m.Timestamp, m.Sequence
 			}
 			if m.PayloadType != "json" {
 				continue

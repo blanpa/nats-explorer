@@ -92,10 +92,14 @@ export function decimate(points: Point[], buckets: number): Point[] {
 export function mergePoints(series: HistorySeries | null | undefined, messages: NatsMessage[], fieldPath: string, agg: Aggregation = 'minmax'): Point[] {
   const out: Point[] = series ? series.points.map(([t, v]) => ({ t, v })) : [];
   if (series && agg !== 'minmax') return out;
-  const after = series?.last ?? 0;
+  // Where the server's answer ends, by the clock. It used to be by sequence
+  // number, and those restart at one with every reconnect: after a restart
+  // "newer than 16 624" was every live message, and the chart stopped
+  // growing. A minute bucket has no sequence at all.
+  const after = out.length ? out[out.length - 1].t : 0;
   for (const m of messages) {
     if (m.payloadType !== 'json') continue;
-    if (series && (m.sequence ?? 0) <= after) continue;
+    if (series && m.timestamp <= after) continue;
     const v = extractNumber(m.payload, fieldPath);
     if (v !== null) out.push({ t: m.timestamp, v });
   }

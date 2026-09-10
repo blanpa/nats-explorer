@@ -166,6 +166,22 @@ describe('mergePoints', () => {
     expect(out.map(p => p.t)).toEqual([1000, 2000, 3000]);
   });
 
+  it('appends by the clock, not by the sequence number', () => {
+    // Sequences restart at one with every reconnect. A series whose last
+    // message was numbered 16 624 used to swallow every live message until
+    // the new run's count caught up -- which it never does.
+    const afterRestart = { ...series('minmax'), points: [[1000, 20]] as [number, number][], last: 16_624 };
+    const live = [msg(2000, 30), msg(3000, 25)];
+    expect(mergePoints(afterRestart, live, 'temp', 'minmax').map(p => p.t)).toEqual([1000, 2000, 3000]);
+  });
+
+  it('appends everything when the server had nothing to say', () => {
+    // A subject the server could not answer for still has messages in the
+    // browser; they are the whole chart.
+    const empty = { ...series('minmax'), points: [] as [number, number][], last: 0 };
+    expect(mergePoints(empty, messages, 'temp', 'minmax').map(p => p.t)).toEqual([1000, 2000, 3000]);
+  });
+
   it('leaves a reduced series alone', () => {
     // An average or a count is a reduction; putting one raw message next to
     // it would make the last bucket jump.
