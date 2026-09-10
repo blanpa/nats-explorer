@@ -27,6 +27,12 @@ nav_order: 3
 - Selecting a branch shows the recent messages of everything below it
 - Large subject spaces cost what is on screen, not what the server sees: see [Performance](#performance)
 
+## What matches a subject
+
+The overflow menu of a subject asks the question a wildcard makes hard: what would one concrete message on it actually run into? The answer is one dialog -- the connection's subscriptions that cover it, the streams that store it and through which of their own patterns, the consumers that would see it and how many filter it out, the alert rules that watch it, and the pinned schema that judges it. The subject can be edited in place, so it answers for one that has never been sent.
+
+`*` covers one token and `>` the rest; stream subjects overlap; a consumer filter one level too deep is invisible until nothing arrives. `GET /api/match?subject=` answers the JetStream half for scripts.
+
 ## Bookmarks
 
 The star in the subject header keeps a subject, with an optional name, group and note. Bookmarks appear as their own panel above the tree and select their subject even when it is filtered out or has not sent anything yet; the note shows under the subject header. Selecting a subject that way, or from an alert or a message list, opens the branches above it in the tree. They travel with the other settings, so with file storage they follow the user to another browser.

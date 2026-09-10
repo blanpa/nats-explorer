@@ -252,6 +252,7 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 
 	publishHandler := &handler.PublishHandler{Store: store}
 	streamsHandler := &handler.StreamsHandler{Store: store}
+	matchHandler := &handler.MatchHandler{Store: store}
 	consumersHandler := &handler.ConsumersHandler{Store: store}
 	kvHandler := &handler.KVHandler{Store: store}
 	objHandler := &handler.ObjectStoreHandler{Store: store}
@@ -468,6 +469,8 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 			r.Delete("/settings/{key}", sh.Delete)
 		}
 
+		// "Who would receive this?" for one concrete subject.
+		r.Get("/match", matchHandler.Match)
 		r.Get("/streams", streamsHandler.List)
 		r.Post("/streams", streamsHandler.Create)
 		r.Get("/streams/{name}", streamsHandler.Get)

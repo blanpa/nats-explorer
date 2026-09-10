@@ -144,6 +144,17 @@ func SetSchemaChecker(fn SchemaChecker) (remove func()) {
 	return func() { checker.CompareAndSwap(p, nil) }
 }
 
+// CheckSchema judges one payload against the schema pinned for its subject:
+// what differs, and the pattern it was pinned under. An empty pattern means
+// there is no reference, which is not the same as matching one. With a nil
+// payload it answers only the second question: which schema would judge it.
+func CheckSchema(subj, kind string, payload []byte) (violations []string, pattern string) {
+	if p := checker.Load(); p != nil {
+		return (*p)(subj, kind, payload)
+	}
+	return nil, ""
+}
+
 /**
  * Annotate marks browser messages with how they stand against the schema
  * pinned for their subject, so a list can show it without asking again.

@@ -31,6 +31,7 @@ import type {
   StreamInfo,
   StreamMessagesPage,
   StreamSeries,
+  MatchResponse,
 } from 'shared';
 import { type AuthInfo, useAuth } from './auth';
 import { serverUrl } from './basePath';
@@ -212,6 +213,8 @@ export const api = {
   // Streams
   listStreams: (connId: string) => request<StreamInfo[]>(withConn('/streams', connId)),
   getStream: (connId: string, name: string) => request<StreamInfo>(withConn(`/streams/${enc(name)}`, connId)),
+  /** What one concrete subject runs into: which streams store it, which consumers see it. */
+  matchSubject: (connId: string, subject: string) => request<MatchResponse>(withConn('/match', connId, { subject })),
   createStream: (connId: string, config: StreamConfigInput) => request<StreamInfo>(withConn('/streams', connId), { method: 'POST', ...json(config) }),
   updateStream: (connId: string, name: string, config: StreamConfigInput) =>
     request<StreamInfo>(withConn(`/streams/${enc(name)}`, connId), { method: 'PUT', ...json(config) }),

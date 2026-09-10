@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import type { NatsMessage } from 'shared';
-import { Bell, Check, Copy, Diff, Eraser, FolderTree, History, LineChart, MoreVertical, MousePointerClick, Send, X } from 'lucide-react';
+import { Bell, Check, Copy, Crosshair, Diff, Eraser, FolderTree, History, LineChart, MoreVertical, MousePointerClick, Send, X } from 'lucide-react';
 import { api, errorMessage } from '../../lib/api';
 import { useCanWrite } from '../../lib/auth';
 import { clearSubject, loadOlder, loadOlderBranch } from '../../lib/feed';
@@ -26,6 +26,7 @@ import MultiSubjectView from './MultiSubjectView';
 import { findBookmark, useBookmarks } from '../../lib/bookmarks';
 import BookmarkButton from './BookmarkButton';
 import HeaderList from './HeaderList';
+import MatchDialog from './MatchDialog';
 import { msgId, repeatedIds } from '../../lib/natsHeaders';
 import RuleDialog from '../alerts/RuleDialog';
 import { alertRuleForSubject } from '../../lib/alerts';
@@ -117,6 +118,8 @@ function SingleSubjectView() {
   // it out again is where a subject like uns.acme.factory-berlin.assembly
   // gets a token wrong.
   const [alertDraft, setAlertDraft] = useState<AlertRule | null>(null);
+  // "Who would receive this?" for the subject on screen.
+  const [matching, setMatching] = useState<string | null>(null);
   const { data: rangedData, setData: setRangedData } = ranged;
 
   // Pages backwards through the range, the same way the live history does:
@@ -413,27 +416,35 @@ function SingleSubjectView() {
         >
           Publish here
         </Button>
-        {canWrite && (
-          <DropdownMenu.Root>
-            <DropdownMenu.Trigger asChild>
-              <IconButton label={`More for ${subject}`}>
-                <MoreVertical size={14} />
-              </IconButton>
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Portal>
-              <DropdownMenu.Content align="end" sideOffset={6} className={menuClass}>
-                <DropdownMenu.Item className={itemClass} onSelect={() => setAlertDraft(alertRuleForSubject(subject, isBranch || shownBelow.length > 0))}>
-                  <Bell size={13} /> {isBranch || shownBelow.length > 0 ? 'Alert on this branch…' : 'Alert on this subject…'}
-                </DropdownMenu.Item>
-                <DropdownMenu.Separator className="h-px bg-line my-1" />
-                <DropdownMenu.Item className={`${itemClass} text-danger`} onSelect={clearThis}>
-                  <Eraser size={13} /> {isBranch || shownBelow.length > 0 ? 'Clear history below…' : 'Clear history…'}
-                </DropdownMenu.Item>
-              </DropdownMenu.Content>
-            </DropdownMenu.Portal>
-          </DropdownMenu.Root>
-        )}
+        {/* Asking what matches a subject reads nothing and changes nothing,
+            so it is there for a viewer too; the two below it are writes. */}
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <IconButton label={`More for ${subject}`}>
+              <MoreVertical size={14} />
+            </IconButton>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content align="end" sideOffset={6} className={menuClass}>
+              <DropdownMenu.Item className={itemClass} onSelect={() => setMatching(subject)}>
+                <Crosshair size={13} /> What matches this subject?…
+              </DropdownMenu.Item>
+              {canWrite && (
+                <>
+                  <DropdownMenu.Item className={itemClass} onSelect={() => setAlertDraft(alertRuleForSubject(subject, isBranch || shownBelow.length > 0))}>
+                    <Bell size={13} /> {isBranch || shownBelow.length > 0 ? 'Alert on this branch…' : 'Alert on this subject…'}
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Separator className="h-px bg-line my-1" />
+                  <DropdownMenu.Item className={`${itemClass} text-danger`} onSelect={clearThis}>
+                    <Eraser size={13} /> {isBranch || shownBelow.length > 0 ? 'Clear history below…' : 'Clear history…'}
+                  </DropdownMenu.Item>
+                </>
+              )}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
         {alertDraft && <RuleDialog rule={alertDraft} onClose={() => setAlertDraft(null)} />}
+        {matching !== null && <MatchDialog subject={matching} onClose={() => setMatching(null)} />}
       </div>
     </PaneHeader>
   );

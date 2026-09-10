@@ -198,3 +198,31 @@ export interface ConsumerCreateInput {
   replayPolicy?: ReplayPolicy;
   maxAckPending?: number;
 }
+
+/** A stream that would store a subject, and the consumers that would see it. */
+export interface MatchStream {
+  name: string;
+  /** the stream's own patterns that match */
+  subjects: string[];
+  consumers: MatchConsumer[];
+  /** consumers of the stream whose filter does not match */
+  filtered: number;
+}
+
+export interface MatchConsumer {
+  name: string;
+  /** its filters that match; empty means it has none and takes everything */
+  subjects?: string[];
+  push?: boolean;
+}
+
+/** What one concrete subject runs into: GET /api/match?subject= */
+export interface MatchResponse {
+  subject: string;
+  streams: MatchStream[];
+  /** the pinned schema that would judge it */
+  schemaPattern?: string;
+  /** whether the streams could be read at all */
+  jetStream: boolean;
+  error?: string;
+}
