@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nats-explorer.fullname" . }}
+  labels: {{- include "nats-explorer.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    # The history lives in the pod: a second one alongside it would answer
+    # browsers with a different half of the traffic.
+    type: Recreate
+  selector:
+    matchLabels: {{- include "nats-explorer.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "nats-explorer.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: nats-explorer
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 3002
+          env:
+            - name: PORT
+              value: "3002"
+            - name: HISTORY_MB
+              value: {{ .Values.config.historyMb | quote }}
+            {{- $base := include "nats-explorer.basePath" . }}
+            {{- if $base }}
+            - name: BASE_PATH
+              value: {{ $base | quote }}
+            {{- end }}
+            {{- if .Values.persistence.enabled }}
+            - name: STORAGE_DIR
+              value: {{ .Values.persistence.mountPath | quote }}
+            {{- if .Values.config.persistHistory }}
+            - name: HISTORY_DB
+              value: {{ printf "%s/history.db" .Values.persistence.mountPath | quote }}
+            - name: HISTORY_RETENTION
+              value: {{ .Values.config.historyRetention | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if eq .Values.auth.mode "token" }}
+            - name: AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.secretName | default (printf "%s-auth" (include "nats-explorer.fullname" .)) }}
+                  key: token
+            {{- else if eq .Values.auth.mode "users" }}
+            - name: AUTH_USERS
+              value: /auth/users
+            {{- end }}
+            {{- range $k, $v := .Values.config.extraEnv }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          volumeMounts:
+            # The image needs a writable temp dir with a read-only root.
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.persistence.enabled }}
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath }}
+            {{- end }}
+            {{- if eq .Values.auth.mode "users" }}
+            - name: auth
+              mountPath: /auth
+              readOnly: true
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: {{ printf "%s/api/app" (include "nats-explorer.basePath" .) }}
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: {{ printf "%s/api/app" (include "nats-explorer.basePath" .) }}
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "nats-explorer.fullname" . }}
+        {{- end }}
+        {{- if eq .Values.auth.mode "users" }}
+        - name: auth
+          secret:
+            secretName: {{ required "auth.usersSecretName is required with auth.mode=users" .Values.auth.usersSecretName }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,24 @@
+{{ .Chart.Name }} {{ .Chart.AppVersion }} is starting.
+
+{{- if .Values.ingress.enabled }}
+Open it at http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.host }}{{ .Values.ingress.path }}
+{{- else }}
+No ingress. Reach it with a port-forward:
+
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "nats-explorer.fullname" . }} 3002:{{ .Values.service.port }}
+
+then open http://localhost:3002
+{{- end }}
+
+{{- if not .Values.persistence.enabled }}
+
+Connections and the recorded history live in the pod and in the browser:
+a restart loses them. Set persistence.enabled=true (and
+config.persistHistory=true for the history on disk) to keep them.
+{{- end }}
+{{- if gt (int .Values.replicaCount) 1 }}
+
+WARNING: replicaCount is {{ .Values.replicaCount }}. Each pod records only
+the traffic of its own NATS connection, so browsers get a different half of
+the history depending on which pod answers. Run one.
+{{- end }}
