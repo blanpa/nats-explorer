@@ -6,11 +6,21 @@ import { useStore } from '../../store';
 import { Badge } from '../ui/misc';
 import ConnectionSwitcher from '../connection/ConnectionSwitcher';
 
+/**
+ * A subject tree: a root and the branches under it. The letter it used to
+ * be said nothing about the tool -- this is the thing the application
+ * shows, and it still reads at 16px in a browser tab.
+ */
 function Logo() {
   return (
     <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden>
       <rect width="32" height="32" rx="7" className="fill-raised" />
-      <path d="M9 23V9l14 14V9" fill="none" stroke="rgb(var(--accent))" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+      <g stroke="rgb(var(--accent))" fill="rgb(var(--accent))">
+        <path d="M8 9.25V22.75M8 12.75H15.4M8 22.75H20.4" strokeWidth="2.6" fill="none" strokeLinecap="round" />
+        <circle cx="8" cy="9.25" r="3" strokeWidth="0" />
+        <circle cx="19" cy="12.75" r="3" strokeWidth="0" />
+        <circle cx="24" cy="22.75" r="3" strokeWidth="0" />
+      </g>
     </svg>
   );
 }
