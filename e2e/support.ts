@@ -77,12 +77,22 @@ export async function openApp(page: Page): Promise<string[]> {
  * between the lookup and the click; retrying is the reliable way.
  */
 export async function selectLeaf(page: Page, text: string): Promise<void> {
-  const row = page.getByRole('treeitem').filter({ hasText: text });
-  await expect(row.first()).toBeVisible({ timeout: 15_000 });
+  const rows = page.getByRole('treeitem').filter({ hasText: text });
+  await expect(rows.first()).toBeVisible({ timeout: 15_000 });
+  // The run id is a base-36 timestamp, so it contains the leaf's letters
+  // about a third of the time -- `e2e.mtve4akq` matches a search for "a".
+  // Waiting for the first match and clicking the last one then clicks the
+  // run-id row whenever the leaf has not rendered yet, and a header check
+  // for a bare letter accepts it. So: try the candidates from the deepest
+  // up, and only stop when the detail pane really shows this leaf.
+  const opened = new RegExp(`\\.${text}(\\b|$)`);
   await expect(async () => {
-    await row.last().click({ timeout: 2000 });
-    // The detail pane, not the tree's own header.
-    await expect(page.locator('main .pane-header').first()).toContainText(text, { timeout: 1500 });
+    for (let i = (await rows.count()) - 1; i >= 0; i--) {
+      await rows.nth(i).click({ timeout: 2000 });
+      const header = await page.locator('main .pane-header').first().innerText();
+      if (opened.test(header.split('\n')[0])) return;
+    }
+    throw new Error(`no tree row opened a subject ending in .${text}`);
   }).toPass({ timeout: 20_000 });
 }
 

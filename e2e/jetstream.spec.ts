@@ -34,11 +34,18 @@ test('stream overview, newest page, chart, live tail, consumers', async ({ page 
   await nc.jetstream().publish(`${subjectRoot}.orders.6`, jc.encode({ id: 6 }));
   await expect(page.locator('tbody tr').filter({ hasText: `${subjectRoot}.orders.6` })).toBeVisible({ timeout: 10_000 });
 
-  // Export the loaded page as a file.
+  // Export the loaded page as a file. NDJSON sits beside JSON in the menu,
+  // so the name has to be exact.
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export' }).click();
-  await page.getByRole('menuitem', { name: /JSON/ }).click();
+  await page.getByRole('menuitem', { name: 'JSON', exact: true }).click();
   expect((await download).suggestedFilename()).toMatch(/\.json$/);
+
+  // And the line-delimited one, which is a different file.
+  const ndjson = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export' }).click();
+  await page.getByRole('menuitem', { name: 'NDJSON' }).click();
+  expect((await ndjson).suggestedFilename()).toMatch(/\.ndjson$/);
 
   // Consumers: create one, then edit what JetStream allows to change.
   await page.getByRole('tab', { name: /Consumers/ }).click();

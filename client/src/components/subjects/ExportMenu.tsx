@@ -7,6 +7,8 @@ import { type ExportFormat, exportMessages } from '../../lib/exportMessages';
 import { Button } from '../ui/Button';
 import { menuClass, menuItemClass as itemClass } from '../ui/misc';
 import { useStore } from '../../store';
+import { errorMessage } from '../../lib/api';
+import { toast } from '../ui/Toast';
 import ExportBundleDialog from '../bundle/ExportBundleDialog';
 import ReplayDialog from './ReplayDialog';
 
@@ -58,34 +60,68 @@ export default function ExportMenu({
   name,
   size = 'sm',
   subject,
+  loadAll,
+  scope,
 }: {
   messages: (NatsMessage | StreamMessage)[];
   name: string;
   size?: 'xs' | 'sm';
   /** offers a support bundle for this subject and everything below it */
   subject?: string;
+  /**
+   * Fetches everything the current selection covers, not only what is
+   * loaded. Without it the export writes what the view holds -- which for a
+   * time range is one page, and picking "30 d" and getting the first 2 000
+   * messages is not what the range said.
+   */
+  loadAll?: () => Promise<(NatsMessage | StreamMessage)[]>;
+  /** What the export covers, for the line above the formats ("the last 30 d"). */
+  scope?: string;
 }) {
   const [replay, setReplay] = useState(false);
   const [bundle, setBundle] = useState(false);
+  const [busy, setBusy] = useState(false);
   const connId = useStore(s => s.activeConnId);
   const none = messages.length === 0;
+
+  // The whole selection is gathered first, so the file holds what was asked
+  // for rather than what happened to be scrolled into view.
+  const run = async (format: ExportFormat) => {
+    if (!loadAll) {
+      exportMessages(messages, format, name);
+      return;
+    }
+    setBusy(true);
+    try {
+      const all = await loadAll();
+      exportMessages(all, format, name);
+    } catch (err) {
+      toast.error('Export failed', errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <>
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
-          <Button size={size} variant="outline" icon={<Download size={13} />} disabled={none} title="Export or replay these messages">
+          <Button size={size} variant="outline" icon={<Download size={13} />} disabled={none} loading={busy} title="Export or replay these messages">
             Export
           </Button>
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
           <DropdownMenu.Content align="end" sideOffset={6} className={menuClass}>
+            {/* What lands in the file, before choosing how it is written. */}
+            <div className="px-2 py-1 text-xs text-faint">
+              {scope ? `Everything in ${scope}` : `${messages.length.toLocaleString('en-US')} loaded message${messages.length === 1 ? '' : 's'}`}
+            </div>
+            <DropdownMenu.Separator className="h-px bg-line my-1" />
             {FORMATS.map(f =>
               f.id === null ? (
                 <DropdownMenu.Separator key={f.label} className="h-px bg-line my-1" />
               ) : (
-                <DropdownMenu.Item key={f.id} className={itemClass} title={f.hint} onSelect={() => exportMessages(messages, f.id as ExportFormat, name)}>
+                <DropdownMenu.Item key={f.id} className={itemClass} title={f.hint} onSelect={() => run(f.id as ExportFormat)}>
                   {f.icon} {f.label}
-                  {f.id === 'json' && <span className="text-faint ml-auto">{messages.length.toLocaleString('en-US')}</span>}
                 </DropdownMenu.Item>
               ),
             )}

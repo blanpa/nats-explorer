@@ -15,6 +15,7 @@ import { Badge, EmptyState, HeaderDivider, menuClass, menuItemClass as itemClass
 import { toast } from '../ui/Toast';
 import DiffView from './DiffView';
 import ExportMenu from './ExportMenu';
+import { EXPORT_MAX_MESSAGES, fetchWholeRange } from '../../lib/exportRange';
 import { HistorySearchInput, SearchSummary, useHistorySearch } from './HistorySearch';
 import RangePicker, { type TimeRange } from './RangePicker';
 import HistoryRail from './HistoryRail';
@@ -97,6 +98,8 @@ function SingleSubjectView() {
     { key: subject && range ? `range:${subject}:${range.from}:${range.to}` : undefined },
   );
   const [loadingOlderRange, setLoadingOlderRange] = useState(false);
+  // How far an export has got while it pages the range in.
+  const [exportProgress, setExportProgress] = useState<number | null>(null);
   const { data: rangedData, setData: setRangedData } = ranged;
 
   // Pages backwards through the range, the same way the live history does:
@@ -235,6 +238,23 @@ function SingleSubjectView() {
     }
   };
 
+  // An export asks for what was selected, not for what has been scrolled
+  // into view: with a range active it pages the rest in first. Live, the
+  // view already holds everything the server keeps in memory for the
+  // subject, so there is nothing to fetch.
+  const loadAllForExport = range
+    ? async () => {
+        const { messages: all, truncated } = await fetchWholeRange(subject, range, { messages: rangedAll, more: rangedData?.more }, n => setExportProgress(n));
+        setExportProgress(null);
+        if (truncated) {
+          toast.info('Export shortened', `${formatCount(EXPORT_MAX_MESSAGES)} messages is the most one export carries; older ones are not in the file.`);
+        }
+        const own = all.filter(m => m.subject === subject).sort(byArrival);
+        const below = all.filter(m => m.subject !== subject).sort(newerFirst);
+        return isBranch ? below : own;
+      }
+    : undefined;
+
   // Where the message on screen sits in the chart, so both directions match:
   // click a point to see its payload, and see the payload's point marked.
   const chartMarker = (() => {
@@ -263,7 +283,9 @@ function SingleSubjectView() {
         {note && <div className="text-xs text-muted mt-1 whitespace-pre-wrap break-words max-w-[70ch]">{note}</div>}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-muted">
           {isBranch ? (
-            <span>{formatCount(branchMessages.length)} recent messages below this subject</span>
+            <span>
+              {formatCount(shownBelow.length)} {range ? `below this subject in ${range.prose}` : 'recent messages below this subject'}
+            </span>
           ) : (
             <>
               <span>
@@ -274,6 +296,9 @@ function SingleSubjectView() {
               {latest && <span>{formatBytes(latest.size)}</span>}
             </>
           )}
+          {/* Paging a long range in takes a moment; silence would read as a
+              dead menu. */}
+          {exportProgress !== null && <span className="text-accent">gathering {formatCount(exportProgress)} for the export…</span>}
         </div>
       </div>
       {/* Three groups, in the order the questions come: what is this
@@ -288,7 +313,13 @@ function SingleSubjectView() {
         </IconButton>
         <HeaderDivider />
         <HistorySearchInput search={search} />
-        <ExportMenu messages={isBranch ? shownBelow : shownMessages} name={range ? `${subject}-${range.label}` : subject} subject={subject} />
+        <ExportMenu
+          messages={isBranch ? shownBelow : shownMessages}
+          name={range ? `${subject}-${range.label}` : subject}
+          subject={subject}
+          loadAll={loadAllForExport}
+          scope={range ? range.prose : undefined}
+        />
         <HeaderDivider />
         <Button
           variant="outline"
