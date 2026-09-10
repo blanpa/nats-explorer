@@ -18,7 +18,7 @@ import (
 func TestServerClearSubjectHistory(t *testing.T) {
 	ns := startNATS(t)
 	dbPath := filepath.Join(t.TempDir(), "history.db")
-	srv := newTestServer(t, serverConfig{historyDB: dbPath, historyRetention: time.Hour})
+	srv := newTestServer(t, serverConfig{historyDB: dbPath, historyRetention: time.Hour, historyManaged: true})
 	api := &apiClient{t: t, base: srv.URL}
 	api.do("POST", "/api/connect", map[string]interface{}{
 		"id": "c1", "name": "C", "servers": []string{ns.ClientURL()}, "authMethod": "none", "subscriptions": []string{"c.>"},

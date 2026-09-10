@@ -16,6 +16,8 @@ const core = new FeedCore(post);
 
 let ws: WebSocket | null = null;
 let url = '';
+/** Where to ask whether a rejected upgrade was an authentication problem. */
+let authUrl = '/api/auth';
 let binary = true;
 let status: WsStatus = 'closed';
 let manuallyClosed = false;
@@ -37,7 +39,7 @@ function send(cmd: WsClientCommand): boolean {
 
 function sendView() {
   const { view } = core;
-  send({ type: 'view', all: view.all, paths: view.paths, filter: view.filter, expr: view.expr });
+  send({ type: 'view', all: view.all, paths: view.paths, filter: view.filter, expr: view.expr, noPreview: !view.preview });
 }
 
 function decodeFrame(data: unknown): WsServerEvent | null {
@@ -77,7 +79,7 @@ function connect() {
     setStatus('closed');
     // 1008 = policy violation is what browsers report for a rejected upgrade (401).
     if (ev.code === 1008 || ev.code === 1006) {
-      fetch('/api/auth')
+      fetch(authUrl)
         .then(r => r.json())
         .then((info: { authenticated: boolean }) => {
           if (!info.authenticated) post({ type: 'auth-required' });
@@ -124,6 +126,7 @@ self.onmessage = (ev: MessageEvent<ToWorker>) => {
       if (url !== msg.url || binary !== msg.binary) disconnect();
       url = msg.url;
       binary = msg.binary;
+      authUrl = msg.authUrl;
       reconnectDelay = 1000;
       connect();
       break;

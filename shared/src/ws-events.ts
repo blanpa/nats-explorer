@@ -28,7 +28,7 @@ export type WsClientCommand =
   /** Subjects or branches the user watches; only their messages are streamed to this tab. Empty stops the feed. */
   | { type: 'focus'; subjects: string[] }
   /** Which part of the tree this tab shows: every branch (`all`, `paths` = collapsed exceptions) or the expanded `paths`; a `filter` shows the paths of matching subjects instead. */
-  | { type: 'view'; all: boolean; paths: string[]; filter: string; expr?: string }
+  | { type: 'view'; all: boolean; paths: string[]; filter: string; expr?: string; noPreview?: boolean }
   | { type: 'kv-watch'; connId: string; bucket: string; domain?: string }
   | { type: 'kv-unwatch'; connId: string; bucket: string }
   | { type: 'stream-tail'; connId: string; stream: string; domain?: string }

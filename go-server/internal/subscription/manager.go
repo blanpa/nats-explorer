@@ -350,6 +350,11 @@ func (m *Manager) Start(nc *nats.Conn, subjects []string) error {
 	stopCh := m.stopCh
 	m.mu.Unlock()
 
+	// What the persistent history recorded for this connection comes back
+	// before the first message arrives, so the tree is not empty after a
+	// restart.
+	m.restoreSubjects(patterns)
+
 	for _, sh := range m.shards {
 		m.workers.Add(1)
 		go m.work(sh, stopCh)

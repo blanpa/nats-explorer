@@ -50,9 +50,16 @@ func TestTreeAggregatesBottomUp(t *testing.T) {
 	if ax := tr.nodes["a.x"]; ax.count != 0 || ax.total != 6 || len(ax.children) != 2 {
 		t.Fatalf("a.x = %+v", ax)
 	}
-	e := entryOf(a)
+	e := entryOf(a, true)
 	if e.Children != 1 || e.Payload != `{"v":1}` || e.Total != 13 || e.TotalRate != 1.2 {
 		t.Fatalf("entry a = %+v", e)
+	}
+	// a, a.x.1, a.x.2 have messages; a.x is only a branch.
+	if e.Subjects != 3 {
+		t.Fatalf("entry a: subjects = %d, want 3", e.Subjects)
+	}
+	if p := entryOf(a, false); p.Payload != "" || p.PayloadType != "json" || p.Total != 13 {
+		t.Fatalf("without preview the payload goes, the rest stays: %+v", p)
 	}
 	tr.clearDirty()
 	if d := tr.refresh(); len(d) != 0 {
@@ -176,13 +183,58 @@ func TestViewFilter(t *testing.T) {
 	}
 }
 
+// Turning the previews off has to replace what the tab already has: a delta
+// only carries changed nodes, so the rows already sent would keep payloads
+// the tab no longer wants.
+func TestViewNoPreviewResendsEverything(t *testing.T) {
+	tr := newTree()
+	now := time.Now().UnixMilli()
+	feed(tr, "a.x.1", 3, now)
+	feed(tr, "b.y", 2, now)
+	dirty := tr.refresh()
+
+	v := newClientView()
+	v.set(View{All: true})
+	up := v.update(tr, dirty)
+	previews := 0
+	for _, e := range up.Entries {
+		if e.Payload != "" {
+			previews++
+		}
+	}
+	if previews != 2 {
+		t.Fatalf("previews are on by default, got %d of %d entries: %+v", previews, len(up.Entries), up)
+	}
+	tr.clearDirty()
+
+	v.set(View{All: true, NoPreview: true})
+	up = v.update(tr, nil)
+	if up == nil || !up.Full {
+		t.Fatalf("switching previews off must resend the view: %+v", up)
+	}
+	for _, e := range up.Entries {
+		if e.Payload != "" {
+			t.Fatalf("%s still carries a payload", e.Subject)
+		}
+		if e.Subjects == 0 && e.Total > 0 {
+			t.Fatalf("%s lost its subject count", e.Subject)
+		}
+	}
+
+	// An unchanged flag is not a reason to send everything again.
+	v.set(View{All: true, NoPreview: true})
+	if up = v.update(tr, nil); up != nil && up.Full {
+		t.Fatalf("same view resent in full: %+v", up)
+	}
+}
+
 func TestEntryPreviewIsTruncatedAndBinaryOmitted(t *testing.T) {
 	long := strings.Repeat("ä", PreviewMaxChars+50)
-	e := entryOf(&node{last: &message.Record{Data: []byte(long)}})
+	e := entryOf(&node{last: &message.Record{Data: []byte(long)}}, true)
 	if !strings.HasSuffix(e.Payload, "…") || len([]rune(e.Payload)) != PreviewMaxChars+1 {
 		t.Errorf("preview not truncated at a rune boundary: %d runes", len([]rune(e.Payload)))
 	}
-	b := entryOf(&node{last: &message.Record{Data: []byte{0xff, 0xfe, 0x00}}})
+	b := entryOf(&node{last: &message.Record{Data: []byte{0xff, 0xfe, 0x00}}}, true)
 	if b.Payload != "" || b.PayloadType != "binary" || b.Size != 3 {
 		t.Errorf("binary entry = %+v", b)
 	}

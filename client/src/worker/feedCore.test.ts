@@ -23,7 +23,7 @@ const entry = (s: string, n = 1) => ({ s, n, r: 0, t: 0, tr: 0, c: 0 });
 describe('FeedCore', () => {
   it('lays the tree out once per batch of updates', () => {
     const h = harness();
-    h.core.view = { all: false, paths: ['orders'], filter: '', expr: '', hideSystem: true };
+    h.core.view = { all: false, paths: ['orders'], filter: '', expr: '', hideSystem: true, preview: false };
     h.core.handleEvent({ type: 'subject-tree', connId: 'a', full: true, data: [entry('orders'), entry('orders.new'), entry('$SYS')] } as WsServerEvent);
     h.core.handleEvent({ type: 'subject-tree', connId: 'a', data: [entry('orders.paid')] } as WsServerEvent);
     expect(h.of('tree')).toHaveLength(0);
@@ -37,7 +37,7 @@ describe('FeedCore', () => {
   it('shows system roots when the filter asks for them', () => {
     const h = harness();
     h.core.handleEvent({ type: 'subject-tree', connId: 'a', full: true, data: [entry('$JS.API'), entry('orders')] } as WsServerEvent);
-    h.core.view = { all: false, paths: [], filter: '$JS', expr: '', hideSystem: true };
+    h.core.view = { all: false, paths: [], filter: '$JS', expr: '', hideSystem: true, preview: false };
     h.core.layoutTree();
     expect(h.lastTree()?.rows.map(r => r.subject)).toContain('$JS');
   });

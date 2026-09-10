@@ -12,11 +12,14 @@ export interface TreeView {
   /** CEL expression over the payload; only matching subjects stay in the tree. */
   expr: string;
   hideSystem: boolean;
+  /** show the last payload next to each subject; off keeps it off the socket too */
+  preview: boolean;
 }
 
 /** Messages from the main thread to the feed worker. */
 export type ToWorker =
-  | { type: 'connect'; url: string; binary: boolean }
+  /** authUrl is resolved on the main thread: a worker has no document to resolve a subpath against. */
+  | { type: 'connect'; url: string; binary: boolean; authUrl: string }
   | { type: 'disconnect' }
   | { type: 'send'; cmd: WsClientCommand }
   | { type: 'view'; view: TreeView };

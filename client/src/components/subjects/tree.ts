@@ -18,6 +18,8 @@ export interface TreeNode {
   totalRate: number;
   /** children the server knows of; the received ones are in `children` */
   childCount: number;
+  /** subjects with at least one message in the subtree, this node included */
+  subjects: number;
   /** newest last-message preview across connections */
   last?: { payload: string; payloadType: PayloadType; timestamp: number; size: number };
   children: TreeNode[];
@@ -38,6 +40,8 @@ export interface FlatNode {
   total: number;
   rate: number;
   totalRate: number;
+  /** subjects with messages in the subtree, this node included */
+  subjects: number;
   last?: TreeNode['last'];
   connIds: string[];
 }
@@ -45,7 +49,20 @@ export interface FlatNode {
 const bySegment = (a: TreeNode, b: TreeNode) => a.segment.localeCompare(b.segment, undefined, { numeric: true });
 
 function newNode(segment: string, fullSubject: string, parent?: TreeNode): TreeNode {
-  return { segment, fullSubject, messageCount: 0, total: 0, rate: 0, totalRate: 0, childCount: 0, children: [], connIds: [], parent, byConn: new Map() };
+  return {
+    segment,
+    fullSubject,
+    messageCount: 0,
+    total: 0,
+    rate: 0,
+    totalRate: 0,
+    childCount: 0,
+    subjects: 0,
+    children: [],
+    connIds: [],
+    parent,
+    byConn: new Map(),
+  };
 }
 
 /** Index of the position at which node belongs in a sorted sibling list. */
@@ -104,6 +121,7 @@ export class TreeModel {
     let rate = 0;
     let totalRate = 0;
     let childCount = 0;
+    let subjects = 0;
     let last: TreeNode['last'];
     for (const c of node.byConn.values()) {
       count += c.n ?? 0;
@@ -111,6 +129,9 @@ export class TreeModel {
       rate += c.r ?? 0;
       totalRate += c.tr ?? 0;
       childCount = Math.max(childCount, c.c ?? 0);
+      // The same subject on two connections is one subject, so the largest
+      // connection wins instead of the sum.
+      subjects = Math.max(subjects, c.sc ?? 0);
       if (c.ts && (!last || c.ts > last.timestamp)) last = { payload: c.p ?? '', payloadType: c.pt ?? 'string', timestamp: c.ts, size: c.sz ?? 0 };
     }
     node.messageCount = count;
@@ -118,6 +139,7 @@ export class TreeModel {
     node.rate = rate;
     node.totalRate = totalRate;
     node.childCount = childCount;
+    node.subjects = subjects;
     node.last = last;
   }
 
@@ -188,6 +210,7 @@ export function flattenTree(roots: TreeNode[], opts: FlattenOptions): FlatNode[]
         total: node.total,
         rate: node.rate,
         totalRate: node.totalRate,
+        subjects: node.subjects,
         last: node.last,
         connIds: node.connIds,
       });

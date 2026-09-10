@@ -13,7 +13,7 @@ export const MAX_PENDING = 10_000;
  */
 export class FeedCore {
   readonly model = new TreeModel();
-  view: TreeView = { all: false, paths: [], filter: '', expr: '', hideSystem: true };
+  view: TreeView = { all: false, paths: [], filter: '', expr: '', hideSystem: true, preview: false };
   private knownConns = new Set<string>();
   private pending: NatsMessage[] = [];
   private treeScheduled = false;

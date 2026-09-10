@@ -35,6 +35,17 @@ describe('TreeModel', () => {
     expect(m.size).toBe(4);
   });
 
+  it('takes the subject count of the largest connection, not their sum', () => {
+    const m = new TreeModel();
+    // Both connections carry uns.temp; c1 also has uns.speed. Summing would
+    // count uns.temp twice.
+    m.apply('c1', true, [entry('uns', 0, 5, 2, { sc: 2 }), entry('uns.temp', 3, 3, 0, { sc: 1 })]);
+    m.apply('c2', true, [entry('uns', 0, 4, 1, { sc: 1 }), entry('uns.temp', 4, 4, 0, { sc: 1 })]);
+    expect(m.roots[0].subjects).toBe(2);
+    const rows = flattenTree(m.roots, { isExpanded: () => true, hideSystem: false });
+    expect(rows[0].subjects).toBe(2);
+  });
+
   it('a placeholder parent appears when a child arrives first, and updates in place', () => {
     const m = new TreeModel();
     m.apply('c', false, [entry('a.x.1', 5)]);

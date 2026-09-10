@@ -33,6 +33,9 @@ type SubjectEntry struct {
 	// Number of children; tells the browser to draw a chevron on a
 	// collapsed branch whose children it has not received.
 	Children int `json:"c,omitempty"`
+	// Subjects that have seen a message in the subtree, this node included.
+	// A collapsed branch says how much is under it without sending it.
+	Subjects int `json:"sc,omitempty"`
 	// Preview of the most recent payload, cut to PreviewMaxChars. Binary
 	// payloads carry no preview, only the type.
 	Payload     string `json:"p,omitempty"`
@@ -64,7 +67,9 @@ type node struct {
 	// subtree aggregates
 	total     int
 	totalRate float64
-	dirty     bool
+	// subjects with at least one message in the subtree, this node included
+	subjects int
+	dirty    bool
 }
 
 // tree holds the hierarchy of one connection. Callers hold the manager lock.
@@ -168,9 +173,14 @@ func (t *tree) refresh() []*node {
 	for _, n := range t.dirty {
 		n.total = n.count
 		n.totalRate = n.rate
+		n.subjects = 0
+		if n.count > 0 {
+			n.subjects = 1
+		}
 		for _, c := range n.children {
 			n.total += c.total
 			n.totalRate += c.totalRate
+			n.subjects += c.subjects
 		}
 	}
 	return t.dirty
@@ -183,13 +193,20 @@ func (t *tree) clearDirty() {
 	t.dirty = t.dirty[:0]
 }
 
-func entryOf(n *node) SubjectEntry {
-	e := SubjectEntry{Subject: n.subject, Count: n.count, Rate: n.rate, Total: n.total, TotalRate: n.totalRate, Children: len(n.children)}
+// entryOf builds the wire form. Without preview the payload itself is left
+// out: it is the largest part of an entry, and a tab that does not show it
+// should not pay for it on the socket.
+func entryOf(n *node, preview bool) SubjectEntry {
+	e := SubjectEntry{
+		Subject: n.subject, Count: n.count, Rate: n.rate,
+		Total: n.total, TotalRate: n.totalRate,
+		Children: len(n.children), Subjects: n.subjects,
+	}
 	if lm := n.last; lm != nil {
 		e.PayloadType = lm.Kind()
 		e.Timestamp = lm.Timestamp
 		e.Size = len(lm.Data)
-		if e.PayloadType != "binary" {
+		if preview && e.PayloadType != "binary" {
 			e.Payload = truncateRunes(string(lm.Data), PreviewMaxChars)
 		}
 	}
@@ -209,6 +226,10 @@ type View struct {
 	// Expr is a CEL expression evaluated against the last message of a
 	// subject; only subjects whose last message satisfies it stay visible.
 	Expr string `json:"expr"`
+	// NoPreview leaves the payload previews out of the tree feed, for a tab
+	// that shows counts and rates only. Negated so an older tab, which does
+	// not send the field, keeps its previews.
+	NoPreview bool `json:"noPreview,omitempty"`
 }
 
 // clientView is a View plus what has been sent to the tab, to build deltas.
@@ -219,9 +240,11 @@ type clientView struct {
 	// prg is the compiled Expr; exprErr holds a compile error for the tab.
 	prg     *filter.Program
 	exprErr string
-	sent    map[string]struct{}
-	dirty   bool // view changed since the last emit
-	loaded  bool // a view was received at all
+	// noPreview: this tab does not show payloads, so none are sent.
+	noPreview bool
+	sent      map[string]struct{}
+	dirty     bool // view changed since the last emit
+	loaded    bool // a view was received at all
 	// needFull: the next update replaces everything the tab has for this
 	// connection. Set for a new tab and whenever the manager restarts.
 	needFull bool
@@ -249,6 +272,12 @@ func (v *clientView) set(view View) {
 		} else {
 			v.prg = prg
 		}
+	}
+	if v.noPreview != view.NoPreview {
+		// The entries already sent carry the wrong shape now, and a delta
+		// only covers what changed: send the view again from scratch.
+		v.noPreview = view.NoPreview
+		v.needFull = true
 	}
 	v.dirty = true
 	v.loaded = true
@@ -389,13 +418,13 @@ func (v *clientView) update(t *tree, dirty []*node) *TreeUpdate {
 			if _, ok := v.sent[s]; ok && !full {
 				continue
 			}
-			up.Entries = append(up.Entries, entryOf(t.nodes[s]))
+			up.Entries = append(up.Entries, entryOf(t.nodes[s], !v.noPreview))
 		}
 		// Changed nodes that stay visible are part of the delta too.
 		for _, n := range dirty {
 			if _, was := v.sent[n.subject]; was {
 				if _, still := want[n.subject]; still {
-					up.Entries = append(up.Entries, entryOf(n))
+					up.Entries = append(up.Entries, entryOf(n, !v.noPreview))
 				}
 			}
 		}
@@ -414,7 +443,7 @@ func (v *clientView) update(t *tree, dirty []*node) *TreeUpdate {
 		}
 		done[n] = struct{}{}
 		v.sent[n.subject] = struct{}{}
-		entries = append(entries, entryOf(n))
+		entries = append(entries, entryOf(n, !v.noPreview))
 	}
 	for _, n := range dirty {
 		if !v.visible(n) {

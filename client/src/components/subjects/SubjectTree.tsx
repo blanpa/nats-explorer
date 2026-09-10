@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Eraser, Eye, EyeOff, Network } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Eraser, Eye, EyeOff, Network, Quote } from 'lucide-react';
 import { useStore } from '../../store';
 import { clearHistory } from '../../lib/feed';
 import { errorMessage } from '../../lib/api';
@@ -8,6 +8,7 @@ import { cn, formatCount, previewPayload } from '../../lib/utils';
 import { toast } from '../ui/Toast';
 import { IconButton } from '../ui/Button';
 import { SearchInput } from '../ui/Input';
+import { confirm } from '../ui/Dialog';
 import { EmptyState, PaneHeader } from '../ui/misc';
 import { toneClass } from '../ui/tone';
 import { ancestorsOf, type FlatNode } from './tree';
@@ -23,6 +24,7 @@ const Row = memo(function Row({
   item,
   selected,
   multiConn,
+  showPreview,
   colorOf,
   onSelect,
   onToggle,
@@ -30,12 +32,13 @@ const Row = memo(function Row({
   item: FlatNode;
   selected: boolean;
   multiConn: boolean;
+  showPreview: boolean;
   colorOf: (id: string) => string | undefined;
   onSelect: (subject: string, add: boolean) => void;
   onToggle: (subject: string) => void;
 }) {
   const { depth, hasChildren, expanded, guides } = item;
-  const preview = item.last && !hasChildren ? previewPayload(item.last.payload, item.last.payloadType, 80) : null;
+  const preview = showPreview && item.last && !hasChildren ? previewPayload(item.last.payload, item.last.payloadType, 80) : null;
   // Leaves show their own rate; branches show the aggregate so hot subtrees stand out even when collapsed.
   const rate = hasChildren ? item.totalRate : item.rate;
 
@@ -71,7 +74,17 @@ const Row = memo(function Row({
       )}
       {multiConn && item.connIds.length === 1 && <span className="status-dot mr-1.5 w-1.5! h-1.5!" style={{ background: colorOf(item.connIds[0]) }} />}
       <span className="tree-label">{item.segment}</span>
-      {item.total > 0 && <span className="tree-count ml-1.5">{formatCount(item.total)}</span>}
+      {item.total > 0 && (
+        <span className="tree-count ml-1.5" title={`${formatCount(item.total)} message${item.total === 1 ? '' : 's'}${hasChildren ? ' in this branch' : ''}`}>
+          {formatCount(item.total)}
+        </span>
+      )}
+      {/* How much is under a branch, without having to open it. */}
+      {hasChildren && item.subjects > 0 && (
+        <span className="tree-count ml-1.5 opacity-70" title={`${formatCount(item.subjects)} subject${item.subjects === 1 ? '' : 's'} with messages below`}>
+          · {formatCount(item.subjects)} subj
+        </span>
+      )}
       {preview && <span className={cn('tree-value ml-2', toneClass[preview.tone])}>{preview.text}</span>}
       {rate >= 0.5 && (
         <span
@@ -98,6 +111,8 @@ export default function SubjectTree() {
   const setFilter = useStore(s => s.setSubjectFilter);
   const hideSystem = useStore(s => s.hideSystemSubjects);
   const setHideSystem = useStore(s => s.setHideSystemSubjects);
+  const treePreview = useStore(s => s.treePreview);
+  const setTreePreview = useStore(s => s.setTreePreview);
   const selected = useStore(s => s.selectedSubject);
   const selectedSubjects = useStore(s => s.selectedSubjects);
   const setSelected = useStore(s => s.setSelectedSubject);
@@ -145,6 +160,25 @@ export default function SubjectTree() {
   const anyConnected = connections.some(c => c.connected);
   const multiConn = connections.filter(c => c.connected).length > 1;
   const colorOf = useCallback((id: string) => connections.find(c => c.id === id)?.color, [connections]);
+
+  // Clearing everything empties the tree as well: a subject with a count and
+  // no messages behind it says less than an empty tree. It reaches the disk
+  // too, so it is worth asking first.
+  const clearAll = async () => {
+    const ok = await confirm({
+      title: 'Clear the whole message history?',
+      message: 'Every recorded message is forgotten, in memory and on disk, and the subject tree starts over. Subjects come back as they send again.',
+      confirmLabel: 'Clear',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await clearHistory();
+      toast.success('History cleared', 'The tree starts over with the next message.');
+    } catch (err) {
+      toast.error('Clear failed', errorMessage(err));
+    }
+  };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (flat.length === 0) return;
@@ -215,6 +249,14 @@ export default function SubjectTree() {
             >
               {hideSystem ? <EyeOff size={13} /> : <Eye size={13} />}
             </IconButton>
+            <IconButton
+              label={treePreview ? 'Hide the last payload in the tree' : 'Show the last payload next to each subject'}
+              size="xs"
+              onClick={() => setTreePreview(!treePreview)}
+              className={cn(treePreview && 'text-accent')}
+            >
+              <Quote size={13} />
+            </IconButton>
             <IconButton label="Expand all" size="xs" onClick={expandAllBranches}>
               <ChevronsUpDown size={13} />
             </IconButton>
@@ -222,7 +264,7 @@ export default function SubjectTree() {
               <ChevronsDownUp size={13} />
             </IconButton>
             {canWrite && (
-              <IconButton label="Clear message history" size="xs" onClick={() => clearHistory().catch(err => toast.error('Clear failed', errorMessage(err)))}>
+              <IconButton label="Clear message history" size="xs" onClick={clearAll}>
                 <Eraser size={13} />
               </IconButton>
             )}
@@ -286,6 +328,7 @@ export default function SubjectTree() {
                     item={item}
                     selected={selectedSubjects.includes(item.subject)}
                     multiConn={multiConn}
+                    showPreview={treePreview}
                     colorOf={colorOf}
                     onSelect={onSelect}
                     onToggle={toggleExpanded}

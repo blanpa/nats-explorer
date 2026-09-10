@@ -198,3 +198,32 @@ func (m *Manager) forgetUnmatched(patterns []string) {
 		}
 	}
 }
+
+// ForgetAll empties the tree, the per-subject counters and the pattern
+// counters of a running connection, as if it had just been opened. Clearing
+// the recorded history has to take the tree with it: a row that says three
+// thousand messages with nothing behind it is worse than an empty tree.
+// The subscriptions stay, so the next message rebuilds what still sends.
+func (m *Manager) ForgetAll() {
+	for _, sh := range m.shards {
+		sh.mu.Lock()
+		sh.subjects = make(map[string]*SubjectStats)
+		sh.dirty = nil
+		sh.active = make(map[string]struct{})
+		sh.mu.Unlock()
+	}
+	m.subjectCount.Store(0)
+	for _, p := range m.patternList() {
+		p.subjects.Store(0)
+	}
+
+	m.mu.Lock()
+	m.tree = newTree()
+	for _, cl := range m.clients {
+		// Everything the tab knows is gone, so it is told from scratch
+		// instead of being sent a removal per subject.
+		cl.view.needFull = true
+	}
+	m.mu.Unlock()
+	m.emitTree()
+}
