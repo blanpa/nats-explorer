@@ -45,13 +45,13 @@
   --color-faint: rgb(var(--fg-faint));
   --color-accent: rgb(var(--accent));
   --color-accent-fg: rgb(var(--accent-fg));
-  --color-info: rgb(var(--info));
+  --color-info: rgb(var(--accent));
   --color-ok: rgb(var(--ok));
   --color-warn: rgb(var(--warn));
   --color-danger: rgb(var(--danger));
   /* JSON keys are the interface blue, and a null is simply muted text:
      two aliases rather than two more colours to keep in step. */
-  --color-syn-key: rgb(var(--info));
+  --color-syn-key: rgb(var(--accent));
   --color-syn-str: rgb(var(--syn-str));
   --color-syn-num: rgb(var(--syn-num));
   --color-syn-bool: rgb(var(--syn-bool));
@@ -111,9 +111,11 @@
   --fg-muted: 139 151 168;
   --fg-faint: 114 130 150;   /* 4.6:1 on --bg-1; it is the most used ink */
 
-  --accent: 46 196 165;
-  --accent-fg: 6 32 26;
-  --info: 90 169 255;
+  /* The interface has one blue, and it is the accent: an "info" badge and a
+     primary button meaning the same colour is a simplification, not a clash.
+     56 degrees from syn-bool, its nearest neighbour. */
+  --accent: 90 169 255;
+  --accent-fg: 6 18 32;
   --ok: 63 207 124;
   --warn: 245 181 63;
   --danger: 242 96 122;
@@ -142,9 +144,8 @@
   --fg-muted: 92 105 121;
   --fg-faint: 102 117 137;
 
-  --accent: 14 156 130;
+  --accent: 37 118 205;
   --accent-fg: 255 255 255;
-  --info: 37 118 205;
   --ok: 28 133 74;
   --warn: 157 107 14;
   --danger: 212 56 83;

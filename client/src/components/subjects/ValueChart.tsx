@@ -37,7 +37,7 @@ interface Props {
  * The colours a chart hands out, in order. They are theme variables, so a
  * series keeps its colour when the theme flips.
  */
-export const SERIES_COLORS = ['rgb(var(--accent))', 'rgb(var(--info))', 'rgb(var(--warn))', 'rgb(var(--syn-bool))', 'rgb(var(--ok))', 'rgb(var(--danger))'];
+export const SERIES_COLORS = ['rgb(var(--accent))', 'rgb(var(--warn))', 'rgb(var(--ok))', 'rgb(var(--syn-bool))', 'rgb(var(--danger))', 'rgb(var(--syn-str))'];
 
 export const colorForIndex = (i: number) => SERIES_COLORS[i % SERIES_COLORS.length];
 
