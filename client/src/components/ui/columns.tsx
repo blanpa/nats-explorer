@@ -81,13 +81,14 @@ export function ColumnGrip({ side = 'right', ...props }: React.HTMLAttributes<HT
       {...props}
     >
       {/*
-        The line is short at rest and runs the length of the table while it
-        is being aimed at or dragged, so the boundary you are moving is the
-        one you can see. A rule down every column all the time would draw a
-        grid nobody asked for; a stub that stops under the header reads as
-        one that was meant to go further.
+        The area to aim at reaches past the cell; the line does not. It ends
+        where the header does -- a line poking out above and below reads as
+        one that was cut off -- and runs the length of the table only while
+        the grip is aimed at or dragged, so the boundary being moved is the
+        one you can see. A rule down every column at rest would draw a grid
+        nobody asked for.
       */}
-      <span className="w-px h-full pointer-events-none bg-line group-hover/grip:h-[100vh] group-hover/grip:bg-accent group-active/grip:h-[100vh] group-active/grip:bg-accent" />
+      <span className="w-px my-2 self-stretch pointer-events-none bg-line group-hover/grip:h-[100vh] group-hover/grip:bg-accent group-active/grip:h-[100vh] group-active/grip:bg-accent" />
     </span>
   );
 }
