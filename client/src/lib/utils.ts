@@ -57,6 +57,23 @@ export function formatDurationMs(ms: number): string {
   return `${Math.round(h / 24)}d`;
 }
 
+/**
+ * How long something has been running, the way an uptime is read: the two
+ * largest units and no more. `formatDurationMs` is for measurements and
+ * says "2.3h", which is a fine number and a poor answer to "since when".
+ */
+export function formatUptime(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '–';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return m % 60 ? `${h}h ${m % 60}m` : `${h}h`;
+  const d = Math.floor(h / 24);
+  return h % 24 ? `${d}d ${h % 24}h` : `${d}d`;
+}
+
 export function formatTime(ts: number | string | Date, withMs = true): string {
   const d = ts instanceof Date ? ts : new Date(ts);
   if (Number.isNaN(d.getTime())) return '–';

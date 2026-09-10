@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractNumber, formatBytes, formatDurationNs, formatNumber, hexDump, parseList, payloadBytes, previewPayload } from './utils';
+import { extractNumber, formatBytes, formatDurationNs, formatNumber, formatUptime, hexDump, parseList, payloadBytes, previewPayload } from './utils';
 
 describe('formatting', () => {
   it('formatBytes', () => {
@@ -57,5 +57,25 @@ describe('payload helpers', () => {
 
   it('parseList splits on commas and newlines', () => {
     expect(parseList(' a, b\n\nc ,')).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('formatUptime', () => {
+  it('reads like an uptime: two units at most', () => {
+    expect(formatUptime(47_000)).toBe('47s');
+    expect(formatUptime(14 * 60_000)).toBe('14m');
+    expect(formatUptime(2 * 3_600_000 + 14 * 60_000)).toBe('2h 14m');
+    expect(formatUptime(5 * 86_400_000 + 3 * 3_600_000)).toBe('5d 3h');
+  });
+
+  it('drops a unit that is zero rather than writing it out', () => {
+    expect(formatUptime(3 * 3_600_000)).toBe('3h');
+    expect(formatUptime(2 * 86_400_000)).toBe('2d');
+  });
+
+  it('says nothing rather than a negative age', () => {
+    // A clock that disagrees with the server's is not an uptime.
+    expect(formatUptime(-1000)).toBe('–');
+    expect(formatUptime(Number.NaN)).toBe('–');
   });
 });

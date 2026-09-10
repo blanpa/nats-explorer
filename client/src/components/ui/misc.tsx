@@ -1,7 +1,7 @@
 import * as RadixTooltip from '@radix-ui/react-tooltip';
 import { Info, Loader2, type LucideIcon } from 'lucide-react';
-import { useId, type ReactNode } from 'react';
-import { cn } from '../../lib/utils';
+import { useEffect, useId, useState, type ReactNode } from 'react';
+import { cn, formatUptime } from '../../lib/utils';
 
 /* Badge ---------------------------------------------------------------- */
 
@@ -313,5 +313,24 @@ export function Hint({ text, id, className, side = 'top' }: { text: ReactNode; i
         {text}
       </span>
     </RadixTooltip.Provider>
+  );
+}
+
+/**
+ * How long ago something last happened, counting on its own. It has to: a
+ * subject that stopped sending is exactly the case where nothing else
+ * re-renders, and an age that stands still says the opposite of what it is
+ * there to say.
+ */
+export function Since({ ts, className }: { ts: number; className?: string }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => tick(n => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <span className={className} title={`Last message at ${new Date(ts).toLocaleString()}`}>
+      {formatUptime(Math.max(0, Date.now() - ts))} ago
+    </span>
   );
 }

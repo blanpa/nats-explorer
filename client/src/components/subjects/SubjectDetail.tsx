@@ -11,7 +11,7 @@ import { copyToClipboard, extractNumber, formatBytes, formatCount, formatTime, p
 import { HISTORY_RAIL_WIDTH, MAX_LOADED_MESSAGES, useBranchMessages, useLiveView, useStore, useSubjectMessages } from '../../store';
 import { Button, IconButton } from '../ui/Button';
 import { confirm } from '../ui/Dialog';
-import { Badge, EmptyState, HeaderDivider, menuClass, menuItemClass as itemClass, PaneHeader } from '../ui/misc';
+import { Badge, EmptyState, HeaderDivider, menuClass, menuItemClass as itemClass, PaneHeader, Since } from '../ui/misc';
 import { toast } from '../ui/Toast';
 import DiffView from './DiffView';
 import ExportMenu from './ExportMenu';
@@ -364,7 +364,14 @@ function SingleSubjectView() {
                 {formatCount(shownMessages.length)} {range ? `in ${range.label}` : 'in history'}
               </span>
               {!range && rate > 0 && <span className="text-warn">{rate < 10 ? rate.toFixed(1) : Math.round(rate)} msg/s</span>}
-              {latest && <span>last {formatTime(latest.timestamp)}</span>}
+              {/* When it last sent, and how long ago -- the figure that
+                  says a subject has gone quiet, which the time alone does
+                  not until you work it out. */}
+              {latest && (
+                <span>
+                  last {formatTime(latest.timestamp)} · <Since ts={latest.timestamp} />
+                </span>
+              )}
               {latest && <span>{formatBytes(latest.size)}</span>}
             </>
           )}

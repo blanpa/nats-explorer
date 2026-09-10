@@ -17,6 +17,7 @@ nav_order: 3
 ## Subject tree
 
 - Numeric fields of the latest message as sparklines with the current value; the history rail is open by default
+- The subject header says when the last message arrived and how long ago, which is what says a subject has gone quiet; the status bar says how long the connection has been up
 - Keyboard: `/` focuses the filter of the current module, Escape clears it, `j`/`k` walk the subject tree, arrow keys expand and collapse
 - The explorer and the history rail are dragged to width by the handle on their edge; a double-click resets, and both widths are remembered
 - Watch several subjects at once: Ctrl/Cmd-click adds subjects to the selection; the detail pane then shows the latest value and rate of each and one list of everything arriving on any of them, newest first
@@ -103,7 +104,7 @@ Six shapes, because what an export is for decides its shape:
 
 <img src="{{ '/screenshots/alerts-dark.png' | relative_url }}" alt="The Alerts module: what is firing, the rules behind it and the log" loading="lazy">
 
-A rule watches a subject pattern for a condition: an expression that holds, a subject that stopped sending, or both. The backend evaluates the rules on the message path, so they keep working while no browser is open, and an optional webhook receives a JSON POST on every state change.
+A rule watches a subject pattern for a condition: an expression that holds, a subject that stopped sending, or both. It can be written from the Alerts module, or straight from the subject it is about -- the overflow menu of a subject opens the dialog with the pattern and the name already filled in, so only the condition is left to say. The backend evaluates the rules on the message path, so they keep working while no browser is open, and an optional webhook receives a JSON POST on every state change.
 
 The Alerts module lists what is firing right now, the rules with the number of subjects each one matches, and a log of state changes. A rule can be tried against the recorded messages before it is saved, which answers "how many of my messages would this match" without waiting. The rail badge counts the active alerts from every module, and a new warning or critical alert raises a toast.
 

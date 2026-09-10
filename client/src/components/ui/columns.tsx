@@ -76,10 +76,7 @@ export function ColumnGrip({ side = 'right', ...props }: React.HTMLAttributes<HT
     // Mouse-only affordance; the widths have keyboard-free defaults.
     <span
       aria-hidden
-      className={cn(
-        'absolute -top-2 -bottom-2 w-5 cursor-col-resize group/grip flex',
-        side === 'left' ? 'left-0 justify-start' : 'right-0 justify-end',
-      )}
+      className={cn('absolute -top-2 -bottom-2 w-5 cursor-col-resize group/grip flex', side === 'left' ? 'left-0 justify-start' : 'right-0 justify-end')}
       title="Drag to resize, double-click to reset"
       {...props}
     >

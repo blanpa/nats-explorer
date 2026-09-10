@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Alert, AlertRule } from 'shared';
-import { describeEvent, describeRule, newAlertRule, newlyFiring, severityTone, sortAlerts, validateRule } from './alerts';
+import { alertRuleForSubject, describeEvent, describeRule, newAlertRule, newlyFiring, severityTone, sortAlerts, validateRule } from './alerts';
 
 const rule = (over: Partial<AlertRule> = {}): AlertRule => newAlertRule({ name: 'Hot', pattern: 'plant.>', expr: 'payload.temp > 30', ...over });
 
@@ -64,5 +64,29 @@ describe('rule and alert helpers', () => {
     expect(describeEvent({ time: 1, ruleId: 'r', ruleName: 'Hot', connId: 'c', subject: 's', state: 'firing', severity: 'warning' })).toBe('Hot fired');
     expect(describeEvent({ time: 1, ruleId: 'r', ruleName: 'Hot', connId: 'c', subject: 's', state: 'stale', severity: 'warning' })).toMatch(/no messages/);
     expect(describeEvent({ time: 1, ruleId: 'r', ruleName: 'Hot', connId: 'c', subject: 's', state: 'resolved', severity: 'warning' })).toMatch(/resolved/);
+  });
+});
+
+describe('alertRuleForSubject', () => {
+  it('takes the subject as the pattern, and as a name to start from', () => {
+    const r = alertRuleForSubject('uns.acme.factory-berlin.assembly.line-1.robot-02.position');
+    expect(r.pattern).toBe('uns.acme.factory-berlin.assembly.line-1.robot-02.position');
+    expect(r.name).toBe(r.pattern);
+    // Nothing else is decided for the reader: no expression yet, so the
+    // dialog opens on the question it needs answered.
+    expect(r.expr).toBeUndefined();
+    expect(r.enabled).toBe(true);
+  });
+
+  it('covers everything under a branch', () => {
+    expect(alertRuleForSubject('uns.acme.factory-berlin', true).pattern).toBe('uns.acme.factory-berlin.>');
+  });
+
+  it('leaves the condition, and nothing else, to be filled in', () => {
+    // Everything the subject can decide is decided; what is missing is the
+    // one thing only the reader knows.
+    const r = alertRuleForSubject('plant.line1.temp');
+    expect(validateRule(r)).toBe('A rule needs an expression, a silence timeout, or both.');
+    expect(validateRule({ ...r, expr: 'payload.temp > 80' })).toBeNull();
   });
 });

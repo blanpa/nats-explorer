@@ -1,5 +1,6 @@
+import { useEffect, useState } from 'react';
 import { useStore, useActiveConnection } from '../../store';
-import { formatBytes, formatNumber, cn } from '../../lib/utils';
+import { formatBytes, formatNumber, formatUptime, cn } from '../../lib/utils';
 import { SourceLink } from '../ui/SourceLink';
 
 export default function StatusBar() {
@@ -9,6 +10,15 @@ export default function StatusBar() {
   const totalSubjects = useStore(s => s.totalSubjects);
   const stats = useStore(s => s.subscriptionStats);
   const setSettingsOpen = useStore(s => s.setSettingsOpen);
+
+  // The uptime has to move on its own: on a quiet connection nothing else
+  // would re-render the bar, and a duration that stands still is worse than
+  // none. Five seconds is fine for a figure that counts in minutes.
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => tick(n => n + 1), 5000);
+    return () => clearInterval(t);
+  }, []);
 
   let throttled = 0;
   let received = 0;
@@ -34,6 +44,14 @@ export default function StatusBar() {
       {active?.connected && (
         <span className="truncate font-mono text-faint hidden md:inline">
           {active.name} · {active.server?.replace(/^nats:\/\//, '')}
+          {active.connectedAt && (
+            <span
+              title={`Connected since ${new Date(active.connectedAt).toLocaleString()}${active.reconnects ? `, ${active.reconnects} reconnect${active.reconnects === 1 ? '' : 's'}` : ''}`}
+            >
+              {' '}
+              · up {formatUptime(Date.now() - active.connectedAt)}
+            </span>
+          )}
           {active.subscriptions && active.subscriptions.join(',') !== '>' && <span> · {active.subscriptions.join(', ')}</span>}
         </span>
       )}
