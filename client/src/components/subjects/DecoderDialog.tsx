@@ -79,7 +79,7 @@ function DecoderEditor({ onClose, prefill }: { onClose: () => void; prefill?: st
                 onClick={() => setDraft(r)}
               >
                 <span className="font-mono text-xs truncate flex-1">{r.pattern}</span>
-                <span className="text-[10px] text-faint shrink-0">{FORMAT_LABELS[r.format]}</span>
+                <span className="text-2xs text-faint shrink-0">{FORMAT_LABELS[r.format]}</span>
               </button>
             ))}
             {draft && isNew && (

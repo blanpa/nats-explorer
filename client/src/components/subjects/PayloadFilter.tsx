@@ -100,7 +100,7 @@ export default function PayloadFilter() {
             )}
           </div>
           {error ? (
-            <p className="text-[11px] text-danger mt-1 font-mono break-words" role="alert">
+            <p className="text-xs text-danger mt-1 font-mono break-words" role="alert">
               {error}
             </p>
           ) : (
@@ -109,7 +109,7 @@ export default function PayloadFilter() {
                 <button
                   key={e.expr}
                   type="button"
-                  className="text-[10px] font-mono text-faint hover:text-accent border border-line rounded px-1 py-0.5"
+                  className="text-2xs font-mono text-faint hover:text-accent border border-line rounded px-1 py-0.5"
                   title={e.label}
                   onClick={() => setText(e.expr)}
                 >

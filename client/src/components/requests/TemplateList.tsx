@@ -96,7 +96,7 @@ export default function TemplateList() {
               onClick={() => setSelected(t.id)}
             >
               <div className="flex items-center gap-2 min-w-0">
-                <span className={cn('font-mono text-[10px] w-7 shrink-0', t.mode === 'request' ? 'text-info' : 'text-accent')}>
+                <span className={cn('font-mono text-2xs w-7 shrink-0', t.mode === 'request' ? 'text-info' : 'text-accent')}>
                   {t.mode === 'request' ? 'REQ' : 'PUB'}
                 </span>
                 <span className="font-medium truncate">{t.name || <span className="text-faint italic">unnamed</span>}</span>

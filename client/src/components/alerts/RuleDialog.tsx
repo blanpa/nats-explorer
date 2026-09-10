@@ -88,7 +88,7 @@ export default function RuleDialog({ rule, onClose }: { rule: AlertRule; onClose
             <button
               key={e.expr}
               type="button"
-              className="text-[10px] font-mono text-faint hover:text-accent border border-line rounded px-1 py-0.5"
+              className="text-2xs font-mono text-faint hover:text-accent border border-line rounded px-1 py-0.5"
               title={e.label}
               onClick={() => patch({ expr: e.expr })}
             >

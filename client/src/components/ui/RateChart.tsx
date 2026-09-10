@@ -116,7 +116,7 @@ export function RateChart({ title, times, series, format = defaultFormat, height
           {yTicks.map((v, i) => (
             <g key={i}>
               <line x1={pad.left} x2={width - pad.right} y1={y(v)} y2={y(v)} stroke="rgb(var(--border))" strokeDasharray={i === 0 ? undefined : '2 4'} />
-              <text x={pad.left - 5} y={y(v) + 3} textAnchor="end" fontSize="10" fill="rgb(var(--fg-faint))" fontFamily="var(--font-mono)">
+              <text x={pad.left - 5} y={y(v) + 3} textAnchor="end" className="text-2xs font-mono" fill="rgb(var(--fg-faint))">
                 {format(v)}
               </text>
             </g>
@@ -127,9 +127,8 @@ export function RateChart({ title, times, series, format = defaultFormat, height
               x={x(t)}
               y={height - 5}
               textAnchor={i === 0 ? 'start' : i === xTicks.length - 1 ? 'end' : 'middle'}
-              fontSize="10"
+              className="text-2xs font-mono"
               fill="rgb(var(--fg-faint))"
-              fontFamily="var(--font-mono)"
             >
               {formatTime(t, false)}
             </text>
@@ -150,7 +149,7 @@ export function RateChart({ title, times, series, format = defaultFormat, height
               {series.map(s => (
                 <circle key={s.label} cx={x(times[hover])} cy={y(s.values[hover] ?? 0)} r="3" fill="rgb(var(--bg-1))" stroke={s.color} strokeWidth="1.5" />
               ))}
-              <text x={x(times[hover]) + 6} y={pad.top + 10} fontSize="10" fill="rgb(var(--fg-muted))" fontFamily="var(--font-mono)">
+              <text x={x(times[hover]) + 6} y={pad.top + 10} className="text-2xs font-mono" fill="rgb(var(--fg-muted))">
                 {formatTime(times[hover])}
               </text>
             </g>

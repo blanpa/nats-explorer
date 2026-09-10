@@ -48,7 +48,7 @@ export default function Rail() {
               {m.id === 'alerts' && active.length > 0 && (
                 <span
                   className={cn(
-                    'absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full text-[10px] font-semibold tabular-nums flex items-center justify-center text-white',
+                    'absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full text-2xs font-semibold tabular-nums flex items-center justify-center text-white',
                     worstSeverity(active) === 'critical' ? 'bg-danger' : 'bg-warn',
                   )}
                 >

@@ -181,7 +181,7 @@ function ConnectionSubscriptions({ conn, showName }: { conn: ConnectionStatus; s
         </IconButton>
       </form>
       <div className="flex flex-wrap items-center gap-1 px-2 pb-1.5" hidden={!canWrite}>
-        <span className="text-[11px] text-faint mr-0.5">System</span>
+        <span className="text-xs text-faint mr-0.5">System</span>
         {SYSTEM_TOPICS.map(t => (
           <button
             key={t.key}

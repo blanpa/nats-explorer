@@ -278,7 +278,7 @@ export default function ValueChart({ series, height = 160, onPick, marker, type,
         {yTicks.map((v, i) => (
           <g key={i}>
             <line x1={pad.left} x2={width - pad.right} y1={yAt(v)} y2={yAt(v)} stroke="rgb(var(--border))" strokeDasharray="2 4" />
-            <text x={pad.left - 6} y={yAt(v) + 3} textAnchor="end" fontSize="10" fill="rgb(var(--fg-faint))" fontFamily="var(--font-mono)">
+            <text x={pad.left - 6} y={yAt(v) + 3} textAnchor="end" className="text-2xs font-mono" fill="rgb(var(--fg-faint))">
               {normalize ? `${Math.round(v * 100)}%` : niceNumber(v)}
             </text>
           </g>
@@ -289,9 +289,8 @@ export default function ValueChart({ series, height = 160, onPick, marker, type,
             x={x(t)}
             y={height - 6}
             textAnchor={i === 0 ? 'start' : i === xTicks.length - 1 ? 'end' : 'middle'}
-            fontSize="10"
+            className="text-2xs font-mono"
             fill="rgb(var(--fg-faint))"
-            fontFamily="var(--font-mono)"
           >
             {formatTime(t, false)}
           </text>

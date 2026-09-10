@@ -8,6 +8,10 @@
 
 @theme {
 
+  /* The smallest tier the interface uses: rates, badges, chart axes. It was
+     missing from the scale, so a dozen places wrote text-2xs by hand. */
+  --text-2xs: 10px;
+  --text-2xs--line-height: 14px;
   --text-xs: 11px;
   --text-xs--line-height: 15px;
   --text-sm: 12px;
@@ -275,7 +279,7 @@
 
   /* --- Keyboard hint ---------------------------------------------------- */
   .kbd {
-    @apply inline-flex items-center rounded-sm border border-line bg-raised px-1 text-[10px] font-mono text-muted;
+    @apply inline-flex items-center rounded-sm border border-line bg-raised px-1 text-2xs font-mono text-muted;
     height: 18px;
   }
 
@@ -297,7 +301,7 @@
   .tree-label { @apply text-fg/90 shrink-0; }
   .tree-count { @apply text-xs text-faint font-mono tabular-nums shrink-0; }
   .tree-value { @apply font-mono text-xs truncate min-w-0 flex-1; }
-  .tree-rate { @apply text-[10px] font-mono text-muted tabular-nums shrink-0; }
+  .tree-rate { @apply text-2xs font-mono text-muted tabular-nums shrink-0; }
   .tree-rate-hot { @apply text-warn; }
 
   /* --- JSON viewer ------------------------------------------------------ */

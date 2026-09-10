@@ -51,7 +51,7 @@ export default function BookmarksPanel() {
           <div className="pb-1 max-h-56 overflow-auto">
             {byGroup(shown).map(([group, list]) => (
               <div key={group || 'ungrouped'}>
-                {group && <div className="px-2 pt-1 pb-0.5 text-[10px] uppercase tracking-wide text-faint">{group}</div>}
+                {group && <div className="px-2 pt-1 pb-0.5 text-2xs uppercase tracking-wide text-faint">{group}</div>}
                 {list.map(b => (
                   <div
                     key={b.subject}

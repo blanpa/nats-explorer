@@ -27,12 +27,12 @@ export default function LatencyHistogram({ buckets }: { buckets: LatencyBucket[]
           className="flex-1 min-w-0 flex flex-col justify-end items-center gap-1 group"
           title={`${formatNumber(b.count)} of ${formatNumber(total)} ${bucketLabel(b)}`}
         >
-          <span className="text-[10px] text-faint tabular-nums opacity-0 group-hover:opacity-100">{b.count || ''}</span>
+          <span className="text-2xs text-faint tabular-nums opacity-0 group-hover:opacity-100">{b.count || ''}</span>
           <div
             className={b.le > 0 ? 'w-full rounded-sm bg-accent/70 group-hover:bg-accent' : 'w-full rounded-sm bg-warn/70 group-hover:bg-warn'}
             style={{ height: `${Math.max(b.count > 0 ? 2 : 0, (b.count / max) * 46)}px` }}
           />
-          <span className="text-[9px] text-faint font-mono truncate w-full text-center">{b.le > 0 ? formatDurationMs(b.le) : '∞'}</span>
+          <span className="text-2xs text-faint font-mono truncate w-full text-center">{b.le > 0 ? formatDurationMs(b.le) : '∞'}</span>
         </div>
       ))}
     </div>
