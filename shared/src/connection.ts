@@ -20,6 +20,8 @@ export interface ConnectionConfig {
   tlsKey?: string;
   /** skip server certificate verification */
   tlsInsecure?: boolean;
+  /** do the TLS handshake before the server's INFO (servers with handshake_first) */
+  tlsFirst?: boolean;
   subscriptions?: string[];
   monitoringPort?: number;
   monitoringUrl?: string;

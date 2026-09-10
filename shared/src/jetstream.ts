@@ -42,6 +42,12 @@ export interface StreamInfo {
   duplicateWindow: number;
   denyDelete: boolean;
   denyPurge: boolean;
+  /** the "new" discard policy applies per subject (NATS 2.11) */
+  discardNewPerSubject?: boolean;
+  /** publishers may expire their own messages with a Nats-TTL header (NATS 2.11) */
+  allowMsgTtl?: boolean;
+  /** how long a delete marker stays after a subject's last message, ns */
+  subjectDeleteMarkerTtl?: number;
   allowRollup: boolean;
   allowDirect: boolean;
   sealed: boolean;
@@ -85,6 +91,9 @@ export interface StreamConfigInput {
   duplicateWindow?: number;
   denyDelete?: boolean;
   denyPurge?: boolean;
+  discardNewPerSubject?: boolean;
+  allowMsgTtl?: boolean;
+  subjectDeleteMarkerTtl?: number;
   allowRollup?: boolean;
   allowDirect?: boolean;
 }
@@ -159,6 +168,10 @@ export interface ConsumerInfo {
   numWaiting: number;
   numPending: number;
   push: boolean;
+  /** the consumer is paused and delivers nothing until its deadline */
+  paused?: boolean;
+  /** milliseconds left of the pause */
+  pauseRemaining?: number;
 }
 
 /** PUT /api/streams/{stream}/consumers/{name}: the fields JetStream lets you change after creation. */

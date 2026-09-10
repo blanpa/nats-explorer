@@ -26,10 +26,13 @@ type Config struct {
 	TLS        bool     `json:"tls,omitempty"`
 	// PEM material for TLS: a CA to trust, and an optional client certificate
 	// + key for mutual TLS. TLSInsecure skips server verification.
-	TLSCA          string   `json:"tlsCa,omitempty"`
-	TLSCert        string   `json:"tlsCert,omitempty"`
-	TLSKey         string   `json:"tlsKey,omitempty"`
-	TLSInsecure    bool     `json:"tlsInsecure,omitempty"`
+	TLSCA       string `json:"tlsCa,omitempty"`
+	TLSCert     string `json:"tlsCert,omitempty"`
+	TLSKey      string `json:"tlsKey,omitempty"`
+	TLSInsecure bool   `json:"tlsInsecure,omitempty"`
+	// TLSFirst does the TLS handshake before the server's INFO, for
+	// servers configured with handshake_first.
+	TLSFirst       bool     `json:"tlsFirst,omitempty"`
 	Subscriptions  []string `json:"subscriptions,omitempty"`
 	MonitoringPort int      `json:"monitoringPort,omitempty"`
 	MonitoringURL  string   `json:"monitoringUrl,omitempty"`
@@ -187,6 +190,11 @@ func buildOptions(cfg Config, managed *Managed, notify func()) ([]nats.Option, e
 			return nil, err
 		}
 		opts = append(opts, nats.Secure(tc))
+		// A server with handshake_first expects TLS before it sends its
+		// INFO; without this the connection hangs until the timeout.
+		if cfg.TLSFirst {
+			opts = append(opts, nats.TLSHandshakeFirst())
+		}
 	}
 	return opts, nil
 }
@@ -255,6 +263,11 @@ func buildSysOptions(cfg Config) ([]nats.Option, error) {
 			return nil, err
 		}
 		opts = append(opts, nats.Secure(tc))
+		// A server with handshake_first expects TLS before it sends its
+		// INFO; without this the connection hangs until the timeout.
+		if cfg.TLSFirst {
+			opts = append(opts, nats.TLSHandshakeFirst())
+		}
 	}
 	return opts, nil
 }

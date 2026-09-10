@@ -1,9 +1,9 @@
 import { Fragment, useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, Pencil, Plus, RefreshCw, TrendingUp, Trash2, Users } from 'lucide-react';
+import { ChevronDown, ChevronRight, Pause, Pencil, Play, Plus, RefreshCw, TrendingUp, Trash2, Users } from 'lucide-react';
 import type { AckPolicy, ConsumerInfo, DeliverPolicy, ReplayPolicy } from 'shared';
 import { api, errorMessage } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
-import { cn, formatDateTime, formatDurationNs, formatNumber } from '../../lib/utils';
+import { cn, formatDateTime, formatDurationMs, formatDurationNs, formatNumber } from '../../lib/utils';
 import { Button, IconButton } from '../ui/Button';
 import { Field, Input, Select } from '../ui/Input';
 import { confirm, Dialog } from '../ui/Dialog';
@@ -33,6 +33,27 @@ export default function ConsumerList({
     key: `consumers:${connId}:${stream}`,
     interval: 5000,
   });
+
+  /** How long a pause lasts; long enough to swap a consumer out, short enough to be forgotten safely. */
+  const PAUSE_SECONDS = 300;
+
+  // A paused consumer delivers nothing until its deadline and then resumes
+  // by itself -- for draining a backlog or replacing what reads from it.
+  const togglePause = async (c: ConsumerInfo) => {
+    try {
+      if (c.paused) {
+        await api.resumeConsumer(connId, stream, c.name);
+        toast.success('Consumer resumed', `${c.name} delivers again.`);
+      } else {
+        const res = await api.pauseConsumer(connId, stream, c.name, PAUSE_SECONDS);
+        toast.info('Consumer paused', `${c.name} delivers nothing until ${formatDateTime(res.pauseUntil)}.`);
+      }
+      reload();
+      onChanged();
+    } catch (err) {
+      toast.error(c.paused ? 'Not resumed' : 'Not paused', errorMessage(err));
+    }
+  };
 
   const del = async (name: string) => {
     if (
@@ -113,7 +134,14 @@ export default function ConsumerList({
                   <Fragment key={c.name}>
                     <tr className="cursor-pointer" onClick={() => setOpen(isOpen ? null : c.name)}>
                       <td className="text-faint">{isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</td>
-                      <td className="font-medium font-mono">{c.name}</td>
+                      <td className="font-medium font-mono">
+                        {c.name}
+                        {c.paused && (
+                          <Badge tone="warn" className="ml-1.5" title={`Delivers nothing for another ${formatDurationMs(c.pauseRemaining ?? 0)}`}>
+                            paused
+                          </Badge>
+                        )}
+                      </td>
                       <td>
                         <Badge tone={c.push ? 'info' : 'neutral'}>{c.push ? 'push' : 'pull'}</Badge>
                       </td>
@@ -143,6 +171,16 @@ export default function ConsumerList({
                               }}
                             >
                               <Pencil size={12} />
+                            </IconButton>
+                            <IconButton
+                              label={c.paused ? 'Resume consumer' : 'Pause consumer for 5 minutes'}
+                              size="xs"
+                              onClick={e => {
+                                e.stopPropagation();
+                                togglePause(c);
+                              }}
+                            >
+                              {c.paused ? <Play size={12} className="text-ok" /> : <Pause size={12} />}
                             </IconButton>
                             <IconButton
                               label="Delete consumer"

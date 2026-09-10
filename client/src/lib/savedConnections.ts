@@ -19,6 +19,8 @@ export interface SavedConnection {
   tlsCert?: string;
   tlsKey?: string;
   tlsInsecure?: boolean;
+  /** TLS before the server's INFO, for servers with handshake_first */
+  tlsFirst?: boolean;
   subscriptions: string[];
   sysTopics: Partial<Record<SystemTopicKey, boolean>>;
   /** Opened by the backend when it starts (file storage only). */
@@ -136,6 +138,7 @@ export function toConnectionConfig(saved: SavedConnection): ConnectionConfig {
     tlsCert: saved.tls ? saved.tlsCert?.trim() || undefined : undefined,
     tlsKey: saved.tls ? saved.tlsKey?.trim() || undefined : undefined,
     tlsInsecure: saved.tls ? saved.tlsInsecure || undefined : undefined,
+    tlsFirst: saved.tls ? saved.tlsFirst || undefined : undefined,
     subscriptions: subs,
     monitoringUrl: saved.monitoringUrl || undefined,
     monitoringPort: saved.monitoringPort || undefined,

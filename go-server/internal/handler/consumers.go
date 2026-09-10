@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"time"
 
@@ -285,5 +287,66 @@ func consumerInfoToMap(ci *jetstream.ConsumerInfo) map[string]interface{} {
 		"numWaiting":     ci.NumWaiting,
 		"numPending":     ci.NumPending,
 		"push":           c.DeliverSubject != "",
+		// A paused consumer delivers nothing until its deadline; without
+		// saying so a stalled pipeline looks like a broken one.
+		"paused":         ci.Paused,
+		"pauseRemaining": int64(ci.PauseRemaining / time.Millisecond),
 	}
+}
+
+// Pause answers POST /api/streams/{stream}/consumers/{consumer}/pause with
+// {"seconds": n} or {"until": "<RFC3339>"}: the consumer stops delivering
+// until the deadline and resumes by itself. Draining a backlog or replacing
+// a downstream service is what this is for.
+func (h *ConsumersHandler) Pause(w http.ResponseWriter, r *http.Request) {
+	js, _, ctx, cancel, ok := h.stream(w, r)
+	if !ok {
+		return
+	}
+	defer cancel()
+
+	var body struct {
+		Seconds int    `json:"seconds"`
+		Until   string `json:"until"`
+	}
+	if r.Body != nil {
+		json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body)
+	}
+	until := time.Now().Add(time.Duration(body.Seconds) * time.Second)
+	if body.Until != "" {
+		t, err := time.Parse(time.RFC3339, body.Until)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "until must be an RFC 3339 time")
+			return
+		}
+		until = t
+	} else if body.Seconds <= 0 {
+		writeError(w, http.StatusBadRequest, "seconds or until is required")
+		return
+	}
+	if !until.After(time.Now()) {
+		writeError(w, http.StatusBadRequest, "the pause deadline is in the past")
+		return
+	}
+	res, err := js.PauseConsumer(ctx, urlParam(r, "stream"), urlParam(r, "consumer"), until)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, map[string]interface{}{"paused": res.Paused, "pauseUntil": res.PauseUntil.Format(time.RFC3339), "pauseRemaining": int64(res.PauseRemaining / time.Millisecond)})
+}
+
+// Resume answers POST .../resume: deliveries start again at once.
+func (h *ConsumersHandler) Resume(w http.ResponseWriter, r *http.Request) {
+	js, _, ctx, cancel, ok := h.stream(w, r)
+	if !ok {
+		return
+	}
+	defer cancel()
+	res, err := js.ResumeConsumer(ctx, urlParam(r, "stream"), urlParam(r, "consumer"))
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, map[string]interface{}{"paused": res.Paused})
 }

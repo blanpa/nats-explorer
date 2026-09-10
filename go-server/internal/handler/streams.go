@@ -42,6 +42,15 @@ type streamConfigBody struct {
 	DenyPurge       *bool    `json:"denyPurge,omitempty"`
 	AllowRollup     *bool    `json:"allowRollup,omitempty"`
 	AllowDirect     *bool    `json:"allowDirect,omitempty"`
+	// DiscardNewPerSubject applies the "new" discard policy per subject
+	// instead of to the stream as a whole; needs maxMsgsPerSubject.
+	DiscardNewPerSubject *bool `json:"discardNewPerSubject,omitempty"`
+	// AllowMsgTTL lets a publisher expire its own message with a
+	// Nats-TTL header (NATS 2.11).
+	AllowMsgTTL *bool `json:"allowMsgTtl,omitempty"`
+	// SubjectDeleteMarkerTTL keeps a marker after the last message of a
+	// subject is removed, for this long. Nanoseconds; 0 is off.
+	SubjectDeleteMarkerTTL *int64 `json:"subjectDeleteMarkerTtl,omitempty"`
 }
 
 // applyStreamBody copies the provided (non-nil) fields onto a stream config.
@@ -93,6 +102,15 @@ func applyStreamBody(cfg *jetstream.StreamConfig, b streamConfigBody) {
 	}
 	if b.AllowDirect != nil {
 		cfg.AllowDirect = *b.AllowDirect
+	}
+	if b.DiscardNewPerSubject != nil {
+		cfg.DiscardNewPerSubject = *b.DiscardNewPerSubject
+	}
+	if b.AllowMsgTTL != nil {
+		cfg.AllowMsgTTL = *b.AllowMsgTTL
+	}
+	if b.SubjectDeleteMarkerTTL != nil {
+		cfg.SubjectDeleteMarkerTTL = time.Duration(*b.SubjectDeleteMarkerTTL)
 	}
 
 	switch b.Retention {
@@ -701,27 +719,30 @@ func streamInfoToMap(si *jetstream.StreamInfo) map[string]interface{} {
 		subjects = []string{}
 	}
 	out := map[string]interface{}{
-		"name":              c.Name,
-		"description":       c.Description,
-		"subjects":          subjects,
-		"retention":         c.Retention.String(),
-		"maxConsumers":      c.MaxConsumers,
-		"maxMsgs":           c.MaxMsgs,
-		"maxMsgsPerSubject": c.MaxMsgsPerSubject,
-		"maxBytes":          c.MaxBytes,
-		"maxAge":            int64(c.MaxAge),
-		"maxMsgSize":        c.MaxMsgSize,
-		"storage":           c.Storage.String(),
-		"replicas":          c.Replicas,
-		"noAck":             c.NoAck,
-		"discard":           c.Discard.String(),
-		"duplicateWindow":   int64(c.Duplicates),
-		"denyDelete":        c.DenyDelete,
-		"denyPurge":         c.DenyPurge,
-		"allowRollup":       c.AllowRollup,
-		"allowDirect":       c.AllowDirect,
-		"sealed":            c.Sealed,
-		"created":           si.Created.Format(time.RFC3339),
+		"name":                   c.Name,
+		"description":            c.Description,
+		"subjects":               subjects,
+		"retention":              c.Retention.String(),
+		"maxConsumers":           c.MaxConsumers,
+		"maxMsgs":                c.MaxMsgs,
+		"maxMsgsPerSubject":      c.MaxMsgsPerSubject,
+		"maxBytes":               c.MaxBytes,
+		"maxAge":                 int64(c.MaxAge),
+		"maxMsgSize":             c.MaxMsgSize,
+		"storage":                c.Storage.String(),
+		"replicas":               c.Replicas,
+		"noAck":                  c.NoAck,
+		"discard":                c.Discard.String(),
+		"duplicateWindow":        int64(c.Duplicates),
+		"denyDelete":             c.DenyDelete,
+		"denyPurge":              c.DenyPurge,
+		"allowRollup":            c.AllowRollup,
+		"allowDirect":            c.AllowDirect,
+		"discardNewPerSubject":   c.DiscardNewPerSubject,
+		"allowMsgTtl":            c.AllowMsgTTL,
+		"subjectDeleteMarkerTtl": int64(c.SubjectDeleteMarkerTTL),
+		"sealed":                 c.Sealed,
+		"created":                si.Created.Format(time.RFC3339),
 		"state": map[string]interface{}{
 			"messages":      si.State.Msgs,
 			"bytes":         si.State.Bytes,

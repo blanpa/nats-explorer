@@ -269,6 +269,12 @@ export default function ConnectionForm({ draft, isNew, live, patch, onSubmit }: 
             checked={!!draft.tlsInsecure}
             onChange={e => patch({ tlsInsecure: e.target.checked })}
           />
+          <Checkbox
+            label="TLS handshake first"
+            description="For servers configured with handshake_first: TLS is negotiated before the server sends its INFO."
+            checked={!!draft.tlsFirst}
+            onChange={e => patch({ tlsFirst: e.target.checked })}
+          />
         </div>
       )}
 

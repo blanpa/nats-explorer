@@ -6,6 +6,8 @@ import type {
   ConsumerCreateInput,
   ConsumerUpdateInput,
   ConsumerInfo,
+  HistoryPersistence,
+  HistoryRangeResponse,
   HistoryResponse,
   HistorySeries,
   NatsMessage,
@@ -30,9 +32,10 @@ import type {
   StreamSeries,
 } from 'shared';
 import { type AuthInfo, useAuth } from './auth';
+import { serverUrl } from './basePath';
 import { useStore } from '../store';
 
-const BASE_URL = '/api';
+const BASE_URL = serverUrl('/api');
 
 export class ApiError extends Error {
   constructor(
@@ -113,26 +116,44 @@ export const api = {
   },
 
   // Message history recorded by the backend
-  getHistory: (subject: string, opts: { connId?: string; limit?: number; branchLimit?: number; before?: number; expr?: string } = {}) => {
+  getHistory: (
+    subject: string,
+    opts: { connId?: string; limit?: number; branchLimit?: number; before?: number; branchBefore?: number; expr?: string } = {},
+  ) => {
     const q = new URLSearchParams({ subject });
     for (const [k, val] of Object.entries(opts)) if (val !== undefined) q.set(k, String(val));
     return request<HistoryResponse>(`/history?${q.toString()}`);
   },
-  /** Persisted messages of a subject (or below it) in a time range, newest first. */
-  getHistoryRange: (subject: string, opts: { from: number; to?: number; branch?: boolean; limit?: number; connId?: string; expr?: string }) => {
+  /**
+   * Persisted messages of a subject (or below it) in a time range, newest
+   * first. `beforeTs`/`beforeSeq` page backwards from a message already
+   * shown; the answer's `more` says whether another page may follow.
+   */
+  getHistoryRange: (
+    subject: string,
+    opts: { from: number; to?: number; branch?: boolean; limit?: number; connId?: string; expr?: string; beforeTs?: number; beforeSeq?: number },
+  ) => {
     const p = new URLSearchParams({ subject, from: String(opts.from) });
     if (opts.to) p.set('to', String(opts.to));
     if (opts.branch) p.set('branch', '1');
     if (opts.limit) p.set('limit', String(opts.limit));
     if (opts.connId) p.set('connId', opts.connId);
     if (opts.expr) p.set('expr', opts.expr);
-    return request<{ subject: string; from: number; to: number; messages: NatsMessage[] }>(`/history/range?${p.toString()}`);
+    if (opts.beforeTs) {
+      p.set('beforeTs', String(opts.beforeTs));
+      p.set('beforeSeq', String(opts.beforeSeq ?? 0));
+    }
+    return request<HistoryRangeResponse>(`/history/range?${p.toString()}`);
   },
   /** Newest recorded messages on a subject or below it whose subject or payload contains q. */
-  searchHistory: (subject: string, q: string, opts: { connId?: string; limit?: number; from?: number; to?: number; expr?: string } = {}) => {
+  searchHistory: (
+    subject: string,
+    q: string,
+    opts: { connId?: string; limit?: number; from?: number; to?: number; expr?: string; beforeTs?: number; beforeSeq?: number } = {},
+  ) => {
     const p = new URLSearchParams({ subject, q });
     for (const [k, val] of Object.entries(opts)) if (val !== undefined) p.set(k, String(val));
-    return request<{ subject: string; q: string; messages: NatsMessage[] }>(`/history/search?${p.toString()}`);
+    return request<{ subject: string; q: string; messages: NatsMessage[]; more?: boolean }>(`/history/search?${p.toString()}`);
   },
   getSeries: (subject: string, field: string, opts: { connId?: string; points?: number; from?: number; to?: number; expr?: string } = {}) => {
     const q = new URLSearchParams({ subject, field });
@@ -150,6 +171,11 @@ export const api = {
     if (opts.connId) p.set('connId', opts.connId);
     return request<{ success: boolean; cleared: number }>(`/history?${p.toString()}`, { method: 'DELETE' });
   },
+  /** Whether the history is also written to SQLite, and how far back it is kept. */
+  getHistoryPersistence: () => request<HistoryPersistence>('/history/persistence'),
+  /** Switches the SQLite copy on or off; `purge` deletes the file with it. */
+  setHistoryPersistence: (input: { enabled: boolean; retention?: string; fullText?: boolean; purge?: boolean }) =>
+    request<HistoryPersistence>('/history/persistence', { method: 'PUT', ...json(input) }),
 
   // Publish / request
   publish: (connId: string, data: PublishInput) => request<{ success: boolean }>('/publish', { method: 'POST', ...json({ ...data, connId }) }),
@@ -181,6 +207,14 @@ export const api = {
     request<ConsumerInfo>(withConn(`/streams/${enc(stream)}/consumers/${enc(consumer)}`, connId)),
   createConsumer: (connId: string, stream: string, config: ConsumerCreateInput) =>
     request<ConsumerInfo>(withConn(`/streams/${enc(stream)}/consumers`, connId), { method: 'POST', ...json(config) }),
+  /** Stops deliveries for a while; the consumer resumes by itself at the deadline. */
+  pauseConsumer: (connId: string, stream: string, consumer: string, seconds: number) =>
+    request<{ paused: boolean; pauseUntil: string }>(withConn(`/streams/${enc(stream)}/consumers/${enc(consumer)}/pause`, connId), {
+      method: 'POST',
+      ...json({ seconds }),
+    }),
+  resumeConsumer: (connId: string, stream: string, consumer: string) =>
+    request<{ paused: boolean }>(withConn(`/streams/${enc(stream)}/consumers/${enc(consumer)}/resume`, connId), { method: 'POST' }),
   updateConsumer: (connId: string, stream: string, consumer: string, config: ConsumerUpdateInput) =>
     request<ConsumerInfo>(withConn(`/streams/${enc(stream)}/consumers/${enc(consumer)}`, connId), { method: 'PUT', ...json(config) }),
   deleteConsumer: (connId: string, stream: string, consumer: string) =>

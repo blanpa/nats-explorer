@@ -65,6 +65,8 @@ export default function StreamDialog({ connId, existing, onClose, onSaved }: Pro
     allowRollup: existing?.allowRollup ?? false,
     allowDirect: existing?.allowDirect ?? false,
     noAck: existing?.noAck ?? false,
+    discardNewPerSubject: existing?.discardNewPerSubject ?? false,
+    allowMsgTtl: existing?.allowMsgTtl ?? false,
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -224,6 +226,18 @@ export default function StreamDialog({ connId, existing, onClose, onSaved }: Pro
             description="Disallow purging the stream."
             checked={flags.denyPurge}
             onChange={e => setFlags(f => ({ ...f, denyPurge: e.target.checked }))}
+          />
+          <Checkbox
+            label="Discard new per subject"
+            description="With the new discard policy, apply the limit per subject instead of to the whole stream. Needs a per-subject message limit."
+            checked={flags.discardNewPerSubject}
+            onChange={e => setFlags(f => ({ ...f, discardNewPerSubject: e.target.checked }))}
+          />
+          <Checkbox
+            label="Allow per-message TTL"
+            description="Publishers may expire their own messages with a Nats-TTL header (NATS 2.11)."
+            checked={flags.allowMsgTtl}
+            onChange={e => setFlags(f => ({ ...f, allowMsgTtl: e.target.checked }))}
           />
           <Checkbox
             label="No ack"
