@@ -115,6 +115,9 @@ type Vars struct {
 	// Data is the payload as it arrived; the schema check needs the bytes,
 	// not the parsed document.
 	Data []byte
+	// rec, when set, produces Raw, Kind and the parsed payload on first use
+	// instead of up front. See VarsOfRecord.
+	rec *message.Record
 }
 
 // SchemaChecker reports how a payload differs from the schema pinned for its
@@ -141,22 +144,103 @@ func SetSchemaChecker(fn SchemaChecker) (remove func()) {
 	return func() { checker.CompareAndSwap(p, nil) }
 }
 
-// activation resolves the variables of one evaluation. The schema check runs
-// at most once, and only when the expression asks for it.
+// activation resolves the variables of one evaluation. Everything an
+// expression does not mention costs nothing: the payload is parsed, the
+// headers are flattened and the schema is checked at most once, and only
+// when the expression asks for them.
 type activation struct {
-	v          Vars
-	headers    map[string]string
-	payload    any
+	v       Vars
+	headers map[string]string
+	payload any
+	raw     string
+	kind    string
+
+	headersDone bool
+	payloadDone bool
+	rawDone     bool
+	kindDone    bool
+
 	violations []string
 	checked    bool
 }
 
 func (a *activation) Parent() interpreter.Activation { return nil }
 
+// rawText is the payload as text. On the ingest path it is produced here
+// rather than in VarsOf, because most expressions never ask for it.
+func (a *activation) rawText() string {
+	if !a.rawDone {
+		a.rawDone = true
+		switch {
+		case a.v.Raw != "":
+			a.raw = a.v.Raw
+		case a.v.rec != nil:
+			a.raw = a.v.rec.Text()
+		}
+	}
+	return a.raw
+}
+
+// kindOf is "json", "string" or "binary". A record caches its own answer,
+// so asking it twice is free.
+func (a *activation) kindOf() string {
+	if !a.kindDone {
+		a.kindDone = true
+		a.kind = a.v.Kind
+		if a.kind == "" && a.v.rec != nil {
+			a.kind = a.v.rec.Kind()
+		}
+	}
+	return a.kind
+}
+
+// doc is the parsed payload: the JSON document, or the text for anything
+// else. Parsing is what a filter on the ingest path would pay per message,
+// so it happens only for an expression that mentions `payload`.
+func (a *activation) doc() any {
+	if a.payloadDone {
+		return a.payload
+	}
+	a.payloadDone = true
+	if a.payload != nil {
+		return a.payload
+	}
+	if a.v.rec != nil && a.kindOf() == "json" {
+		var d any
+		if json.Unmarshal(a.v.rec.Data, &d) == nil {
+			a.payload = normalize(d)
+			return a.payload
+		}
+	}
+	a.payload = a.rawText()
+	return a.payload
+}
+
+// headerMap flattens the headers to their first value. An expression that
+// does not mention `headers` never builds the map.
+func (a *activation) headerMap() map[string]string {
+	if a.headersDone {
+		return a.headers
+	}
+	a.headersDone = true
+	if a.headers == nil && a.v.rec != nil {
+		a.headers = make(map[string]string, len(a.v.rec.Header))
+		for k, vals := range a.v.rec.Header {
+			if len(vals) > 0 {
+				a.headers[k] = vals[0]
+			}
+		}
+	}
+	if a.headers == nil {
+		a.headers = map[string]string{}
+	}
+	return a.headers
+}
+
 func (a *activation) resolveViolations() []string {
 	if !a.checked {
 		a.checked = true
-		a.violations, _ = SchemaViolations(a.v.Subject, a.v.Kind, a.data())
+		a.violations, _ = SchemaViolations(a.v.Subject, a.kindOf(), a.data())
 	}
 	return a.violations
 }
@@ -176,7 +260,7 @@ func (a *activation) data() []byte {
 	if a.v.Data != nil {
 		return a.v.Data
 	}
-	return []byte(a.v.Raw)
+	return []byte(a.rawText())
 }
 
 func (a *activation) ResolveName(name string) (any, bool) {
@@ -184,13 +268,13 @@ func (a *activation) ResolveName(name string) (any, bool) {
 	case "subject":
 		return a.v.Subject, true
 	case "payload":
-		return a.payload, true
+		return a.doc(), true
 	case "raw":
-		return a.v.Raw, true
+		return a.rawText(), true
 	case "kind":
-		return a.v.Kind, true
+		return a.kindOf(), true
 	case "headers":
-		return a.headers, true
+		return a.headerMap(), true
 	case "size":
 		return a.v.Size, true
 	case "timestamp":
@@ -207,6 +291,16 @@ func (a *activation) ResolveName(name string) (any, bool) {
 		return v, true
 	}
 	return nil, false
+}
+
+// VarsOfRecord builds the variables of a record without touching its
+// payload: the text, the parsed document and the headers are produced only
+// if the expression asks for them. This is the form the ingest path uses,
+// where a filter is evaluated on every message and most expressions only
+// look at the subject -- parsing every payload there would cost more than
+// the filter saves.
+func VarsOfRecord(r *message.Record) Vars {
+	return Vars{Subject: r.Subject, Size: len(r.Data), Timestamp: r.Timestamp, Reply: r.Reply, Data: r.Data, rec: r}
 }
 
 // VarsOf builds the variables of a record. The payload is parsed once here.
@@ -281,15 +375,7 @@ func normalize(v any) any {
 // Eval runs the program. Runtime errors (a missing field, a type clash on
 // this particular message) count as no match and are returned for display.
 func (p *Program) Eval(v Vars) (bool, error) {
-	headers := v.Headers
-	if headers == nil {
-		headers = map[string]string{}
-	}
-	payload := v.Payload
-	if payload == nil {
-		payload = v.Raw
-	}
-	out, _, err := p.prg.Eval(&activation{v: v, headers: headers, payload: payload})
+	out, _, err := p.prg.Eval(&activation{v: v, headers: v.Headers, payload: v.Payload})
 	if err != nil {
 		return false, err
 	}
@@ -299,7 +385,7 @@ func (p *Program) Eval(v Vars) (bool, error) {
 
 // Match reports whether a record satisfies the program; errors read as false.
 func (p *Program) Match(r *message.Record) bool {
-	ok, _ := p.Eval(VarsOf(r))
+	ok, _ := p.Eval(VarsOfRecord(r))
 	return ok
 }
 
