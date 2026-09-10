@@ -17,8 +17,9 @@ describe('TrendStrip', () => {
   it('shows a sparkline per numeric field of the latest message', () => {
     const messages = [21, 22, 23, 24].map((t, i) => msg(JSON.stringify({ temp: t, humidity: 40 + i, unit: 'C', nested: { x: 1 } }), i));
     const onSelect = vi.fn();
-    render(<TrendStrip messages={messages} latest={messages[3]} selected="temp" onSelect={onSelect} />);
-    expect(screen.getByTitle('Chart temp')).toHaveTextContent('24');
+    render(<TrendStrip messages={messages} latest={messages[3]} selected={['temp']} onSelect={onSelect} />);
+    // A charted field offers to stop rather than to start.
+    expect(screen.getByTitle('Stop charting temp')).toHaveTextContent('24');
     expect(screen.getByTitle('Chart humidity')).toHaveTextContent('43');
     expect(screen.queryByTitle('Chart unit')).toBeNull();
     expect(screen.queryByTitle('Chart nested')).toBeNull();
@@ -28,10 +29,10 @@ describe('TrendStrip', () => {
 
   it('renders nothing for too little history or non-JSON payloads', () => {
     const two = [1, 2].map((t, i) => msg(JSON.stringify({ temp: t }), i));
-    const { container, rerender } = render(<TrendStrip messages={two} latest={two[1]} selected={null} onSelect={() => undefined} />);
+    const { container, rerender } = render(<TrendStrip messages={two} latest={two[1]} selected={[]} onSelect={() => undefined} />);
     expect(container).toBeEmptyDOMElement();
     const text: NatsMessage = { ...two[1], payload: 'hello', payloadType: 'string' };
-    rerender(<TrendStrip messages={[...two, text]} latest={text} selected={null} onSelect={() => undefined} />);
+    rerender(<TrendStrip messages={[...two, text]} latest={text} selected={[]} onSelect={() => undefined} />);
     expect(container).toBeEmptyDOMElement();
   });
 });

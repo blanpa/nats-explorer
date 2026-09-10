@@ -73,7 +73,7 @@ export default function StreamMessageRow({ m, open, live, canWrite, denyDelete, 
                 type={m.payloadType}
                 size={m.size}
                 maxHeight={360}
-                selectedField={chartField}
+                selectedFields={chartField ? [chartField] : []}
                 onFieldSelect={field => onFieldSelect(field, m.subject)}
               />
             </div>

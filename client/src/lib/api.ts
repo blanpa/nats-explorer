@@ -1,4 +1,5 @@
 import type {
+  Aggregation,
   ClusterOverview,
   ConnectionConfig,
   ConnectionStatus,
@@ -155,7 +156,11 @@ export const api = {
     for (const [k, val] of Object.entries(opts)) if (val !== undefined) p.set(k, String(val));
     return request<{ subject: string; q: string; messages: NatsMessage[]; more?: boolean }>(`/history/search?${p.toString()}`);
   },
-  getSeries: (subject: string, field: string, opts: { connId?: string; points?: number; from?: number; to?: number; expr?: string } = {}) => {
+  getSeries: (
+    subject: string,
+    field: string,
+    opts: { connId?: string; points?: number; from?: number; to?: number; expr?: string; agg?: Aggregation } = {},
+  ) => {
     const q = new URLSearchParams({ subject, field });
     for (const [k, val] of Object.entries(opts)) if (val !== undefined) q.set(k, String(val));
     return request<HistorySeries>(`/history/series?${q.toString()}`);
@@ -196,7 +201,7 @@ export const api = {
   /** The first stream sequence stored at or after a point in time. */
   getStreamSeqAt: (connId: string, name: string, timeMs: number) =>
     request<{ seq: number; timestamp: number; firstSeq: number; lastSeq: number }>(withConn(`/streams/${enc(name)}/seq`, connId, { time: timeMs })),
-  getStreamSeries: (connId: string, name: string, opts: { field: string; subject?: string; last?: number; points?: number }) =>
+  getStreamSeries: (connId: string, name: string, opts: { field: string; subject?: string; last?: number; points?: number; agg?: Aggregation }) =>
     request<StreamSeries>(withConn(`/streams/${enc(name)}/series`, connId, opts)),
   deleteStreamMessage: (connId: string, stream: string, seq: number) =>
     request<{ success: boolean }>(withConn(`/streams/${enc(stream)}/messages/${seq}`, connId), { method: 'DELETE' }),

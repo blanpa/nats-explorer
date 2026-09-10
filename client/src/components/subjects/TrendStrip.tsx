@@ -47,7 +47,8 @@ export default function TrendStrip({
 }: {
   messages: NatsMessage[];
   latest: NatsMessage;
-  selected: string | null;
+  /** fields currently charted; a card of one is marked */
+  selected: string[];
   onSelect: (field: string) => void;
 }) {
   const trends = useMemo(() => {
@@ -75,10 +76,10 @@ export default function TrendStrip({
           type="button"
           className={cn(
             'card flex items-center gap-3 px-3 py-1.5 text-left hover:border-accent/50 transition-colors',
-            selected === t.field && 'border-accent/60',
+            selected.includes(t.field) && 'border-accent/60',
           )}
           onClick={() => onSelect(t.field)}
-          title={`Chart ${t.field}`}
+          title={selected.includes(t.field) ? `Stop charting ${t.field}` : `Chart ${t.field}`}
         >
           <span className="min-w-0">
             <span className="block text-xs text-muted font-mono truncate">{t.field}</span>

@@ -6,21 +6,22 @@ interface Props {
   depth?: number;
   path?: string;
   onFieldSelect?: (path: string) => void;
-  selectedField: string | null;
+  /** the fields being charted; a selected one is marked */
+  selectedFields: string[];
   /** collapse objects deeper than this by default */
   collapseDepth?: number;
 }
 
 const INDENT = 16;
 
-export const JsonTree = memo(function JsonTree({ data, depth = 0, path = '', onFieldSelect, selectedField, collapseDepth = 6 }: Props) {
+export const JsonTree = memo(function JsonTree({ data, depth = 0, path = '', onFieldSelect, selectedFields, collapseDepth = 6 }: Props) {
   const [collapsed, setCollapsed] = useState(depth >= collapseDepth);
 
   if (data === null) return <span className="jv-null">null</span>;
   if (typeof data === 'boolean') return <span className="jv-bool">{String(data)}</span>;
   if (typeof data === 'number') {
     if (!onFieldSelect) return <span className="jv-num">{String(data)}</span>;
-    const active = selectedField === path;
+    const active = selectedFields.includes(path);
     return (
       <span
         className={cn('jv-num jv-chartable', active && 'jv-chartable-active')}
@@ -76,7 +77,14 @@ export const JsonTree = memo(function JsonTree({ data, depth = 0, path = '', onF
                 <span className="jv-punct">: </span>
               </>
             )}
-            <JsonTree data={val} depth={depth + 1} path={childPath} onFieldSelect={onFieldSelect} selectedField={selectedField} collapseDepth={collapseDepth} />
+            <JsonTree
+              data={val}
+              depth={depth + 1}
+              path={childPath}
+              onFieldSelect={onFieldSelect}
+              selectedFields={selectedFields}
+              collapseDepth={collapseDepth}
+            />
             {i < entries.length - 1 && <span className="jv-punct">,</span>}
           </div>
         );

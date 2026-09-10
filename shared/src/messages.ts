@@ -66,10 +66,17 @@ export interface SubscriptionStats {
 }
 
 /** GET /api/history/series: a numeric JSON field over the recorded history, downsampled. */
+/**
+ * How a chart reduces the samples inside one bucket. Downsampling always
+ * throws something away; which thing depends on the question being asked of
+ * the field.
+ */
+export type Aggregation = 'minmax' | 'avg' | 'min' | 'max' | 'sum' | 'count' | 'rate';
+
 export interface HistorySeries {
   subject: string;
   field: string;
-  /** [timestamp ms, value] in time order; every bucket keeps its min and max */
+  /** [timestamp ms, value] in time order, reduced per bucket the way `agg` says */
   points: [number, number][];
   /** messages that carried the field */
   samples: number;
@@ -77,6 +84,8 @@ export interface HistorySeries {
   last: number;
   /** "rollup" when the points are minute aggregates instead of messages */
   source?: 'rollup';
+  /** the reduction the server applied; echoed so the chart labels what it shows */
+  agg?: Aggregation;
 }
 
 /** GET /api/history: what the server recorded for a subject and the branch below it. */

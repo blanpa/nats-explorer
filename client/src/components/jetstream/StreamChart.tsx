@@ -1,13 +1,15 @@
+import { useState } from 'react';
 import { LineChart, RefreshCw, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
 import { formatCount } from '../../lib/utils';
 import { Button, IconButton } from '../ui/Button';
 import { Select } from '../ui/Input';
-import ValueChart from '../subjects/ValueChart';
+import { Segmented } from '../ui/misc';
+import ValueChart, { CHART_TYPES, colorForIndex, type ChartType } from '../subjects/ValueChart';
+import { AGGREGATIONS, savedAgg, savedChartType, persistChartSettings, savedLayout, savedNormalize } from '../subjects/ChartPanel';
 
 const RANGES = [500, 2000, 10_000, 50_000];
-const NO_MESSAGES: never[] = [];
 
 export interface ChartSpec {
   field: string;
@@ -32,10 +34,25 @@ export default function StreamChart({
   onChange: (s: ChartSpec) => void;
   onClose: () => void;
 }) {
+  // The same two choices as a subject chart: how to reduce a bucket, and
+  // how to draw it. They share the stored settings, so a chart opens the way
+  // the last one was left wherever it was opened.
+  const [agg, setAggState] = useState(savedAgg);
+  const [type, setTypeState] = useState<ChartType>(savedChartType);
+  const store = (next: { agg?: typeof agg; type?: ChartType }) =>
+    persistChartSettings({ agg: next.agg ?? agg, type: next.type ?? type, layout: savedLayout(), normalize: savedNormalize() });
+  const setAgg = (a: typeof agg) => {
+    store({ agg: a });
+    setAggState(a);
+  };
+  const setType = (t: ChartType) => {
+    store({ type: t });
+    setTypeState(t);
+  };
   const { data, error, loading, reload } = useAsync(
-    () => api.getStreamSeries(connId, stream, { field: spec.field, subject: spec.subject ?? undefined, last: spec.last, points: 600 }),
-    [connId, stream, spec.field, spec.subject, spec.last],
-    { interval: live ? 10_000 : undefined, key: `stream-series:${connId}:${stream}:${spec.field}:${spec.subject ?? '*'}:${spec.last}` },
+    () => api.getStreamSeries(connId, stream, { field: spec.field, subject: spec.subject ?? undefined, last: spec.last, points: 600, agg }),
+    [connId, stream, spec.field, spec.subject, spec.last, agg],
+    { interval: live ? 10_000 : undefined, key: `stream-series:${connId}:${stream}:${spec.field}:${spec.subject ?? '*'}:${spec.last}:${agg}` },
   );
   return (
     <div className="card mx-3 mt-2 px-3 py-2 flex flex-col gap-2">
@@ -72,7 +89,11 @@ export default function StreamChart({
             {formatCount(data.samples)} values in seq {data.fromSeq}–{data.toSeq}
           </span>
         )}
-        <span className="ml-auto flex items-center gap-1">
+        <span className="ml-auto flex flex-wrap items-center gap-1">
+          <span title={AGGREGATIONS.find(a => a.id === agg)?.hint}>
+            <Segmented size="xs" options={AGGREGATIONS.map(a => ({ id: a.id, label: a.label }))} value={agg} onChange={setAgg} />
+          </span>
+          <Segmented size="xs" options={CHART_TYPES} value={type} onChange={setType} />
           <IconButton label="Reload chart" size="xs" loading={loading && !!data} onClick={reload}>
             <RefreshCw size={12} />
           </IconButton>
@@ -85,9 +106,15 @@ export default function StreamChart({
         <div className="text-xs text-danger">{error}</div>
       ) : data ? (
         <ValueChart
-          messages={NO_MESSAGES}
-          series={{ subject: data.subject ?? '', field: data.field, points: data.points, samples: data.samples, last: 0 }}
-          fieldPath={spec.field}
+          type={type}
+          series={[
+            {
+              field: spec.field,
+              color: colorForIndex(0),
+              points: data.points.map(([t, v]) => ({ t, v })),
+              info: { subject: data.subject ?? '', field: data.field, points: data.points, samples: data.samples, last: 0, agg: data.agg },
+            },
+          ]}
         />
       ) : (
         <div className="text-xs text-muted py-6 text-center">Reading the stream…</div>

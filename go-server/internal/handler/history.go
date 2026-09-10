@@ -391,6 +391,34 @@ type SeriesResponse struct {
 	// Source is "rollup" when the points come from the minute aggregates
 	// instead of the messages.
 	Source string `json:"source,omitempty"`
+	// Agg is the reduction applied per bucket, echoed so a chart can label
+	// what it is showing rather than what was asked for.
+	Agg Aggregation `json:"agg"`
+}
+
+// rollupPoints turns one stored minute into the points the aggregation asks
+// for. min, max, sum and count are stored; the average is derived from the
+// sum. Rate differences the minute's maximum, because the last value of a
+// minute is not kept and a counter's maximum is its last value.
+func rollupPoints(b history.RollupPoint, agg Aggregation) [][2]float64 {
+	t := float64(b.T)
+	switch agg {
+	case AggAvg:
+		return [][2]float64{{t, b.Avg}}
+	case AggMin:
+		return [][2]float64{{t, b.Min}}
+	case AggMax, AggRate:
+		return [][2]float64{{t, b.Max}}
+	case AggSum:
+		return [][2]float64{{t, b.Avg * float64(b.Count)}}
+	case AggCount:
+		return [][2]float64{{t, float64(b.Count)}}
+	}
+	// minmax: both extremes, so a peak inside the minute survives.
+	if b.Max == b.Min {
+		return [][2]float64{{t, b.Min}}
+	}
+	return [][2]float64{{t, b.Min}, {t, b.Max}}
 }
 
 // rollupFrom is the range beyond which a chart reads minute aggregates
@@ -406,6 +434,11 @@ func (h *HistoryHandler) Series(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	points := limitParam(r, "points", defaultSeriesPoints, maxSeriesPoints)
+	agg, ok := aggParam(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "unknown aggregation "+r.URL.Query().Get("agg"))
+		return
+	}
 	prg, err := exprParam(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -422,23 +455,25 @@ func (h *HistoryHandler) Series(w http.ResponseWriter, r *http.Request) {
 		points := make([][2]float64, 0, 256)
 		samples := 0
 		for _, id := range h.connIDs(r) {
-			buckets, err := db.SeriesRollup(r.Context(), id, subject, field, ranged0, ranged1)
+			minutes, err := db.SeriesRollup(r.Context(), id, subject, field, ranged0, ranged1)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
-			for _, b := range buckets {
-				// Minimum and maximum per bucket, like the downsampler, so a
-				// peak inside the minute survives.
-				points = append(points, [2]float64{float64(b.T), b.Min})
-				if b.Max != b.Min {
-					points = append(points, [2]float64{float64(b.T), b.Max})
-				}
+			// The minute already reduced the messages, so the aggregation
+			// applies to the minute rather than to the samples in it: the
+			// average of a minute is stored, the sum of one is not the sum
+			// of the messages twice.
+			for _, b := range minutes {
+				points = append(points, rollupPoints(b, agg)...)
 				samples += int(b.Count)
 			}
 		}
 		sort.SliceStable(points, func(i, j int) bool { return points[i][0] < points[j][0] })
-		writeJSON(w, SeriesResponse{Subject: subject, Field: field, Points: points, Samples: samples, Source: "rollup"})
+		if agg == AggRate {
+			points = rateOf(points)
+		}
+		writeJSON(w, SeriesResponse{Subject: subject, Field: field, Points: points, Samples: samples, Source: "rollup", Agg: agg})
 		return
 	}
 
@@ -473,7 +508,7 @@ func (h *HistoryHandler) Series(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	sort.SliceStable(samples, func(i, j int) bool { return samples[i][0] < samples[j][0] })
-	writeJSON(w, SeriesResponse{Subject: subject, Field: field, Points: downsample(samples, points), Samples: len(samples), Last: last})
+	writeJSON(w, SeriesResponse{Subject: subject, Field: field, Points: aggregate(samples, points, agg), Samples: len(samples), Last: last, Agg: agg})
 }
 
 // Fields answers GET /api/history/fields?subject=&connId=: the numeric
@@ -532,40 +567,9 @@ func numberAt(payload string, path []string) (float64, bool) {
 }
 
 // downsample keeps the minimum and maximum of every bucket, in time order.
+// downsample keeps both extremes of every bucket. It is aggregate() with
+// the default reduction, kept as a name for the callers that never offered
+// a choice.
 func downsample(samples [][2]float64, points int) [][2]float64 {
-	if points <= 0 || len(samples) <= points {
-		if samples == nil {
-			return [][2]float64{}
-		}
-		return samples
-	}
-	out := make([][2]float64, 0, 2*points)
-	size := float64(len(samples)) / float64(points)
-	for b := 0; b < points; b++ {
-		start := int(float64(b) * size)
-		end := int(float64(b+1) * size)
-		if end > len(samples) {
-			end = len(samples)
-		}
-		if start >= end {
-			continue
-		}
-		lo, hi := start, start
-		for i := start + 1; i < end; i++ {
-			if samples[i][1] < samples[lo][1] {
-				lo = i
-			}
-			if samples[i][1] > samples[hi][1] {
-				hi = i
-			}
-		}
-		if lo == hi {
-			out = append(out, samples[lo])
-		} else if lo < hi {
-			out = append(out, samples[lo], samples[hi])
-		} else {
-			out = append(out, samples[hi], samples[lo])
-		}
-	}
-	return out
+	return aggregate(samples, points, AggMinMax)
 }

@@ -412,9 +412,10 @@ type StreamSeriesResponse struct {
 	Stream  string `json:"stream"`
 	Field   string `json:"field"`
 	Subject string `json:"subject,omitempty"`
-	// Points are [timestamp ms, value] pairs in time order, downsampled to
-	// min/max buckets like the subject history series.
+	// Points are [timestamp ms, value] pairs in time order, reduced per
+	// bucket the way Agg says, like the subject history series.
 	Points [][2]float64 `json:"points"`
+	Agg    Aggregation  `json:"agg"`
 	// Samples is how many messages carried the field; Scanned how many of
 	// the stream's messages in the range were read.
 	Samples int    `json:"samples"`
@@ -440,6 +441,11 @@ func (h *StreamsHandler) Series(w http.ResponseWriter, r *http.Request) {
 	subject := r.URL.Query().Get("subject")
 	last := limitParam(r, "last", defaultSeriesLast, maxSeriesLast)
 	points := limitParam(r, "points", defaultSeriesPoints, maxSeriesPoints)
+	agg, aggOK := aggParam(r)
+	if !aggOK {
+		writeError(w, http.StatusBadRequest, "unknown aggregation "+r.URL.Query().Get("agg"))
+		return
+	}
 	path := strings.Split(field, ".")
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -455,7 +461,7 @@ func (h *StreamsHandler) Series(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	resp := StreamSeriesResponse{Stream: name, Field: field, Subject: subject, Points: [][2]float64{}}
+	resp := StreamSeriesResponse{Stream: name, Field: field, Subject: subject, Points: [][2]float64{}, Agg: agg}
 	first, end := info.State.FirstSeq, info.State.LastSeq
 	if info.State.Msgs == 0 || end == 0 {
 		writeJSON(w, resp)
@@ -530,7 +536,8 @@ func (h *StreamsHandler) Series(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	resp.Samples = len(samples)
-	resp.Points = downsample(samples, points)
+	resp.Points = aggregate(samples, points, agg)
+	resp.Agg = agg
 	writeJSON(w, resp)
 }
 

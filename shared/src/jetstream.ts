@@ -1,4 +1,4 @@
-import type { PayloadType } from './messages.js';
+import type { Aggregation, PayloadType } from './messages.js';
 
 export type RetentionPolicy = 'limits' | 'interest' | 'workqueue';
 export type StorageType = 'file' | 'memory';
@@ -122,8 +122,9 @@ export interface StreamSeries {
   stream: string;
   field: string;
   subject?: string;
-  /** [timestamp ms, value] in time order; every bucket keeps its min and max */
+  /** [timestamp ms, value] in time order, reduced per bucket the way `agg` says */
   points: [number, number][];
+  agg?: Aggregation;
   samples: number;
   scanned: number;
   fromSeq: number;

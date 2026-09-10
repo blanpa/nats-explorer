@@ -19,14 +19,14 @@ interface Props {
   subject?: string;
   size?: number;
   onFieldSelect?: (path: string) => void;
-  selectedField?: string | null;
+  selectedFields?: string[];
   /** max height of the scroll area; defaults to filling the parent */
   maxHeight?: number;
   compact?: boolean;
   className?: string;
 }
 
-export default function PayloadViewer({ payload, type, subject, size, onFieldSelect, selectedField, maxHeight, compact, className }: Props) {
+export default function PayloadViewer({ payload, type, subject, size, onFieldSelect, selectedFields, maxHeight, compact, className }: Props) {
   const [mode, setMode] = useState<ViewMode>('auto');
   const [rulesOpen, setRulesOpen] = useState(false);
   const [wrap, setWrap] = useState(true);
@@ -67,7 +67,7 @@ export default function PayloadViewer({ payload, type, subject, size, onFieldSel
         <span className="text-sm text-faint">Decoding…</span>
       ) : decoded.ok ? (
         <div className="jv">
-          <JsonTree data={decoded.value} onFieldSelect={onFieldSelect} selectedField={selectedField ?? null} />
+          <JsonTree data={decoded.value} onFieldSelect={onFieldSelect} selectedFields={selectedFields ?? []} />
         </div>
       ) : (
         <div className="text-sm text-danger">
@@ -95,7 +95,7 @@ export default function PayloadViewer({ payload, type, subject, size, onFieldSel
   } else {
     body = (
       <div className="jv">
-        <JsonTree data={parsed} onFieldSelect={onFieldSelect} selectedField={selectedField ?? null} />
+        <JsonTree data={parsed} onFieldSelect={onFieldSelect} selectedFields={selectedFields ?? []} />
       </div>
     );
   }

@@ -28,10 +28,13 @@ import { messageForPoint, windowFor } from './pickMessage';
 import PublishDrawer from './PublishDrawer';
 import SchemaPanel from './SchemaPanel';
 import TrendStrip from './TrendStrip';
-import ValueChart from './ValueChart';
+import ChartPanel, { type ChartSettings, persistChartSettings, savedAgg, savedLayout, savedNormalize, savedChartType } from './ChartPanel';
 
 /** Messages per request, for the first page of a range and every one after. */
 const RANGE_PAGE = 2000;
+
+/** How many fields one chart panel takes. Past six the colours repeat and the legend stops being readable. */
+const MAX_CHART_FIELDS = 6;
 
 export default function SubjectDetail() {
   const count = useStore(s => s.selectedSubjects.length);
@@ -60,7 +63,22 @@ function SingleSubjectView() {
     setShowHistoryState(v);
   };
   const [showDiff, setShowDiff] = useState(false);
-  const [chartField, setChartField] = useState<string | null>(null);
+  // Several fields can be charted at once. The order is the order they were
+  // added, which is also the order the colours are handed out in.
+  const [chartFields, setChartFields] = useState<string[]>([]);
+  const [chartSettings, setChartSettingsState] = useState<ChartSettings>(() => ({
+    type: savedChartType(),
+    layout: savedLayout(),
+    agg: savedAgg(),
+    normalize: savedNormalize(),
+  }));
+  const setChartSettings = (patch: Partial<ChartSettings>) =>
+    setChartSettingsState(prev => {
+      const next = { ...prev, ...patch };
+      persistChartSettings(next);
+      return next;
+    });
+  const toggleChartField = (f: string) => setChartFields(fs => (fs.includes(f) ? fs.filter(x => x !== f) : [...fs, f].slice(-MAX_CHART_FIELDS)));
   const [copied, setCopied] = useState(false);
   const [rangeState, setRange] = useState<TimeRange | null>(null);
   // Switching the persistent history off takes the range with it: without a
@@ -117,20 +135,28 @@ function SingleSubjectView() {
   // Reset per-subject UI state when the subject changes.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the reset belongs to a subject change, which the body itself does not read
   useEffect(() => {
-    setChartField(null);
+    setChartFields([]);
     setShowDiff(false);
     setRange(null);
     setListMessage(null);
   }, [subject]);
 
-  // The chart's history comes downsampled from the server and is refreshed
-  // now and then; live messages fill the gap in between.
-  const { data: series } = useAsync(
-    () => (subject && chartField ? api.getSeries(subject, chartField, { points: 600, from: range?.from, to: range?.to }) : null),
-    [subject, chartField, range?.from, range?.to],
+  // The chart's history comes reduced from the server and is refreshed now
+  // and then; live messages fill the gap in between. One request per field,
+  // in parallel: they are independent and the answers are small.
+  const fieldKey = chartFields.join(',');
+  const { data: seriesByField } = useAsync(
+    async () => {
+      if (!subject || chartFields.length === 0) return {};
+      const answers = await Promise.all(
+        chartFields.map(f => api.getSeries(subject, f, { points: 600, from: range?.from, to: range?.to, agg: chartSettings.agg }).catch(() => null)),
+      );
+      return Object.fromEntries(chartFields.map((f, i) => [f, answers[i]]));
+    },
+    [subject, fieldKey, range?.from, range?.to, chartSettings.agg],
     {
       interval: range ? undefined : 15_000,
-      key: subject && chartField ? `series:${subject}:${chartField}:${range?.from ?? 'live'}` : undefined,
+      key: subject && fieldKey ? `series:${subject}:${fieldKey}:${chartSettings.agg}:${range?.from ?? 'live'}` : undefined,
     },
   );
 
@@ -187,10 +213,9 @@ function SingleSubjectView() {
   // Clicking a chart point pins the message behind it. The value decides,
   // not only the time: a downsampled or aggregated point covers several
   // messages, and the interesting one is the one that produced the peak.
-  const pickPoint = async (point: { t: number; v: number }) => {
-    if (!chartField) return;
-    const win = windowFor(series?.source);
-    const local = messageForPoint(shownMessages, chartField, point, win);
+  const pickPoint = async (point: { t: number; v: number }, field: string) => {
+    const win = windowFor(seriesByField?.[field]?.source);
+    const local = messageForPoint(shownMessages, field, point, win);
     if (local) {
       setSelectedMessage(local);
       return;
@@ -201,7 +226,7 @@ function SingleSubjectView() {
     }
     try {
       const res = await api.getHistoryRange(subject, { from: point.t - win, to: point.t + win, limit: 500 });
-      const found = messageForPoint(res.messages, chartField, point, win);
+      const found = messageForPoint(res.messages, field, point, win);
       if (found) setSelectedMessage(found);
       else toast.info('No message found', 'Nothing recorded around that point carries the field.');
     } catch (err) {
@@ -212,8 +237,10 @@ function SingleSubjectView() {
   // Where the message on screen sits in the chart, so both directions match:
   // click a point to see its payload, and see the payload's point marked.
   const chartMarker = (() => {
-    if (!chartField || !display) return null;
-    const v = extractNumber(display.payload, chartField);
+    // Only with one field: with several the dot would sit on one line and
+    // say nothing about the others.
+    if (chartFields.length !== 1 || !display) return null;
+    const v = extractNumber(display.payload, chartFields[0]);
     return v === null ? null : { t: display.timestamp, v };
   })();
 
@@ -393,9 +420,16 @@ function SingleSubjectView() {
                 <Button size="sm" variant="outline" active={showDiff} disabled={!previous} icon={<Diff size={13} />} onClick={() => setShowDiff(v => !v)}>
                   Diff to previous
                 </Button>
-                {chartField && (
-                  <Button size="sm" variant="outline" active icon={<LineChart size={13} />} onClick={() => setChartField(null)}>
-                    Chart: <span className="font-mono">{chartField}</span> <X size={12} />
+                {chartFields.length > 0 && (
+                  <Button size="sm" variant="outline" active icon={<LineChart size={13} />} onClick={() => setChartFields([])}>
+                    {chartFields.length === 1 ? (
+                      <>
+                        Chart: <span className="font-mono">{chartFields[0]}</span>
+                      </>
+                    ) : (
+                      <>Charting {chartFields.length} fields</>
+                    )}{' '}
+                    <X size={12} />
                   </Button>
                 )}
                 {pinned && (
@@ -404,26 +438,35 @@ function SingleSubjectView() {
                   </Badge>
                 )}
                 <div className="ml-auto flex items-center gap-2 text-xs text-muted">
-                  {display.payloadType === 'json' && !chartField && <span className="hidden lg:inline">Click a number to chart it</span>}
+                  {display.payloadType === 'json' && chartFields.length === 0 && <span className="hidden lg:inline">Click a number to chart it</span>}
+                  {display.payloadType === 'json' && chartFields.length > 0 && chartFields.length < MAX_CHART_FIELDS && (
+                    <span className="hidden lg:inline">Click another number to add it</span>
+                  )}
                   <Badge tone="neutral">{display.payloadType}</Badge>
                 </div>
               </div>
 
-              {chartField && (
-                <div className="card px-3 py-2">
-                  <ValueChart messages={shownMessages} series={series} fieldPath={chartField} onPick={pickPoint} marker={chartMarker} />
-                </div>
-              )}
+              <ChartPanel
+                fields={chartFields}
+                messages={shownMessages}
+                seriesByField={seriesByField ?? {}}
+                settings={chartSettings}
+                onSettings={setChartSettings}
+                onRemove={f => setChartFields(fs => fs.filter(x => x !== f))}
+                onClear={() => setChartFields([])}
+                onPick={pickPoint}
+                marker={chartMarker}
+              />
 
-              <TrendStrip messages={shownMessages} latest={display} selected={chartField} onSelect={f => setChartField(c => (c === f ? null : f))} />
+              <TrendStrip messages={shownMessages} latest={display} selected={chartFields} onSelect={toggleChartField} />
 
               <PayloadViewer
                 payload={display.payload}
                 type={display.payloadType}
                 subject={display.subject}
                 size={display.size}
-                onFieldSelect={p => setChartField(f => (f === p ? null : p))}
-                selectedField={chartField}
+                onFieldSelect={toggleChartField}
+                selectedFields={chartFields}
                 maxHeight={showDiff ? 320 : undefined}
               />
 
