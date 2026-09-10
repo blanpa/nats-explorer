@@ -15,6 +15,8 @@ export default function StatusBar() {
   let rate = 0;
   let historyBytes = 0;
   let db: { bytes: number; messages: number; dropped: number; retention: string } | null = null;
+  // A drop is worth saying out loud, not only colouring: the figure beside
+  // it is a size, and a size going yellow does not say what happened.
   for (const st of stats.values()) {
     throttled += st.throttled;
     received += st.received;
@@ -62,9 +64,13 @@ export default function StatusBar() {
               type="button"
               onClick={() => setSettingsOpen(true)}
               className={cn('font-mono tabular-nums hidden lg:inline hover:text-fg', db.dropped > 0 ? 'text-warn' : 'text-faint')}
-              title={`SQLite copy of the history, retention ${db.retention}${db.dropped > 0 ? `; ${formatNumber(db.dropped)} messages not persisted because the writer fell behind` : ''}`}
+              title={
+                db.dropped > 0
+                  ? `${formatNumber(db.dropped)} messages did not reach the disk: they arrived faster than SQLite could write them. The live view is unaffected. Click to see what to change.`
+                  : `SQLite copy of the history, retention ${db.retention}`
+              }
             >
-              {formatBytes(db.bytes)} on disk
+              {db.dropped > 0 ? `${formatNumber(db.dropped)} not persisted` : `${formatBytes(db.bytes)} on disk`}
             </button>
           )}
           {throttled > 0 && (

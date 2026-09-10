@@ -8,7 +8,7 @@ import { formatBytes, formatDateTime, formatNumber } from '../../lib/utils';
 import { useStore } from '../../store';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
-import { Checkbox, Field, Select } from '../ui/Input';
+import { Checkbox, Field, Input, Select } from '../ui/Input';
 import { Badge, ErrorState, KeyValueGrid, LoadingState, SectionTitle } from '../ui/misc';
 import { toast } from '../ui/Toast';
 
@@ -30,10 +30,38 @@ export function parseGoDuration(d: string): number {
   return total;
 }
 
+/** Write buffers offered, in bytes. Bigger absorbs a longer burst and costs that much RAM. */
+const BUFFERS = [
+  { value: 16 << 20, label: '16 MB' },
+  { value: 64 << 20, label: '64 MB (default)' },
+  { value: 256 << 20, label: '256 MB' },
+  { value: 1024 << 20, label: '1 GB' },
+];
+
 /** The option matching a duration from the backend, or the raw value when it is not one of ours. */
 function retentionValue(d: string): string {
   const hours = parseGoDuration(d) / 3600;
   return RETENTIONS.find(r => Number.parseFloat(r.value) === hours)?.value ?? d;
+}
+
+/** The editable part of the setting. */
+interface Form {
+  enabled: boolean;
+  retention: string;
+  fullText: boolean;
+  filter: string;
+  queueBytes: number;
+}
+
+/** What the backend reports, as the form sees it. */
+function formOf(data: HistoryPersistence): Form {
+  return {
+    enabled: data.enabled,
+    retention: retentionValue(data.retention),
+    fullText: data.fullText !== false,
+    filter: data.filter ?? '',
+    queueBytes: data.queueBytes || 64 << 20,
+  };
 }
 
 function HistorySection() {
@@ -45,26 +73,26 @@ function HistorySection() {
   // Until the user touches something the form is what the backend reports,
   // so the polled refresh does not fight an edit and nothing flashes while
   // the first answer arrives.
-  const [edit, setEdit] = useState<{ enabled: boolean; retention: string; fullText: boolean } | null>(null);
+  const [edit, setEdit] = useState<Form | null>(null);
   const [purge, setPurge] = useState(false);
   const [saving, setSaving] = useState(false);
 
   if (initial && loading) return <LoadingState label="Reading the history setting…" />;
   if (!data) return <ErrorState message={error ?? 'The history setting could not be read.'} />;
 
-  const enabled = edit ? edit.enabled : data.enabled;
-  const retention = edit ? edit.retention : retentionValue(data.retention);
-  const fullText = edit ? edit.fullText : data.fullText !== false;
-  const set = (patch: { enabled?: boolean; retention?: string; fullText?: boolean }) => setEdit({ enabled, retention, fullText, ...patch });
+  const current = formOf(data);
+  const { enabled, retention, fullText, filter, queueBytes } = edit ?? current;
+  const set = (patch: Partial<Form>) => setEdit({ ...(edit ?? current), ...patch });
 
   const editable = data.supported && !data.managed && canWrite;
-  const changed =
-    enabled !== data.enabled || (enabled && (retention !== retentionValue(data.retention) || fullText !== (data.fullText !== false))) || (!enabled && purge);
+  const changedWhileOn =
+    enabled && (retention !== current.retention || fullText !== current.fullText || filter !== current.filter || queueBytes !== current.queueBytes);
+  const changed = enabled !== data.enabled || changedWhileOn || (!enabled && purge);
 
   const save = async () => {
     setSaving(true);
     try {
-      const next = await api.setHistoryPersistence({ enabled, retention, fullText, purge: !enabled && purge });
+      const next = await api.setHistoryPersistence({ enabled, retention, fullText, filter, queueBytes, purge: !enabled && purge });
       setData(next);
       setHistoryDb(next.enabled, next.retention);
       setPurge(false);
@@ -131,6 +159,35 @@ function HistorySection() {
               onChange={e => set({ fullText: e.target.checked })}
             />
           )}
+          {enabled && (
+            <Field
+              label="Only write messages matching"
+              hint="A CEL expression over subject, payload, headers, size and kind -- the same language as the payload filter. Empty writes everything. Excluding what is never searched for is the one setting that lowers the write rate itself, so it is the first thing to reach for when messages are not being persisted."
+            >
+              <Input
+                mono
+                placeholder='e.g. subject.startsWith("orders.") || size > 1024'
+                value={filter}
+                disabled={!editable || saving}
+                onChange={e => set({ filter: e.target.value })}
+              />
+            </Field>
+          )}
+          {enabled && (
+            <Field
+              label="Write buffer"
+              hint="How much of a burst is held in memory while the disk catches up. Above it messages are dropped from the disk copy -- never from the live view."
+            >
+              <Select value={String(queueBytes)} disabled={!editable || saving} onChange={e => set({ queueBytes: Number(e.target.value) })}>
+                {BUFFERS.every(b => b.value !== queueBytes) && <option value={queueBytes}>{formatBytes(queueBytes)}</option>}
+                {BUFFERS.map(b => (
+                  <option key={b.value} value={b.value}>
+                    {b.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
           {!enabled && data.enabled && (
             <Checkbox
               label="Delete what is already stored"
@@ -147,14 +204,21 @@ function HistorySection() {
           )}
           {!canWrite && <p className="text-sm text-muted">A read-only account cannot change this.</p>}
           {data.db && (
-            <KeyValueGrid
-              items={[
-                { label: 'Messages', value: formatNumber(data.db.messages) },
-                { label: 'Size on disk', value: formatBytes(data.db.bytes) },
-                { label: 'Oldest message', value: data.db.oldest ? formatDateTime(data.db.oldest) : '–' },
-                ...(data.db.dropped > 0 ? [{ label: 'Not persisted', value: `${formatNumber(data.db.dropped)} (the writer fell behind)` }] : []),
-              ]}
-            />
+            <>
+              <KeyValueGrid
+                items={[
+                  { label: 'Messages', value: formatNumber(data.db.messages) },
+                  { label: 'Size on disk', value: formatBytes(data.db.bytes) },
+                  { label: 'Oldest message', value: data.db.oldest ? formatDateTime(data.db.oldest) : '–' },
+                  { label: 'Waiting to be written', value: `${formatBytes(data.db.queued)} of ${formatBytes(data.db.queueBytes)}` },
+                  ...(data.db.filtered > 0 ? [{ label: 'Left out by the filter', value: formatNumber(data.db.filtered) }] : []),
+                  ...(data.db.dropped > 0 ? [{ label: 'Not persisted', value: `${formatNumber(data.db.dropped)} (the writer fell behind)` }] : []),
+                ]}
+              />
+              {data.db.dropped > 0 && (
+                <DroppedHint dropped={data.db.dropped} fullText={fullText} hasFilter={filter.trim() !== ''} buffered={data.db.queueBytes} />
+              )}
+            </>
           )}
           {data.path && (
             <p className="text-xs text-faint font-mono break-all flex items-start gap-1.5">
@@ -172,6 +236,37 @@ function HistorySection() {
         </>
       )}
     </section>
+  );
+}
+
+/**
+ * What to do about messages that did not reach the disk. The counter alone
+ * only says something went wrong; the three settings above are the answer,
+ * in the order of how much they buy.
+ */
+function DroppedHint({ dropped, fullText, hasFilter, buffered }: { dropped: number; fullText: boolean; hasFilter: boolean; buffered: number }) {
+  const remedies = [
+    !hasFilter && 'write only the subjects that are searched for, with the filter above -- what it leaves out costs nothing at all',
+    fullText && 'switch the full-text index off: it costs about three quarters of the write rate',
+    buffered < 256 << 20 && 'raise the write buffer, if the load comes in bursts rather than steadily',
+  ].filter(Boolean) as string[];
+  return (
+    <div className="text-xs text-warn border border-warn/30 bg-warn/5 rounded p-2 flex flex-col gap-1">
+      <span className="font-medium">
+        {formatNumber(dropped)} {dropped === 1 ? 'message' : 'messages'} did not reach the disk.
+      </span>
+      <span className="text-muted">
+        They arrived faster than SQLite could write them and the buffer was full. The live view and the subject tree are unaffected -- only the copy on disk has
+        gaps.
+      </span>
+      {remedies.length > 0 && (
+        <ul className="list-disc list-inside text-muted">
+          {remedies.map(r => (
+            <li key={r}>{r}</li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
