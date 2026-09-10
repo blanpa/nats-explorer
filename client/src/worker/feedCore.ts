@@ -13,7 +13,7 @@ export const MAX_PENDING = 10_000;
  */
 export class FeedCore {
   readonly model = new TreeModel();
-  view: TreeView = { all: false, paths: [], filter: '', expr: '', hideSystem: true, preview: false };
+  view: TreeView = { all: false, paths: [], filterCollapsed: [], filter: '', expr: '', hideSystem: true, preview: false };
   private knownConns = new Set<string>();
   private pending: NatsMessage[] = [];
   private treeScheduled = false;
@@ -59,8 +59,12 @@ export class FeedCore {
     const hideSystem = view.hideSystem && !wantsSystem;
     const filtering = view.filter.trim().length > 0;
     const paths = new Set(view.paths);
-    // In filter mode the server sends only the paths of matches: show them all.
-    const isExpanded = filtering ? () => true : view.all ? (p: string) => !paths.has(p) : (p: string) => paths.has(p);
+    // In filter mode the server sends only the paths of matches, so they
+    // start open -- typing a filter and seeing nothing but roots would be
+    // useless. Open by default is not the same as unclosable, though: a
+    // branch the reader collapsed stays collapsed until the filter changes.
+    const collapsed = new Set(view.filterCollapsed);
+    const isExpanded = filtering ? (p: string) => !collapsed.has(p) : view.all ? (p: string) => !paths.has(p) : (p: string) => paths.has(p);
     const rows = flattenTree(this.model.roots, { isExpanded, hideSystem });
     const systemCount = this.model.roots.filter(n => isSystemRoot(n.segment)).length;
     this.post({ type: 'tree', rows, systemCount });

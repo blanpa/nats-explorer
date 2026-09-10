@@ -174,6 +174,12 @@ export interface AppState {
   /** every branch expanded; `expanded` then holds the collapsed exceptions */
   expandAll: boolean;
   expanded: Set<string>;
+  /**
+   * While a filter is on every match is shown, so `expanded` says nothing:
+   * the branches closed by hand are kept here instead, and forgotten when
+   * the filter changes.
+   */
+  filterCollapsed: Set<string>;
   isExpanded: (path: string) => boolean;
   toggleExpanded: (path: string) => void;
   setExpanded: (paths: Iterable<string>) => void;
@@ -315,7 +321,9 @@ export const useStore = create<AppState>((set, get) => ({
   systemCount: 0,
   setTreeRows: (rows, systemCount) => set({ treeRows: rows, systemCount }),
   subjectFilter: '',
-  setSubjectFilter: f => set({ subjectFilter: f }),
+  // A new filter is a new set of matches, so what was closed under the old
+  // one means nothing under it.
+  setSubjectFilter: f => set({ subjectFilter: f, filterCollapsed: new Set() }),
   subjectExpr: readSetting('ne.subjectExpr', ''),
   setSubjectExpr: e => {
     writeSetting('ne.subjectExpr', e);
@@ -369,20 +377,36 @@ export const useStore = create<AppState>((set, get) => ({
     }),
   expandAll: false,
   expanded: new Set(),
+  filterCollapsed: new Set(),
   isExpanded: path => {
     const s = get();
+    if (s.subjectFilter.trim()) return !s.filterCollapsed.has(path);
     return s.expandAll ? !s.expanded.has(path) : s.expanded.has(path);
   },
   toggleExpanded: path =>
     set(s => {
+      // A filter decides what is shown, so a toggle under one is about that
+      // view alone and must not disturb the expansion the reader had before.
+      if (s.subjectFilter.trim()) {
+        const next = new Set(s.filterCollapsed);
+        if (next.has(path)) next.delete(path);
+        else next.add(path);
+        return { filterCollapsed: next };
+      }
       const next = new Set(s.expanded);
       if (next.has(path)) next.delete(path);
       else next.add(path);
       return { expanded: next };
     }),
   setExpanded: paths => set({ expandAll: false, expanded: new Set(paths) }),
-  expandAllBranches: () => set({ expandAll: true, expanded: new Set() }),
-  collapseAll: () => set({ expandAll: false, expanded: new Set() }),
+  expandAllBranches: () => set(s => (s.subjectFilter.trim() ? { filterCollapsed: new Set() } : { expandAll: true, expanded: new Set() })),
+  collapseAll: () =>
+    set(s => {
+      if (!s.subjectFilter.trim()) return { expandAll: false, expanded: new Set() };
+      // Under a filter there are no roots to fall back to, so collapsing
+      // everything means closing every branch that is on screen.
+      return { filterCollapsed: new Set(s.treeRows.filter(r => r.hasChildren).map(r => r.subject)) };
+    }),
 
   live: new Map(),
   ingestFeed: msgs => {

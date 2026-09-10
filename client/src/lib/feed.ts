@@ -181,6 +181,7 @@ const treeView = (s: ReturnType<typeof useStore.getState>) => ({
   all: s.expandAll,
   paths: [...s.expanded],
   filter: s.subjectFilter,
+  filterCollapsed: [...s.filterCollapsed],
   expr: s.subjectExpr,
   hideSystem: s.hideSystemSubjects,
   preview: s.treePreview,
@@ -210,6 +211,7 @@ export function startFeed(): () => void {
       if (
         s.expanded !== prev.expanded ||
         s.expandAll !== prev.expandAll ||
+        s.filterCollapsed !== prev.filterCollapsed ||
         s.subjectFilter !== prev.subjectFilter ||
         s.subjectExpr !== prev.subjectExpr ||
         s.hideSystemSubjects !== prev.hideSystemSubjects ||

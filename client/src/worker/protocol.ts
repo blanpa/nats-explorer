@@ -9,6 +9,12 @@ export interface TreeView {
   all: boolean;
   paths: string[];
   filter: string;
+  /**
+   * Branches the reader collapsed while the filter was on. Filtering shows
+   * every match, so `paths` says nothing there and this holds the
+   * exceptions instead; it is dropped when the filter changes.
+   */
+  filterCollapsed: string[];
   /** CEL expression over the payload; only matching subjects stay in the tree. */
   expr: string;
   hideSystem: boolean;
