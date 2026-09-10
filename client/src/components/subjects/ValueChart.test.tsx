@@ -53,6 +53,54 @@ describe('ValueChart', () => {
     expect(onPick.mock.calls[0][1]).toBe('temp');
   });
 
+  it('hands back the stretch of time that was dragged over', () => {
+    const onZoom = vi.fn();
+    const onPick = vi.fn();
+    const { container } = render(<ValueChart series={[temp]} type="line" onPick={onPick} onZoom={onZoom} />);
+    const svg = chartOf(container);
+    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 600, height: 160, right: 600, bottom: 160, x: 0, y: 0, toJSON: () => ({}) });
+    svg.setPointerCapture = () => undefined;
+
+    // The plot runs from x=56 to x=586 over 1000..3000ms, so the middle
+    // third of it is roughly the second half of the second second.
+    fireEvent.pointerDown(svg, { clientX: 240, pointerId: 1, button: 0 });
+    fireEvent.pointerMove(svg, { clientX: 420, pointerId: 1 });
+    fireEvent.pointerUp(svg, { clientX: 420, pointerId: 1 });
+
+    expect(onZoom).toHaveBeenCalledTimes(1);
+    const [from, to] = onZoom.mock.calls[0];
+    expect(from).toBeGreaterThan(1000);
+    expect(to).toBeLessThan(3000);
+    expect(to - from).toBeGreaterThan(0);
+    // The click that ends a drag belongs to the drag, not to a point.
+    fireEvent.click(svg, { clientX: 420 });
+    expect(onPick).not.toHaveBeenCalled();
+  });
+
+  it('treats a drag too short to mean a window as a click', () => {
+    const onZoom = vi.fn();
+    const onPick = vi.fn();
+    const { container } = render(<ValueChart series={[temp]} type="line" onPick={onPick} onZoom={onZoom} />);
+    const svg = chartOf(container);
+    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 600, height: 160, right: 600, bottom: 160, x: 0, y: 0, toJSON: () => ({}) });
+    svg.setPointerCapture = () => undefined;
+
+    fireEvent.pointerDown(svg, { clientX: 590, pointerId: 1, button: 0 });
+    fireEvent.pointerMove(svg, { clientX: 592, pointerId: 1 });
+    fireEvent.pointerUp(svg, { clientX: 592, pointerId: 1 });
+    expect(onZoom).not.toHaveBeenCalled();
+
+    fireEvent.click(svg, { clientX: 590 });
+    expect(onPick).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers no crosshair where there is no window to choose', () => {
+    // Without a range to set, a chart is not a picker and must not look
+    // like one.
+    const { container } = render(<ValueChart series={[temp]} type="line" onPick={() => {}} />);
+    expect(chartOf(container).getAttribute('class')).not.toContain('crosshair');
+  });
+
   it('draws every series with its own colour and names them all', () => {
     const { container } = render(<ValueChart series={[temp, rpm]} type="line" />);
     const paths = [...container.querySelectorAll('path')].map(p => p.getAttribute('stroke'));

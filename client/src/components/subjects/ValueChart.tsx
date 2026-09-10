@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Aggregation, HistorySeries, NatsMessage } from 'shared';
-import { extractNumber, formatCount, formatTime } from '../../lib/utils';
+import { cn, extractNumber, formatCount, formatDurationMs, formatTime } from '../../lib/utils';
 
 export interface Point {
   t: number;
@@ -31,7 +31,22 @@ interface Props {
    * axis is meaningless must not also show meaningless numbers.
    */
   normalize?: boolean;
+  /**
+   * Dragging across the chart hands back the stretch of time that was
+   * covered. Left out, the chart is not a way of choosing a window and does
+   * not pretend to be one: no crosshair, no band.
+   */
+  onZoom?: (from: number, to: number) => void;
 }
+
+/**
+ * How far the pointer has to travel before it counts as a drag rather than
+ * a click. Below this a chart is being pointed at, not brushed.
+ */
+const DRAG_PX = 6;
+
+/** The narrowest window a drag can produce, so a twitch cannot empty the chart. */
+const MIN_SPAN_MS = 500;
 
 /**
  * The colours a chart hands out, in order. They are theme variables, so a
@@ -108,10 +123,16 @@ interface Scaled {
   max: number;
 }
 
-export default function ValueChart({ series, height = 160, onPick, marker, type, normalize = false }: Props) {
+export default function ValueChart({ series, height = 160, onPick, marker, type, normalize = false, onZoom }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(600);
   const [hoverT, setHoverT] = useState<number | null>(null);
+  // The stretch being dragged, in time. Held here rather than in pixels so
+  // it survives a resize mid-drag and reads the same as everything else.
+  const [band, setBand] = useState<{ a: number; b: number } | null>(null);
+  const dragFrom = useRef<number | null>(null);
+  // A drag ends in a click as well; that click belongs to the drag.
+  const swallowClick = useRef(false);
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -216,7 +237,42 @@ export default function ValueChart({ series, height = 160, onPick, marker, type,
 
   const timeAt = (clientX: number, rect: DOMRect) => t0 + ((clientX - rect.left - pad.left) / w) * tRange;
   const onMove = (e: React.MouseEvent<SVGSVGElement>) => setHoverT(timeAt(e.clientX, e.currentTarget.getBoundingClientRect()));
+
+  const onDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (!onZoom || e.button !== 0) return;
+    dragFrom.current = e.clientX;
+    const t = timeAt(e.clientX, e.currentTarget.getBoundingClientRect());
+    setBand({ a: t, b: t });
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onDrag = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (dragFrom.current === null) return;
+    const t = timeAt(e.clientX, e.currentTarget.getBoundingClientRect());
+    setBand(b => (b ? { a: b.a, b: t } : b));
+  };
+  const cancelDrag = () => {
+    dragFrom.current = null;
+    setBand(null);
+  };
+  const onUp = (e: React.PointerEvent<SVGSVGElement>) => {
+    const start = dragFrom.current;
+    const b = band;
+    cancelDrag();
+    if (start === null || !b || !onZoom) return;
+    if (Math.abs(e.clientX - start) < DRAG_PX) return;
+    // Only over the data: a drag that runs off the plot means "to the end",
+    // not "into a stretch of time the chart never showed".
+    const from = Math.max(t0, Math.min(b.a, b.b));
+    const to = Math.min(t1, Math.max(b.a, b.b));
+    swallowClick.current = true;
+    onZoom(Math.round(from), Math.round(Math.max(to, from + MIN_SPAN_MS)));
+  };
+
   const onClick = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (swallowClick.current) {
+      swallowClick.current = false;
+      return;
+    }
     if (!onPick) return;
     const t = timeAt(e.clientX, e.currentTarget.getBoundingClientRect());
     // With several series the click belongs to the one whose point is
@@ -234,6 +290,8 @@ export default function ValueChart({ series, height = 160, onPick, marker, type,
   };
 
   const hoveredT = hoverT !== null ? nearestIn(drawable[0].points, hoverT).t : null;
+  const bandSpan = band ? Math.abs(band.b - band.a) : 0;
+  const bandX = band ? [Math.min(x(band.a), x(band.b)), Math.max(x(band.a), x(band.b))] : null;
   const marked = marker && marker.t >= t0 && marker.t <= t1 ? marker : null;
   const single = drawable.length === 1 ? drawable[0] : null;
   const totalPoints = series.reduce((n, s) => n + s.points.length, 0);
@@ -254,8 +312,16 @@ export default function ValueChart({ series, height = 160, onPick, marker, type,
             </span>
           );
         })}
-        {hoveredT !== null && <span className="text-muted font-mono">{formatTime(hoveredT)}</span>}
-        {hoverT === null && marked && <span className="text-accent font-mono">{formatTime(marked.t)}</span>}
+        {band && bandSpan > 0 ? (
+          <span className="text-accent font-mono">
+            {formatTime(Math.min(band.a, band.b), false)} + {formatDurationMs(bandSpan)}
+          </span>
+        ) : (
+          <>
+            {hoveredT !== null && <span className="text-muted font-mono">{formatTime(hoveredT)}</span>}
+            {hoverT === null && marked && <span className="text-accent font-mono">{formatTime(marked.t)}</span>}
+          </>
+        )}
         <span className="ml-auto min-w-0 truncate text-faint font-mono tabular-nums">
           {single ? `min ${niceNumber(single.min)} · max ${niceNumber(single.max)} · ` : ''}
           {formatCount(totalPoints)} pts
@@ -268,11 +334,15 @@ export default function ValueChart({ series, height = 160, onPick, marker, type,
       <svg
         width={width}
         height={height}
-        className={onPick ? 'block cursor-pointer' : 'block'}
+        className={cn('block', onZoom && 'cursor-crosshair select-none', !onZoom && onPick && 'cursor-pointer')}
         role="img"
         aria-label={`${series.map(s => s.field).join(', ')} over time`}
         onMouseMove={onMove}
         onMouseLeave={() => setHoverT(null)}
+        onPointerDown={onDown}
+        onPointerMove={onDrag}
+        onPointerUp={onUp}
+        onPointerCancel={cancelDrag}
         onClick={onClick}
       >
         {yTicks.map((v, i) => (
@@ -339,7 +409,18 @@ export default function ValueChart({ series, height = 160, onPick, marker, type,
             <circle cx={x(marked.t)} cy={yOf(single)(marked.v)} r="5" fill="rgb(var(--accent))" stroke="rgb(var(--bg-1))" strokeWidth="2" />
           </g>
         )}
-        {hoveredT !== null && (
+        {bandX && bandX[1] - bandX[0] > 1 && (
+          <rect
+            x={bandX[0]}
+            y={pad.top}
+            width={bandX[1] - bandX[0]}
+            height={h}
+            fill="rgb(var(--accent) / 0.15)"
+            stroke="rgb(var(--accent) / 0.55)"
+            pointerEvents="none"
+          />
+        )}
+        {hoveredT !== null && !band && (
           <g pointerEvents="none">
             <line x1={x(hoveredT)} x2={x(hoveredT)} y1={pad.top} y2={pad.top + h} stroke="rgb(var(--fg-faint))" strokeDasharray="3 3" />
             {drawable.map(d => {

@@ -1,6 +1,6 @@
-import { CalendarClock, X } from 'lucide-react';
+import { CalendarClock, ChevronLeft, ChevronRight, X, ZoomOut } from 'lucide-react';
 import { useState } from 'react';
-import { cn, parseGoDuration } from '../../lib/utils';
+import { cn, formatDateTime, formatDurationMs, formatTime, parseGoDuration } from '../../lib/utils';
 import { useStore } from '../../store';
 import { Button, IconButton } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -31,15 +31,32 @@ const PRESETS: { label: string; minutes: number; prose?: string }[] = [
   { label: 'All', minutes: 0, prose: 'the recorded history' },
 ];
 
+/**
+ * A window with a start and an end, named the way it reads back: two clock
+ * times while it stays inside one day, dates as well once it crosses one.
+ * This is what a drag across a chart and the custom form both produce, so
+ * both are shown, and re-shown, in the same words.
+ */
+export function windowRange(from: number, to: number): TimeRange {
+  const start = Math.max(0, Math.round(from));
+  const end = Math.round(to);
+  const oneDay = new Date(start).toDateString() === new Date(end).toDateString();
+  const at = (ms: number) => (oneDay ? formatTime(ms, false) : formatDateTime(ms));
+  const label = `${at(start)} – ${at(end)}`;
+  return { from: start, to: end, label, prose: label };
+}
+
 /** A zero retention means nothing is deleted; "retention 0s" would not say that. */
 function retentionLabel(retention: string): string {
   const forever = retention === '' || parseGoDuration(retention) === 0;
   return forever ? 'Persistent history, every message kept' : `Persistent history, retention ${retention}`;
 }
 
+// Seconds and all: a window dragged out of a chart is rarely a round
+// minute, and rounding it away on the way into the form would move it.
 const toLocalInput = (ms: number) => {
   const d = new Date(ms - new Date().getTimezoneOffset() * 60000);
-  return d.toISOString().slice(0, 16);
+  return d.toISOString().slice(0, 19);
 };
 
 /**
@@ -68,9 +85,31 @@ export default function RangePicker({ range, onChange }: { range: TimeRange | nu
     const f = new Date(from).getTime();
     const t = new Date(to).getTime();
     if (!Number.isFinite(f) || !Number.isFinite(t) || t <= f) return;
-    const label = `${new Date(f).toLocaleString()} – ${new Date(t).toLocaleString()}`;
-    onChange({ from: f, to: t, label, prose: label });
+    onChange(windowRange(f, t));
   };
+
+  // The form opens on the window that is showing, so a rough drag across a
+  // chart can be corrected to the second instead of typed out again.
+  const toggleCustom = () => {
+    if (!custom && range && range.from > 0) {
+      setFrom(toLocalInput(range.from));
+      setTo(toLocalInput(range.to));
+    }
+    setCustom(c => !c);
+  };
+
+  /**
+   * Moves the window without changing how wide it is, and never past now:
+   * a window over the future is empty, and an empty chart is not an answer.
+   */
+  const move = (nextFrom: number, nextTo: number) => {
+    const now = Date.now();
+    const over = Math.max(0, nextTo - now);
+    onChange(windowRange(nextFrom - over, nextTo - over));
+  };
+  const span = range ? range.to - range.from : 0;
+  // A window with a start can be zoomed and panned; "All" has none.
+  const zoomable = !!range && range.from > 0 && span > 0;
 
   return (
     <div className="flex flex-wrap items-center gap-1" title={retentionLabel(retention)}>
@@ -86,10 +125,27 @@ export default function RangePicker({ range, onChange }: { range: TimeRange | nu
       <button
         type="button"
         className={cn('btn btn-xs', custom || (range && !PRESETS.some(p => p.label === range.label)) ? 'btn-primary' : 'btn-outline')}
-        onClick={() => setCustom(c => !c)}
+        onClick={toggleCustom}
       >
         Custom
       </button>
+      {/* Zooming out and stepping sideways only exist once a window does, so
+          they appear at the end of the row, where nothing has to move for
+          them. */}
+      {zoomable && (
+        <span className="flex items-center gap-1 ml-1">
+          <IconButton label="Earlier window" size="xs" onClick={() => move(range.from - span / 2, range.to - span / 2)}>
+            <ChevronLeft size={13} />
+          </IconButton>
+          <IconButton label="Zoom out" size="xs" onClick={() => move(range.from - span / 2, range.to + span / 2)}>
+            <ZoomOut size={13} />
+          </IconButton>
+          <IconButton label="Later window" size="xs" onClick={() => move(range.from + span / 2, range.to + span / 2)}>
+            <ChevronRight size={13} />
+          </IconButton>
+          <span className="text-xs text-faint font-mono tabular-nums whitespace-nowrap">{formatDurationMs(span)}</span>
+        </span>
+      )}
       {custom && (
         <form
           className="flex items-center gap-1"
@@ -98,9 +154,9 @@ export default function RangePicker({ range, onChange }: { range: TimeRange | nu
             applyCustom();
           }}
         >
-          <Input inputSize="sm" type="datetime-local" className="w-44" value={from} onChange={e => setFrom(e.target.value)} aria-label="Range start" />
+          <Input inputSize="sm" type="datetime-local" step="1" className="w-48" value={from} onChange={e => setFrom(e.target.value)} aria-label="Range start" />
           <span className="text-faint text-xs">to</span>
-          <Input inputSize="sm" type="datetime-local" className="w-44" value={to} onChange={e => setTo(e.target.value)} aria-label="Range end" />
+          <Input inputSize="sm" type="datetime-local" step="1" className="w-48" value={to} onChange={e => setTo(e.target.value)} aria-label="Range end" />
           <Button size="xs" type="submit">
             Apply
           </Button>

@@ -17,7 +17,7 @@ import DiffView from './DiffView';
 import ExportMenu from './ExportMenu';
 import { EXPORT_MAX_MESSAGES, fetchWholeRange } from '../../lib/exportRange';
 import { HistorySearchInput, SearchSummary, useHistorySearch } from './HistorySearch';
-import RangePicker, { type TimeRange } from './RangePicker';
+import RangePicker, { type TimeRange, windowRange } from './RangePicker';
 import HistoryRail from './HistoryRail';
 import { ResizeHandle } from '../layout/ResizeHandle';
 import MessageList from './MessageList';
@@ -161,6 +161,15 @@ function SingleSubjectView() {
     setRange(null);
     setListMessage(null);
   }, [subject]);
+
+  /**
+   * A drag across a chart chooses the time range. It is the same range the
+   * picker sets, so the chart, the history below it and the export all move
+   * together -- and the server reduces over the shorter window, which is why
+   * zooming in shows detail that was not on screen before. Without a
+   * database there is no range to set, so there is nothing to drag either.
+   */
+  const zoomToWindow = historyDb ? (from: number, to: number) => setRange(windowRange(from, to)) : undefined;
 
   // The chart's history comes reduced from the server and is refreshed now
   // and then; live messages fill the gap in between. One request per field,
@@ -536,6 +545,7 @@ function SingleSubjectView() {
                 onClear={() => setChartFields([])}
                 onPick={pickPoint}
                 marker={chartMarker}
+                onZoom={zoomToWindow}
               />
 
               <TrendStrip messages={shownMessages} latest={display} selected={chartFields} onSelect={toggleChartField} />

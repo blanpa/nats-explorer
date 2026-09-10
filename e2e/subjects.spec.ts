@@ -290,6 +290,56 @@ test('a chart point opens the message behind it', async ({ page }) => {
   expect(errors, errors.join('\n')).toEqual([]);
 });
 
+test('dragging across a chart zooms into that stretch of time', async ({ page }) => {
+  const { nc, subjectRoot } = suite;
+  const errors = await openApp(page);
+  await ensureConnected(page);
+
+  for (let i = 0; i < 12; i++) {
+    nc.publish(`${subjectRoot}.zoom.temp`, jc.encode({ temp: 20 + i }));
+    await page.waitForTimeout(250);
+  }
+  await page.getByPlaceholder('Filter subjects…').fill(`${subjectRoot}.zoom`);
+  await selectLeaf(page, 'temp');
+
+  await page.locator('.jv-chartable').first().click();
+  const chart = page.getByRole('img', { name: /over time/ }).first();
+  await expect(chart).toBeVisible({ timeout: 10_000 });
+
+  // Live, so there is no window yet and nothing to widen.
+  const zoomOut = page.getByRole('button', { name: 'Zoom out' });
+  await expect(zoomOut).toHaveCount(0);
+
+  // How many the subject header says are on screen: "12 in history" live,
+  // "5 in 16:07:46 – 16:08:04" once a window has been dragged.
+  const shown = page.getByText(/^\d+ in /);
+  const count = async () => Number((await shown.innerText()).match(/^(\d+) in/)![1]);
+  await expect(shown).toContainText('in history');
+  const live = await count();
+
+  const box = (await chart.boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.35, box.y + box.height * 0.5);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.75, box.y + box.height * 0.5, { steps: 8 });
+  await page.mouse.up();
+
+  // The drag is the time range now: a window with a start and an end, fewer
+  // messages than the whole history, and something to widen it with again.
+  await expect(shown).toContainText(/in \d{2}:\d{2}:\d{2} – \d{2}:\d{2}:\d{2}/, { timeout: 10_000 });
+  const zoomed = await count();
+  expect(zoomed).toBeGreaterThan(0);
+  expect(zoomed).toBeLessThan(live);
+
+  await zoomOut.click();
+  await expect(shown).toContainText(/in \d{2}:\d{2}:\d{2} – /, { timeout: 10_000 });
+  expect(await count()).toBeGreaterThanOrEqual(zoomed);
+
+  await page.getByRole('button', { name: 'Live', exact: true }).click();
+  await expect(shown).toContainText('in history', { timeout: 10_000 });
+
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
 test('a search hit opens its payload', async ({ page }) => {
   const { nc, subjectRoot } = suite;
   const errors = await openApp(page);

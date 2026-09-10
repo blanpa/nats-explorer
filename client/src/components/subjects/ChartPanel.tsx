@@ -79,9 +79,11 @@ interface Props {
   onClear: () => void;
   onPick?: (point: Point, field: string) => void;
   marker?: Point | null;
+  /** dragging across a chart picks that stretch of time as the time range */
+  onZoom?: (from: number, to: number) => void;
 }
 
-export default function ChartPanel({ fields, messages, seriesByField, settings, onSettings, onRemove, onClear, onPick, marker }: Props) {
+export default function ChartPanel({ fields, messages, seriesByField, settings, onSettings, onRemove, onClear, onPick, marker, onZoom }: Props) {
   const { type, layout, agg, normalize } = settings;
 
   const series: ChartSeries[] = useMemo(
@@ -110,6 +112,9 @@ export default function ChartPanel({ fields, messages, seriesByField, settings, 
       */}
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className="text-muted">Charting</span>
+        {onZoom && (
+          <Hint text="Drag across a chart to zoom into that stretch of time. It becomes the time range, so the history below follows it and the server reduces the points over the shorter window -- zooming in really does show more, it does not just stretch what is there. Zoom back out with the arrows next to the range." />
+        )}
 
         <span className="ml-auto flex flex-wrap items-center gap-2">
           {/*
@@ -164,11 +169,19 @@ export default function ChartPanel({ fields, messages, seriesByField, settings, 
       )}
 
       {layout === 'overlay' || !many ? (
-        <ValueChart series={series} type={type} normalize={many && normalize} onPick={onPick} marker={many ? null : marker} height={many ? 200 : 160} />
+        <ValueChart
+          series={series}
+          type={type}
+          normalize={many && normalize}
+          onPick={onPick}
+          marker={many ? null : marker}
+          height={many ? 200 : 160}
+          onZoom={onZoom}
+        />
       ) : (
         <div className="flex flex-col gap-2">
           {series.map(s => (
-            <ValueChart key={s.field} series={[s]} type={type} onPick={onPick} marker={marker} height={130} />
+            <ValueChart key={s.field} series={[s]} type={type} onPick={onPick} marker={marker} height={130} onZoom={onZoom} />
           ))}
         </div>
       )}

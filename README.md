@@ -84,6 +84,7 @@ Releases are produced by `.github/workflows/release.yml` on every `v*` tag: the 
 - **Multi-Connection** -- Connect to multiple NATS servers simultaneously
 - **Authentication** -- Token, username/password, NKey, JWT/credentials, TLS
 - **Live Value Charts** -- Chart any numeric JSON field over time as line, area, step, bars or dots
+- **Zoom by dragging** -- Drag across a chart to make that stretch of time the range; the history follows it and the server re-reduces the field over the shorter window
 - **JetStream domains** -- a connection can target a JetStream domain or API prefix (leaf nodes behind a hub and vice versa), and the JetStream, KV and Object Store panes can switch domains ad hoc
 - **Requests module** -- Postman-style request templates in the sidebar: create, edit, duplicate, run, import/export as JSON. Repeat a request up to 10 000× with parallel senders and `{{i}}`/`{{ts}}`/`{{uuid}}`/`{{rand:1-100}}` variables and read throughput and latency percentiles. The publish drawer under a subject uses the same templates
 - **TLS with certificates** -- CA certificate, client certificate and key can be pasted or loaded from files per connection (mutual TLS), plus an insecure mode for test setups
