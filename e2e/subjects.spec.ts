@@ -290,6 +290,24 @@ test('a chart point opens the message behind it', async ({ page }) => {
   expect(errors, errors.join('\n')).toEqual([]);
 });
 
+test('one message is enough for the history rail', async ({ page }) => {
+  const { nc, subjectRoot } = suite;
+  const errors = await openApp(page);
+  await ensureConnected(page);
+
+  // A subject that has sent once. The rail is also the way back into what
+  // was recorded before this tab opened, so hiding it until a second
+  // message arrives hides the way there.
+  nc.publish(`${subjectRoot}.once.temp`, jc.encode({ temp: 21 }));
+  await page.getByPlaceholder('Filter subjects…').fill(`${subjectRoot}.once`);
+  await selectLeaf(page, 'temp');
+
+  await expect(page.getByText('1 newest first')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(/No older messages|Load older/)).toBeVisible();
+
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
 test('dragging across a chart zooms into that stretch of time', async ({ page }) => {
   const { nc, subjectRoot } = suite;
   const errors = await openApp(page);

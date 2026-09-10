@@ -18,6 +18,8 @@ interface Props {
   atOldest?: boolean;
   /** the view is full: what is older is recorded, this list just cannot hold it */
   atCap?: boolean;
+  /** told when the reader has scrolled back from the newest messages, and when they return */
+  onScrolledAway?: (away: boolean) => void;
   /** width in pixels; the pane is draggable */
   width: number;
 }
@@ -27,7 +29,7 @@ interface Props {
  * rendered newest first and pages backwards as it is scrolled, so the list
  * is not limited to what the first request brought.
  */
-export default function HistoryRail({ messages, active, onPick, onLoadOlder, loadingOlder, atOldest, atCap, width }: Props) {
+export default function HistoryRail({ messages, active, onPick, onLoadOlder, loadingOlder, atOldest, atCap, onScrolledAway, width }: Props) {
   const paging = !!onLoadOlder;
   return (
     <div className="shrink-0 border-r border-line flex flex-col min-h-0" style={{ width }}>
@@ -40,6 +42,7 @@ export default function HistoryRail({ messages, active, onPick, onLoadOlder, loa
         count={messages.length}
         rowHeight={ROW}
         onEndReached={onLoadOlder}
+        onScrolledAway={onScrolledAway}
         footer={
           paging && messages.length > 0 ? (
             <div className="h-9 flex items-center justify-center gap-1.5 text-xs text-faint border-t border-line">

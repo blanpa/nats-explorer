@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import type { NatsMessage } from 'shared';
 import { Check, Copy, Diff, Eraser, FolderTree, History, LineChart, MoreVertical, MousePointerClick, Send, X } from 'lucide-react';
@@ -190,6 +190,10 @@ function SingleSubjectView() {
     },
   );
 
+  // Which message the scroll is holding, so only that one is let go again;
+  // up here with the other hooks, because the return below is an early one.
+  const autoHeld = useRef<NatsMessage | null>(null);
+
   if (!subject) {
     return <EmptyState icon={MousePointerClick} title="Select a subject" description="Ctrl-click watches several subjects at once." />;
   }
@@ -210,16 +214,31 @@ function SingleSubjectView() {
   const rate = recentRate(messages);
 
   /**
-   * Paging back means looking at what happened, not at what is happening.
-   * So the first page older holds the message on screen instead of letting
-   * every arrival replace it: reading the payload of something from ten
-   * minutes ago while the viewer jumps to the newest twice a second is not
-   * reading it. The badge says it is held, and one click follows again.
+   * Reading back means looking at what happened, not at what is happening.
+   * So scrolling away from the newest messages holds the one on screen
+   * instead of letting every arrival replace it: reading the payload of
+   * something from ten minutes ago while the viewer jumps to the newest
+   * twice a second is not reading it. Scrolling back to the top follows
+   * again, and so does the badge that says it is held.
+   *
+   * The signal is the scroll and not the page of older messages, because a
+   * short list is at its end the moment it is drawn: paging in what follows
+   * would have frozen the view of every quiet subject before anyone had
+   * looked at it.
    */
-  const loadOlderHere = () => {
-    if (range) return loadOlderRange();
-    if (!pinned && latest) setSelectedMessage(latest);
-    return loadOlder(subject);
+  const holdWhileReadingBack = (away: boolean) => {
+    if (range) return;
+    if (away) {
+      if (!pinned && latest) {
+        autoHeld.current = latest;
+        setSelectedMessage(latest);
+      }
+    } else if (autoHeld.current && selectedMessage === autoHeld.current) {
+      // Only what the scroll held is released by it; a message the reader
+      // picked stays picked.
+      autoHeld.current = null;
+      setSelectedMessage(null);
+    }
   };
   // A selected branch (no messages of its own) shows what flows below it.
   const isBranch = shownMessages.length === 0 && shownBelow.length > 0;
@@ -480,17 +499,25 @@ function SingleSubjectView() {
       {rangeBar}
 
       <div className="flex-1 min-h-0 flex">
-        {showHistory && shownMessages.length > 1 && (
+        {/*
+          One message is enough for the rail. It used to want two -- a list
+          of one row says nothing the payload beside it does not -- but the
+          rail is also the way back into what was recorded, and a subject
+          that has sent one message since this tab opened may have thousands
+          on disk. Hiding it hid the way to them.
+        */}
+        {showHistory && shownMessages.length > 0 && (
           <>
             <HistoryRail
               messages={shownMessages}
               active={display}
               width={railWidth}
               onPick={m => setSelectedMessage(m === latest ? null : m)}
-              onLoadOlder={loadOlderHere}
+              onLoadOlder={range ? loadOlderRange : () => loadOlder(subject)}
               loadingOlder={range ? loadingOlderRange : !!view?.loadingOlder}
               atOldest={range ? !rangedData?.more : !!view?.atOldest}
               atCap={!range && messages.length >= MAX_LOADED_MESSAGES}
+              onScrolledAway={holdWhileReadingBack}
             />
             <ResizeHandle
               label="history"
