@@ -64,44 +64,88 @@ interface ConfirmOptions {
   danger?: boolean;
 }
 
+/**
+ * One way out of a choice dialog. Several of them turn the question from
+ * "are you sure" into "which one", which is what an action with more than
+ * one possible scope needs: guessing the scope for the user is how a button
+ * meant for one subject ends up clearing everything.
+ */
+export interface ChoiceAction {
+  key: string;
+  label: string;
+  danger?: boolean;
+  /** The one the dialog opens on; the safest, not the widest. */
+  primary?: boolean;
+}
+
+interface ChoiceOptions {
+  title: string;
+  message?: ReactNode;
+  cancelLabel?: string;
+  actions: ChoiceAction[];
+}
+
 interface ConfirmState {
-  pending: (ConfirmOptions & { resolve: (ok: boolean) => void }) | null;
-  ask: (opts: ConfirmOptions) => Promise<boolean>;
-  settle: (ok: boolean) => void;
+  pending: (ChoiceOptions & { resolve: (key: string | null) => void }) | null;
+  ask: (opts: ChoiceOptions) => Promise<string | null>;
+  settle: (key: string | null) => void;
 }
 
 const useConfirmStore = create<ConfirmState>((set, get) => ({
   pending: null,
   ask: opts =>
-    new Promise<boolean>(resolve => {
-      get().pending?.resolve(false);
+    new Promise<string | null>(resolve => {
+      get().pending?.resolve(null);
       set({ pending: { ...opts, resolve } });
     }),
-  settle: ok => {
-    get().pending?.resolve(ok);
+  settle: key => {
+    get().pending?.resolve(key);
     set({ pending: null });
   },
 }));
 
-export const confirm = (opts: ConfirmOptions) => useConfirmStore.getState().ask(opts);
+/** A yes/no question. */
+export const confirm = async (opts: ConfirmOptions): Promise<boolean> => {
+  const key = await useConfirmStore.getState().ask({
+    title: opts.title,
+    message: opts.message,
+    cancelLabel: opts.cancelLabel,
+    actions: [{ key: 'ok', label: opts.confirmLabel ?? 'Confirm', danger: opts.danger, primary: true }],
+  });
+  return key === 'ok';
+};
+
+/** A question with more than one answer; resolves to the chosen key, or null. */
+export const choose = (opts: ChoiceOptions) => useConfirmStore.getState().ask(opts);
 
 export function ConfirmHost() {
   const pending = useConfirmStore(s => s.pending);
   const settle = useConfirmStore(s => s.settle);
+  const actions = pending?.actions ?? [];
+  // With one action the cancel button is the safe default; with a choice the
+  // dialog opens on the action marked primary, so Enter takes the narrow one.
+  const autoFocusCancel = actions.length === 1 && !actions[0].danger;
   return (
     <Dialog
       open={!!pending}
-      onOpenChange={open => !open && settle(false)}
+      onOpenChange={open => !open && settle(null)}
       title={pending?.title ?? ''}
       width="sm"
       footer={
         <>
-          <Button variant="ghost" onClick={() => settle(false)} autoFocus={!pending?.danger}>
+          <Button variant="ghost" onClick={() => settle(null)} autoFocus={autoFocusCancel}>
             {pending?.cancelLabel ?? 'Cancel'}
           </Button>
-          <Button variant={pending?.danger ? 'danger-solid' : 'primary'} onClick={() => settle(true)} autoFocus={pending?.danger}>
-            {pending?.confirmLabel ?? 'Confirm'}
-          </Button>
+          {actions.map(a => (
+            <Button
+              key={a.key}
+              variant={a.danger ? 'danger-solid' : 'primary'}
+              onClick={() => settle(a.key)}
+              autoFocus={!autoFocusCancel && (a.primary ?? false)}
+            >
+              {a.label}
+            </Button>
+          ))}
         </>
       }
     >

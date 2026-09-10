@@ -2,13 +2,13 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from '
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Eraser, Eye, EyeOff, Network, Quote } from 'lucide-react';
 import { useStore } from '../../store';
-import { clearHistory } from '../../lib/feed';
+import { clearHistory, clearSubject } from '../../lib/feed';
 import { errorMessage } from '../../lib/api';
 import { cn, formatCount, previewPayload } from '../../lib/utils';
 import { toast } from '../ui/Toast';
 import { IconButton } from '../ui/Button';
 import { SearchInput } from '../ui/Input';
-import { confirm } from '../ui/Dialog';
+import { choose } from '../ui/Dialog';
 import { EmptyState, PaneHeader } from '../ui/misc';
 import { toneClass } from '../ui/tone';
 import { ancestorsOf, type FlatNode } from './tree';
@@ -164,17 +164,40 @@ export default function SubjectTree() {
   // Clearing everything empties the tree as well: a subject with a count and
   // no messages behind it says less than an empty tree. It reaches the disk
   // too, so it is worth asking first.
-  const clearAll = async () => {
-    const ok = await confirm({
-      title: 'Clear the whole message history?',
-      message: 'Every recorded message is forgotten, in memory and on disk, and the subject tree starts over. Subjects come back as they send again.',
-      confirmLabel: 'Clear',
-      danger: true,
+  //
+  // With a subject selected the dialog asks which scope rather than assuming
+  // one: this button sits in the tree header, next to the selection, and
+  // used to clear everything without saying so -- clearing one branch and
+  // watching an unrelated one disappear with it.
+  const clearFromHeader = async () => {
+    const scope = await choose({
+      title: 'Clear message history',
+      message: selected ? (
+        <>
+          Recorded messages are forgotten, in memory and on disk, and the tree starts over with them. Subjects come back as they send again.
+          <br />
+          <br />
+          <span className="font-mono text-fg">{selected}</span> is selected.
+        </>
+      ) : (
+        'Every recorded message is forgotten, in memory and on disk, and the subject tree starts over. Subjects come back as they send again.'
+      ),
+      actions: selected
+        ? [
+            { key: 'subject', label: 'Only the selected subject', danger: true, primary: true },
+            { key: 'all', label: 'Everything', danger: true },
+          ]
+        : [{ key: 'all', label: 'Clear everything', danger: true, primary: true }],
     });
-    if (!ok) return;
+    if (!scope) return;
     try {
-      await clearHistory();
-      toast.success('History cleared', 'The tree starts over with the next message.');
+      if (scope === 'subject' && selected) {
+        const cleared = await clearSubject(selected, true);
+        toast.success('History cleared', `${selected} and everything below it: ${cleared} ${cleared === 1 ? 'subject' : 'subjects'} forgotten.`);
+      } else {
+        await clearHistory();
+        toast.success('History cleared', 'The tree starts over with the next message.');
+      }
     } catch (err) {
       toast.error('Clear failed', errorMessage(err));
     }
@@ -264,7 +287,7 @@ export default function SubjectTree() {
               <ChevronsDownUp size={13} />
             </IconButton>
             {canWrite && (
-              <IconButton label="Clear message history" size="xs" onClick={clearAll}>
+              <IconButton label="Clear message history" size="xs" onClick={clearFromHeader}>
                 <Eraser size={13} />
               </IconButton>
             )}
