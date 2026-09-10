@@ -38,7 +38,7 @@ Connect to `nats://localhost:4230` in the connection dialog.
 | `bun run --filter client test` | Vitest: pure unit tests in Node, component tests (`*.test.tsx`, `@vitest-environment jsdom`) with Testing Library |
 | `cd go-server && go test -race ./...` | Go unit and end-to-end tests (embedded nats-server) |
 | `bun run test:e2e` | Playwright suite, one file per module in `e2e/` with shared helpers in `support.ts` against `http://localhost:3002` (`NE_URL`, `NATS_URL`, `PW_CHROME`) |
-| `scripts/build-desktop.sh linux|windows|macos` | Desktop packages for one platform (`--docker` runs Linux/Windows in the builder image) |
+| `scripts/build-desktop.sh` with `linux`, `windows` or `macos` | Desktop packages for one platform (`--docker` runs Linux and Windows in the builder image) |
 | `scripts/smoke-desktop.sh <binary>` | Launches a desktop build headless and checks API, UI, websocket and settings persistence |
 
 ---

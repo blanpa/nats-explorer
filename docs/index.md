@@ -57,8 +57,9 @@ filterable, with the last value and the rate per subject. Tuned for tens of
 thousands of subjects at tens of thousands of messages per second.
 
 **History that outlives the tab.** An optional SQLite copy of every message, with
-retention, ranges from 15 minutes to 7 days, full-text search across subjects and
-minute aggregates behind the long charts.
+a retention, ranges from 15 minutes to 30 days -- or a window dragged out of a
+chart -- full-text search across subjects, and minute aggregates behind the long
+charts.
 
 **JetStream, KV, Object Store.** Streams with their consumers, replication and
 placement; buckets and stores as browsable, editable lists; JetStream domains for
@@ -67,7 +68,7 @@ hub and leaf setups.
 **Filter and schema.** A [CEL](https://cel.dev/) expression such as
 `payload.temp > 80 && subject.endsWith(".temp")` narrows tree, lists and charts.
 The fields of a subject are read back from its own messages, with types, ranges
-and drift.
+and a marker when newer messages drift from older ones.
 
 **Alerts.** Rules watch a subject pattern for an expression that holds or for a
 subject that fell silent. They run in the backend, so they keep firing without an
