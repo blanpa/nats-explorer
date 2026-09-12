@@ -176,6 +176,12 @@ export interface PublishInput {
   subject: string;
   payload: string;
   headers?: Record<string, string[]>;
+  /**
+   * "binary": the payload is base64 and the bytes behind it are what gets
+   * sent. Hex, base64 and protobuf are written in the browser and encoded
+   * there, because JSON has no way to carry bytes.
+   */
+  payloadType?: 'binary';
 }
 
 export interface RequestInput extends PublishInput {

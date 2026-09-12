@@ -3,7 +3,9 @@ package handler
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	mrand "math/rand"
 	"net/http"
@@ -107,6 +109,33 @@ type runResult struct {
 	Stopped      bool           `json:"stopped"`
 }
 
+// errLabel names a failure the way a single request does. A deadline on
+// the context is what the reader calls a timeout, and one module must not
+// have two words for the same thing: "28x context deadline exceeded" and
+// "nats: timeout" were the same run against the same service.
+func errLabel(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return nats.ErrTimeout.Error()
+	}
+	return err.Error()
+}
+
+// payloadBytes turns a body's payload into the bytes to send. A payload
+// written as hex, base64 or protobuf arrives base64-encoded -- JSON cannot
+// carry bytes -- and is decoded here. The placeholders are expanded only in
+// text: a {{uuid}} inside an encoded message is not a placeholder, it is
+// whatever those bytes happen to spell.
+func payloadBytes(payload, payloadType string, i int, now time.Time, rnd *mrand.Rand) ([]byte, error) {
+	if payloadType == "binary" {
+		data, err := base64.StdEncoding.DecodeString(payload)
+		if err != nil {
+			return nil, fmt.Errorf("payload is not base64: %w", err)
+		}
+		return data, nil
+	}
+	return []byte(expandTemplate(payload, i, now, rnd)), nil
+}
+
 var templateVar = regexp.MustCompile(`\{\{\s*(i|ts|uuid|rand:(-?\d+)-(-?\d+))\s*\}\}`)
 
 // expandTemplate substitutes the run variables. i is 1-based.
@@ -196,6 +225,15 @@ func (h *PublishHandler) Run(w http.ResponseWriter, r *http.Request) {
 	if timeout > 60*time.Second {
 		timeout = 60 * time.Second
 	}
+	// An encoded payload is the same bytes for every message of the run, so
+	// it is decoded once, before anything is sent: a run that cannot send is
+	// a bad request, not a thousand failures.
+	if body.PayloadType == "binary" {
+		if _, err := payloadBytes(body.Payload, body.PayloadType, 1, time.Now(), mrand.New(mrand.NewSource(1))); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	interval := time.Duration(body.IntervalMs) * time.Millisecond
 	if interval < 0 {
 		interval = 0
@@ -234,7 +272,8 @@ func (h *PublishHandler) Run(w http.ResponseWriter, r *http.Request) {
 			}
 			first = false
 			now := time.Now()
-			msg := &nats.Msg{Subject: expandTemplate(body.Subject, i, now, rnd), Data: []byte(expandTemplate(body.Payload, i, now, rnd))}
+			data, _ := payloadBytes(body.Payload, body.PayloadType, i, now, rnd)
+			msg := &nats.Msg{Subject: expandTemplate(body.Subject, i, now, rnd), Data: data}
 			if len(body.Headers) > 0 {
 				msg.Header = make(nats.Header)
 				for k, vals := range body.Headers {
@@ -258,9 +297,9 @@ func (h *PublishHandler) Run(w http.ResponseWriter, r *http.Request) {
 			res.Sent++
 			if err != nil {
 				res.Errors++
-				res.ErrorCounts[err.Error()]++
+				res.ErrorCounts[errLabel(err)]++
 				if len(res.ErrorSamples) < runSampleErrors {
-					res.ErrorSamples = append(res.ErrorSamples, runError{I: i, Error: err.Error()})
+					res.ErrorSamples = append(res.ErrorSamples, runError{I: i, Error: errLabel(err)})
 				}
 			} else {
 				res.OK++

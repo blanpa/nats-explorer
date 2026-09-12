@@ -1,5 +1,6 @@
 import { uuid } from './utils';
 import { persist } from './storage';
+import { PAYLOAD_FORMATS, type PayloadFormat } from './payloadFormat';
 
 export type RequestMode = 'publish' | 'request';
 
@@ -15,6 +16,8 @@ export interface SavedRequest {
   mode: RequestMode;
   subject: string;
   payload: string;
+  /** what the payload text is; absent means JSON, which is what it was before */
+  format?: PayloadFormat;
   headers: HeaderPair[];
   timeout?: number;
   count?: number;
@@ -22,6 +25,8 @@ export interface SavedRequest {
   intervalMs?: number;
   updatedAt: number;
 }
+
+const isFormat = (v: unknown): v is PayloadFormat => PAYLOAD_FORMATS.some(f => f.id === v);
 
 const STORAGE_KEY = 'ne.requests.v1';
 const COLLECTION_MARKER = 'nats-explorer-requests';
@@ -86,6 +91,7 @@ export function parseCollection(text: string): SavedRequest[] {
       mode: r.mode === 'request' ? 'request' : 'publish',
       subject: r.subject,
       payload: typeof r.payload === 'string' ? r.payload : '',
+      format: isFormat(r.format) ? r.format : undefined,
       headers,
       timeout: num(r.timeout),
       count: num(r.count),
@@ -102,6 +108,7 @@ export interface RequestDraft {
   mode: RequestMode;
   subject: string;
   payload: string;
+  format: PayloadFormat;
   headers: HeaderPair[];
   timeout: number;
   count: number;
@@ -110,7 +117,7 @@ export interface RequestDraft {
 }
 
 export function emptyDraft(subject = ''): RequestDraft {
-  return { mode: 'publish', subject, payload: '', headers: [], timeout: 5000, count: 1, concurrency: 1, intervalMs: 0 };
+  return { mode: 'publish', subject, payload: '', format: 'json', headers: [], timeout: 5000, count: 1, concurrency: 1, intervalMs: 0 };
 }
 
 export function draftFromSaved(t: SavedRequest): RequestDraft {
@@ -118,6 +125,7 @@ export function draftFromSaved(t: SavedRequest): RequestDraft {
     mode: t.mode,
     subject: t.subject,
     payload: t.payload,
+    format: t.format ?? 'json',
     headers: t.headers.map(h => ({ ...h })),
     timeout: t.timeout ?? 5000,
     count: t.count ?? 1,
@@ -135,6 +143,9 @@ export function savedFromDraft(d: RequestDraft, base: Pick<SavedRequest, 'id' | 
     mode: d.mode,
     subject: d.subject.trim(),
     payload: d.payload,
+    // JSON is what a template without a format always was; writing it out
+    // would mark every old template as changed.
+    format: d.format === 'json' ? undefined : d.format,
     headers: d.headers.filter(h => h.key.trim()),
     timeout: d.mode === 'request' ? d.timeout : undefined,
     count: repeated ? d.count : undefined,
@@ -148,6 +159,16 @@ export function savedFromDraft(d: RequestDraft, base: Pick<SavedRequest, 'id' | 
 export function draftDiffers(d: RequestDraft, t: SavedRequest): boolean {
   const a = savedFromDraft(d, t);
   const norm = (x: SavedRequest) =>
-    JSON.stringify([x.mode, x.subject, x.payload, x.headers, x.timeout ?? null, x.count ?? null, x.concurrency ?? null, x.intervalMs ?? null]);
+    JSON.stringify([
+      x.mode,
+      x.subject,
+      x.payload,
+      x.format ?? null,
+      x.headers,
+      x.timeout ?? null,
+      x.count ?? null,
+      x.concurrency ?? null,
+      x.intervalMs ?? null,
+    ]);
   return norm(a) !== norm({ ...t, headers: t.headers.filter(h => h.key.trim()) });
 }

@@ -5,7 +5,9 @@ import { api, errorMessage } from '../../lib/api';
 import { schemasApi } from '../../lib/api.schemas';
 import type { RequestDraft } from '../../lib/savedRequests';
 import { useStore } from '../../store';
-import { cn, formatDurationMs, formatNumber, previewPayload, prettyJson, tryParseJson } from '../../lib/utils';
+import { cn, formatDurationMs, formatNumber, previewPayload, tryParseJson } from '../../lib/utils';
+import { isBinaryFormat, PAYLOAD_FORMATS, payloadProblem, prettyPayload, toWire, wireLength } from '../../lib/payloadFormat';
+import { useDecoders } from '../../lib/decoders';
 import { Button, IconButton } from '../ui/Button';
 import { Input, Select, Textarea } from '../ui/Input';
 import { Kbd, Segmented, StatStrip, StatTile } from '../ui/misc';
@@ -14,6 +16,17 @@ import LatencyHistogram from './LatencyHistogram';
 import { useCanWrite } from '../../lib/auth';
 
 export const MAX_COUNT = 10_000;
+
+/** What an empty editor suggests, per format. */
+const PAYLOAD_PLACEHOLDERS: Record<RequestDraft['format'], string> = {
+  json: '{"hello": "world"}',
+  text: 'hello',
+  xml: '<reading><celsius>21.5</celsius></reading>',
+  html: '<p>hello</p>',
+  hex: 'de ad be ef',
+  base64: 'aGVsbG8=',
+  protobuf: '{"id": "a", "celsius": 21}',
+};
 
 /** Sends one request/publish or a repeated run and keeps the outcome. */
 export function useRequestRunner() {
@@ -37,8 +50,11 @@ export function useRequestRunner() {
       const k = h.key.trim();
       if (k) (hdrs[k] ||= []).push(h.value);
     }
-    const body = { subject: draft.subject.trim(), payload: draft.payload, headers: Object.keys(hdrs).length ? hdrs : undefined };
     try {
+      // What the editor holds becomes bytes here: hex, base64 and protobuf
+      // are written as text and cannot travel as one.
+      const wire = await toWire(draft.format, draft.payload, draft.subject.trim(), useDecoders.getState().rules);
+      const body = { subject: draft.subject.trim(), ...wire, headers: Object.keys(hdrs).length ? hdrs : undefined };
       if (draft.count > 1) {
         setRun(
           await api.run(connId, {
@@ -124,9 +140,13 @@ export function RequestForm({ draft, onChange, onSend, busy, canSend, connId, on
   const canWrite = useCanWrite();
   const { connected } = useSendConnection(connId);
   const patch = (p: Partial<RequestDraft>) => onChange({ ...draft, ...p });
-  const trimmed = draft.payload.trim();
-  const jsonValid = trimmed === '' || (!trimmed.startsWith('{') && !trimmed.startsWith('[')) || tryParseJson(draft.payload) !== undefined;
-  const schemaCheck = useSchemaCheck(draft.subject, draft.payload);
+  const format = draft.format;
+  const problem = payloadProblem(format, draft.payload);
+  const tidy = prettyPayload(format, draft.payload);
+  const bytes = wireLength(format, draft.payload);
+  // A pinned schema describes JSON payloads; it has nothing to say about the
+  // bytes of a protobuf message or the text of an XML body.
+  const schemaCheck = useSchemaCheck(format === 'json' ? draft.subject : '', draft.payload);
   const repeated = draft.count > 1;
 
   return (
@@ -278,9 +298,9 @@ export function RequestForm({ draft, onChange, onSend, busy, canSend, connId, on
             rows={payloadRows}
             value={draft.payload}
             onChange={e => patch({ payload: e.target.value })}
-            placeholder='{"hello": "world"}'
+            placeholder={PAYLOAD_PLACEHOLDERS[format]}
             aria-label="Payload"
-            className={!jsonValid ? 'border-warn/60' : undefined}
+            className={cn(problem && 'border-warn/60', isBinaryFormat(format) && 'font-mono')}
             onKeyDown={e => {
               if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
@@ -289,11 +309,37 @@ export function RequestForm({ draft, onChange, onSend, busy, canSend, connId, on
             }}
           />
           <div className="flex items-center gap-2 text-xs">
-            {!jsonValid ? (
-              <span className="text-warn">Looks like JSON but does not parse. It will be sent as-is.</span>
+            {/*
+              What the editor holds. NATS carries bytes and says nothing about
+              them, so this is the author's word on what is being written --
+              and for hex, base64 and protobuf it is also how the text becomes
+              the bytes that travel.
+            */}
+            <Select
+              inputSize="sm"
+              className="w-28"
+              value={format}
+              onChange={e => patch({ format: e.target.value as RequestDraft['format'] })}
+              aria-label="Payload format"
+              title={PAYLOAD_FORMATS.find(f => f.id === format)?.hint}
+            >
+              {PAYLOAD_FORMATS.map(f => (
+                <option key={f.id} value={f.id}>
+                  {f.label}
+                </option>
+              ))}
+            </Select>
+            {problem ? (
+              <span className="text-warn truncate" title={problem}>
+                {problem}
+              </span>
             ) : schemaCheck ? (
               <span className="text-warn truncate" title={`Pinned for ${schemaCheck.pattern}: ${schemaCheck.violations.join('; ')}`}>
                 Does not match the pinned schema: {schemaCheck.violations.join('; ')}
+              </span>
+            ) : isBinaryFormat(format) ? (
+              <span className="text-faint truncate" title={PAYLOAD_FORMATS.find(f => f.id === format)?.hint}>
+                {PAYLOAD_FORMATS.find(f => f.id === format)?.hint}
               </span>
             ) : (
               <span className="text-faint font-mono" title="Replaced per message in subject, payload and headers">
@@ -301,13 +347,15 @@ export function RequestForm({ draft, onChange, onSend, busy, canSend, connId, on
               </span>
             )}
             <span className="flex-1" />
-            <span className="text-faint font-mono">{new TextEncoder().encode(draft.payload).length} B</span>
+            {/* The bytes that will travel, which for hex is not the number of
+                characters typed; nothing at all while they are not readable. */}
+            <span className="text-faint font-mono">{bytes === null ? '–' : `${formatNumber(bytes)} B`}</span>
             <Button
               size="xs"
               variant="ghost"
               icon={<Braces size={12} />}
-              disabled={tryParseJson(draft.payload) === undefined}
-              onClick={() => patch({ payload: prettyJson(draft.payload) })}
+              disabled={tidy === null || tidy === draft.payload}
+              onClick={() => tidy !== null && patch({ payload: tidy })}
             >
               Format
             </Button>

@@ -543,6 +543,60 @@ func TestServerEndToEnd(t *testing.T) {
 		t.Fatalf("run without responders: status %d, %+v", st, run)
 	}
 
+	// A run that times out says "timeout", the same word a single request
+	// uses; the context's "deadline exceeded" is the same thing said twice.
+	slow, _ := nc.Subscribe("slow.one", func(m *nats.Msg) {
+		time.Sleep(300 * time.Millisecond)
+		m.Respond(m.Data)
+	})
+	defer slow.Unsubscribe()
+	nc.Flush()
+	var timedOut struct {
+		Errors      int
+		ErrorCounts map[string]int `json:"errorCounts"`
+	}
+	if st := api.do("POST", "/api/run"+q, map[string]interface{}{"mode": "request", "subject": "slow.one", "count": 1, "timeout": 50}, &timedOut); st != 200 || timedOut.Errors != 1 {
+		t.Fatalf("slow run: status %d, %+v", st, timedOut)
+	}
+	if timedOut.ErrorCounts["nats: timeout"] != 1 {
+		t.Fatalf("a run's timeout should read like a request's: %+v", timedOut.ErrorCounts)
+	}
+
+	// Bytes that no JSON string can hold -- hex, base64 and protobuf are
+	// written in the browser and arrive base64-encoded.
+	if st := api.do("POST", "/api/publish"+q, map[string]interface{}{"subject": "bytes.raw", "payload": "3q2+7w==", "payloadType": "binary"}, nil); st != 200 {
+		t.Fatalf("binary publish: %d", st)
+	}
+	var raw struct {
+		Messages []map[string]interface{} `json:"messages"`
+	}
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		api.do("GET", "/api/history"+q+"&subject=bytes.raw", nil, &raw)
+		if len(raw.Messages) == 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(raw.Messages) != 1 || raw.Messages[0]["payloadType"] != "binary" || raw.Messages[0]["payload"] != "3q2+7w==" {
+		t.Fatalf("binary payload did not arrive as the four bytes it was: %+v", raw.Messages)
+	}
+	if st := api.do("POST", "/api/publish"+q, map[string]interface{}{"subject": "bytes.raw", "payload": "not base64!", "payloadType": "binary"}, nil); st != 400 {
+		t.Fatalf("a payload that is not base64 must be a bad request, got %d", st)
+	}
+
+	// One request expands the placeholders too: they are offered under the
+	// payload whatever the repeat count says, and a literal {{uuid}} in an
+	// idempotency key is nobody's intention.
+	var single map[string]interface{}
+	if st := api.do("POST", "/api/request"+q, map[string]interface{}{"subject": "echo.{{i}}", "payload": `{"id":"{{uuid}}","n":{{i}}}`, "timeout": 2000}, &single); st != 200 {
+		t.Fatalf("single request: %d %+v", st, single)
+	}
+	payload, _ := single["payload"].(string)
+	if strings.Contains(payload, "{{") || !strings.Contains(payload, `"n":1`) {
+		t.Fatalf("placeholders not expanded in a single request: %q", payload)
+	}
+
 	// JetStream domains: a connection configured for the "hub" domain sees
 	// the same streams; a per-call override to a domain nobody serves fails.
 	if st := api.do("POST", "/api/connect", map[string]interface{}{

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	mrand "math/rand"
 	"net/http"
 	"time"
 
@@ -20,6 +21,10 @@ type publishBody struct {
 	Payload string              `json:"payload"`
 	Headers map[string][]string `json:"headers,omitempty"`
 	Timeout int                 `json:"timeout,omitempty"` // ms, request only
+	// PayloadType "binary" means Payload is base64 and the bytes are what
+	// gets sent: hex, base64 and protobuf are written in the browser and
+	// arrive here as bytes, because JSON has no way to carry them otherwise.
+	PayloadType string `json:"payloadType,omitempty"`
 }
 
 func (h *PublishHandler) parse(w http.ResponseWriter, r *http.Request) (*nats.Conn, *nats.Msg, publishBody, bool) {
@@ -46,12 +51,24 @@ func (h *PublishHandler) parse(w http.ResponseWriter, r *http.Request) (*nats.Co
 		return nil, nil, body, false
 	}
 
-	msg := &nats.Msg{Subject: body.Subject, Data: []byte(body.Payload)}
+	// The placeholders are offered under the payload whether a message is
+	// sent once or a thousand times; a single send expanded none of them and
+	// published the literal `{{uuid}}`, which is exactly the value nobody
+	// wants in an idempotency key. i is 1: this is the first message, and
+	// the only one.
+	now := time.Now()
+	rnd := mrand.New(mrand.NewSource(now.UnixNano()))
+	data, err := payloadBytes(body.Payload, body.PayloadType, 1, now, rnd)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return nil, nil, body, false
+	}
+	msg := &nats.Msg{Subject: expandTemplate(body.Subject, 1, now, rnd), Data: data}
 	if len(body.Headers) > 0 {
 		msg.Header = make(nats.Header)
 		for k, vals := range body.Headers {
 			for _, v := range vals {
-				msg.Header.Add(k, v)
+				msg.Header.Add(k, expandTemplate(v, 1, now, rnd))
 			}
 		}
 	}

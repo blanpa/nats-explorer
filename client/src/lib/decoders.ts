@@ -102,6 +102,29 @@ function plain(v: unknown): unknown {
   return out;
 }
 
+/**
+ * Encodes a value with a rule's schema: the way back through the same
+ * `.proto` the payloads are read with. Only protobuf, because that is the
+ * one format where writing a message by hand is otherwise out of reach --
+ * MessagePack and Avro can wait until someone needs them.
+ *
+ * Errors are thrown rather than returned: a payload that cannot be encoded
+ * must not be sent, which is the opposite of a decode, where showing the
+ * bytes as they came is still an answer.
+ */
+export async function encodeWith(rule: DecoderRule, value: unknown): Promise<Uint8Array> {
+  if (rule.format !== 'protobuf') throw new Error(`${FORMAT_LABELS[rule.format]} payloads cannot be written here yet`);
+  const protobuf = await import('protobufjs');
+  if (!rule.schema?.trim()) throw new Error('paste the .proto source into the rule');
+  const { root } = protobuf.parse(rule.schema, { keepCase: true });
+  const name = rule.messageType?.trim();
+  const type = name ? root.lookupType(name) : firstMessage(root);
+  if (!type) throw new Error('the .proto defines no message type');
+  const bad = type.verify(value as Record<string, unknown>);
+  if (bad) throw new Error(bad);
+  return type.encode(type.fromObject(value as Record<string, unknown>)).finish();
+}
+
 /** Decodes bytes with a rule; compile errors and decode errors both come back as `ok: false`. */
 export async function decodeWith(rule: DecoderRule, bytes: Uint8Array): Promise<Decoded> {
   const key = cacheKey(rule);
