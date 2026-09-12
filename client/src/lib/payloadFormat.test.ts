@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { type DecoderRule, newRule } from './decoders';
-import { isBinaryFormat, parseBase64, parseHex, payloadProblem, prettyPayload, prettyXml, toWire, wireLength } from './payloadFormat';
+import { isBinaryFormat, markupOf, parseBase64, parseHex, payloadProblem, prettyPayload, prettyXml, toWire, wireLength } from './payloadFormat';
 
 const bytes = (...n: number[]) => new Uint8Array(n);
 
@@ -71,11 +71,30 @@ describe('prettyPayload', () => {
     expect(prettyXml('<a><b>1</b></a>')).toBe('<a>\n  <b>1</b>\n</a>');
     expect(prettyPayload('hex', 'DEADBEEF')).toBe('de ad be ef');
     expect(prettyPayload('text', 'x')).toBeNull();
-    expect(prettyPayload('html', '<p>x</p>')).toBeNull();
+    expect(prettyPayload('html', '<ul><li>a</li><li>b</li></ul>')).toBe('<ul>\n  <li>a</li>\n  <li>b</li>\n</ul>');
   });
   it('has nothing to tidy in what does not parse', () => {
     expect(prettyPayload('json', '{oops')).toBeNull();
     expect(prettyPayload('hex', 'abc')).toBeNull();
+  });
+});
+
+describe('markupOf', () => {
+  it('tells the two markups apart by their first tag', () => {
+    expect(markupOf('<?xml version="1.0"?><a/>')).toBe('xml');
+    expect(markupOf('<!DOCTYPE html><html></html>')).toBe('html');
+    expect(markupOf('<div class="x">hi</div>')).toBe('html');
+    expect(markupOf('<reading><celsius>21</celsius></reading>')).toBe('xml');
+    expect(markupOf('{"a":1}')).toBeNull();
+    expect(markupOf('  not markup')).toBeNull();
+  });
+});
+
+describe('prettyXml', () => {
+  it('does not indent behind a tag that never closes', () => {
+    // <br> and friends have no closing tag; treating them as open drifts
+    // every line below them one level to the right.
+    expect(prettyXml('<p>a<br><span>b</span></p>')).toContain('  <span>b</span>');
   });
 });
 

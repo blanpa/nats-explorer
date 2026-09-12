@@ -5,10 +5,11 @@ import { cn, copyToClipboard, formatBytes, hexDump, payloadBytes, prettyJson, tr
 import { IconButton } from '../ui/Button';
 import { Segmented } from '../ui/misc';
 import { type Decoded, decodeWith, findRule, useDecoders } from '../../lib/decoders';
+import { markupOf, prettyXml, toBase64, wrapBase64 } from '../../lib/payloadFormat';
 import DecoderDialog from './DecoderDialog';
 import { JsonTree } from './JsonTree';
 
-type ViewMode = 'auto' | 'raw' | 'hex' | 'decoded';
+type ViewMode = 'auto' | 'raw' | 'hex' | 'base64' | 'markup' | 'decoded';
 
 const MAX_TREE_BYTES = 256 * 1024;
 
@@ -33,7 +34,10 @@ export default function PayloadViewer({ payload, type, subject, size, onFieldSel
   const [copied, setCopied] = useState(false);
 
   const parsed = useMemo(() => (type === 'json' && payload.length <= MAX_TREE_BYTES ? tryParseJson(payload) : undefined), [payload, type]);
-  const bytes = useMemo(() => (mode === 'hex' ? payloadBytes(payload, type) : null), [mode, payload, type]);
+  const bytes = useMemo(() => (mode === 'hex' || mode === 'base64' ? payloadBytes(payload, type) : null), [mode, payload, type]);
+  // A payload that is markup is offered as itself: XML and HTML are read by
+  // their structure, and one line of minified tags is not that.
+  const markup = useMemo(() => (type === 'string' ? markupOf(payload) : null), [payload, type]);
 
   // A decoder rule for the subject turns binary payloads into a tree; "auto" prefers it.
   const rules = useDecoders(s => s.rules);
@@ -53,7 +57,16 @@ export default function PayloadViewer({ payload, type, subject, size, onFieldSel
   const showDecoded = !!rule && (mode === 'decoded' || (mode === 'auto' && type !== 'json'));
 
   const copy = async () => {
-    const text = type === 'binary' ? payload : mode === 'auto' && parsed !== undefined ? prettyJson(payload) : payload;
+    const text =
+      mode === 'base64' && bytes
+        ? toBase64(bytes)
+        : mode === 'markup'
+          ? prettyXml(payload)
+          : type === 'binary'
+            ? payload
+            : mode === 'auto' && parsed !== undefined
+              ? prettyJson(payload)
+              : payload;
     if (await copyToClipboard(text)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
@@ -76,6 +89,16 @@ export default function PayloadViewer({ payload, type, subject, size, onFieldSel
       );
   } else if (mode === 'hex') {
     body = <pre className="font-mono text-xs leading-[1.6] text-muted whitespace-pre">{bytes ? hexDump(bytes) : ''}</pre>;
+  } else if (mode === 'base64') {
+    // The bytes as base64, wrapped: this is the form that survives a paste
+    // into a terminal, a ticket or another tool.
+    body = <pre className="font-mono text-xs leading-[1.6] text-muted whitespace-pre-wrap break-all">{bytes ? wrapBase64(toBase64(bytes)) : ''}</pre>;
+  } else if (mode === 'markup') {
+    // Source, never rendered: a payload is someone else's text, and this
+    // window is not the place to run it.
+    body = (
+      <pre className={cn('font-mono text-sm leading-[1.55] text-fg', wrap ? 'whitespace-pre-wrap break-all' : 'whitespace-pre')}>{prettyXml(payload)}</pre>
+    );
   } else if (mode === 'raw' || type === 'binary' || parsed === undefined) {
     if (type === 'binary' && mode !== 'raw') {
       body = (
@@ -114,8 +137,11 @@ export default function PayloadViewer({ payload, type, subject, size, onFieldSel
           options={[
             { id: 'auto', label: type === 'json' ? 'JSON' : type === 'binary' ? 'Binary' : 'Text' },
             ...(rule ? [{ id: 'decoded' as const, label: 'Decoded' }] : []),
+            // Only ever one of the two: a payload is XML or it is HTML.
+            ...(markup ? [{ id: 'markup' as const, label: markup === 'xml' ? 'XML' : 'HTML' }] : []),
             { id: 'raw', label: 'Raw' },
             { id: 'hex', label: 'Hex' },
+            { id: 'base64', label: 'Base64' },
           ]}
         />
         {rule && <span className="text-xs text-faint font-mono truncate">{rule.pattern}</span>}

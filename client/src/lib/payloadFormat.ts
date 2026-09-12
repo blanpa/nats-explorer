@@ -64,11 +64,15 @@ export function parseBase64(text: string): Uint8Array | null {
   }
 }
 
-const toBase64 = (bytes: Uint8Array) => {
+/** Bytes as base64: the form that survives a paste into any other tool. */
+export const toBase64 = (bytes: Uint8Array) => {
   let bin = '';
   for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin);
 };
+
+/** The same, in lines short enough to read. */
+export const wrapBase64 = (text: string) => text.match(/.{1,76}/g)?.join('\n') ?? text;
 
 /**
  * How many bytes the message will carry, or null when the text is not that
@@ -128,7 +132,23 @@ export function payloadProblem(format: PayloadFormat, text: string): string | nu
   }
 }
 
-/** Indents XML by its tags. Text inside a tag stays on its line. */
+/**
+ * Which markup a payload is written in, from its first tag: `<?xml` and a
+ * root element that is not an HTML one say XML, `<!doctype html>` and the
+ * usual suspects say HTML. Null when it is not markup at all.
+ */
+export function markupOf(text: string): 'xml' | 'html' | null {
+  const t = text.trimStart();
+  if (!t.startsWith('<')) return null;
+  if (/^<\?xml/i.test(t)) return 'xml';
+  if (/^<!doctype\s+html/i.test(t) || /^<(html|head|body|div|p|span|table|ul|ol|section|article|a|img|h[1-6])\b/i.test(t)) return 'html';
+  return /^<[a-z_:][\w.:-]*[\s/>]/i.test(t) ? 'xml' : null;
+}
+
+/** HTML elements that never close; treating them as open would drift the indent. */
+const VOID_ELEMENTS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
+
+/** Indents XML or HTML by its tags. Text inside a tag stays on its line. */
 export function prettyXml(text: string): string {
   const lines = text.replace(/>\s*</g, '><').replace(/></g, '>\n<').split('\n');
   let depth = 0;
@@ -139,7 +159,8 @@ export function prettyXml(text: string): string {
     const closing = t.startsWith('</');
     // A tag that closes itself, a declaration, or an element opened and
     // closed again on the same line leaves the level where it is.
-    const flat = closing || t.endsWith('/>') || /^<[!?]/.test(t) || /^<([^\s>/]+)[^>]*>.*<\/\1>$/.test(t);
+    const tag = /^<\/?([^\s>/]+)/.exec(t)?.[1]?.toLowerCase() ?? '';
+    const flat = closing || t.endsWith('/>') || /^<[!?]/.test(t) || VOID_ELEMENTS.has(tag) || /^<([^\s>/]+)[^>]*>.*<\/\1>$/.test(t);
     if (closing) depth = Math.max(0, depth - 1);
     out.push('  '.repeat(depth) + t);
     if (!flat) depth++;
@@ -159,6 +180,8 @@ export function prettyPayload(format: PayloadFormat, text: string): string | nul
       }
     case 'xml':
       return parseXml(text) === null ? prettyXml(text) : null;
+    case 'html':
+      return prettyXml(text);
     case 'hex': {
       const bytes = parseHex(text);
       if (!bytes) return null;
