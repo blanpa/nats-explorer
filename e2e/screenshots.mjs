@@ -81,6 +81,32 @@ async function seed(nc) {
   await nc.flush();
 }
 
+/**
+ * Advisories worth a screenshot: a consumer that gives up on a message, a
+ * nak before it, and a stream that goes away. They are published by the
+ * server itself -- the only way to make them is to do the thing.
+ */
+async function makeAdvisories(nc) {
+  const { AckPolicy } = await import('nats');
+  const jsm = await nc.jetstreamManager();
+  const js = nc.jetstream();
+  await jsm.streams.add({ name: 'RETRIES', subjects: ['retries.>'], storage: 'memory' }).catch(() => {});
+  await js.publish('retries.one', jc.encode({ order: 'ORD-4711' }));
+  await jsm.consumers.add('RETRIES', { durable_name: 'billing', ack_policy: AckPolicy.Explicit, max_deliver: 2, ack_wait: 1_000_000_000 }).catch(() => {});
+  const c = await js.consumers.get('RETRIES', 'billing');
+  const first = await c.next({ expires: 2000 });
+  if (first) first.nak(300_000_000);
+  for (let i = 0; i < 3; i++) {
+    const m = await c.next({ expires: 1500 }).catch(() => null);
+    if (m) void m;
+    await sleep(1200);
+  }
+  // The last delivery has to run past its ack wait before the server gives
+  // up and says so; that advisory is the point of the screenshot.
+  await sleep(3000);
+  await jsm.streams.delete('RETRIES').catch(() => {});
+}
+
 /** A service to send requests at, so a run has latencies to report. */
 function responder(nc) {
   const sub = nc.subscribe('services.echo');
@@ -106,18 +132,20 @@ async function main() {
   const nc = await connect({ servers: NATS });
   const sub = responder(nc);
 
+  // The second connection exists so the switcher has something to switch
+  // between; it is created first, because the newest one is the active one
+  // and every shot below is of the connection that sees everything.
+  await api('POST', '/connect', { id: 'staging', name: 'Staging', servers: [NATS], authMethod: 'none', subscriptions: ['orders.>'], color: '#f2607a' }).catch(
+    () => {},
+  );
   await api('POST', '/connect', {
     id: 'local',
     name: 'Local',
     servers: [NATS],
     authMethod: 'none',
-    subscriptions: ['orders.>', 'sensors.>', 'services.>'],
+    subscriptions: ['orders.>', 'sensors.>', 'services.>', 'retries.>', '$JS.>'],
     monitoringPort: 8230,
   });
-  // A second one, so the switcher has something to switch between.
-  await api('POST', '/connect', { id: 'staging', name: 'Staging', servers: [NATS], authMethod: 'none', subscriptions: ['orders.>'], color: '#f2607a' }).catch(
-    () => {},
-  );
   await seed(nc);
 
   // The endpoint takes the whole list: it replaces what is there.
@@ -191,6 +219,32 @@ async function main() {
   await page.getByRole('button', { name: 'Alerts' }).click();
   await settle(page, 2500);
   await shot(page, 'alerts-dark');
+
+  // --- State: what the plant is doing right now -------------------------
+  // Both views read the active connection, and the active one is whichever
+  // the backend lists first. Pick the one that sees everything.
+  await page
+    .getByRole('button', { name: /Switch connection/ })
+    .first()
+    .click();
+  await settle(page, 800);
+  await page
+    .getByRole('menuitem', { name: /Local/ })
+    .first()
+    .click()
+    .catch(() => {});
+  await settle(page, 1200);
+  await page.getByRole('button', { name: 'State' }).click();
+  await settle(page);
+  await page.getByLabel('Root subject').fill('sensors');
+  await settle(page, 2000);
+  await shot(page, 'state-dark');
+
+  // --- Events: what the servers reported ---------------------------------
+  await makeAdvisories(nc);
+  await page.getByRole('button', { name: 'Events' }).click();
+  await settle(page, 2500);
+  await shot(page, 'events-dark');
 
   // --- Key-Value --------------------------------------------------------
   await page.getByRole('button', { name: 'Key-Value' }).click();

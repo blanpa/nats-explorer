@@ -30,6 +30,8 @@ nav_order: 3
 
 ## State
 
+<img src="{{ '/screenshots/state-dark.png' | relative_url }}" alt="The State module: the newest message of every sensor with its fields in columns and its age" loading="lazy">
+
 A message list answers "what was sent". In front of a running plant the question is "what is it": the newest value of every sensor, setpoint and counter at once. The State module is that table -- one row per subject under a root, the scalar fields of its newest message as columns (the ones most rows carry, commonest first), and its age beside it.
 
 The age is why the table exists: a value is only as good as the moment it arrived, so a minute is marked and ten minutes are marked louder, and the Age header sorts the oldest first -- what is dead in a plant of two thousand subjects is then the first row rather than a hunt through a tree. Where the payloads carry the producer's own clock, a **Clock** column shows the gap to their arrival, and a negative one is marked: a clock running ahead is a problem, not a fast network. Copy takes what is on screen as CSV.
@@ -128,6 +130,8 @@ Six shapes, because what an export is for decides its shape:
 {% raw %}The replay script quotes for the shell, carries the headers, sends binary payloads through base64 and stdin, and escapes `{{` as `{{"{{"}}` -- `nats pub` expands Go templates in the body, so a payload holding `{{Count}}` would otherwise arrive as `1`.{% endraw %} The loaded messages can also be replayed straight through the publish API, with a pause and an optional subject rewrite.
 
 ## Events
+
+<img src="{{ '/screenshots/events-dark.png' | relative_url }}" alt="The Events module: JetStream advisories read as a log, with severities" loading="lazy">
 
 JetStream publishes an advisory for everything that matters -- a consumer that gave up after its last attempt, a message terminated, a stream that lost quorum, an API call that was refused -- and the system account does the same for clients and servers. They are ordinary messages on `$JS.EVENT.>` and `$SYS.>`, which is why they used to read as JSON in the subject tree; the Events module reads them as a log instead:
 
