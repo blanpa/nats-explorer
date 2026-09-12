@@ -76,6 +76,39 @@ describe('RangePicker', () => {
     expect(screen.queryByRole('button', { name: 'Zoom out' })).not.toBeInTheDocument();
   });
 
+  it('names the window on screen without being asked', () => {
+    // Dragging across a chart used to leave the row saying "Custom" and
+    // nothing else: which stretch of time was on screen could only be found
+    // out by opening the form.
+    picker(windowRange(new Date('2026-09-10T14:50:07').getTime(), new Date('2026-09-10T14:55:41').getTime()));
+    expect(screen.getByText('14:50:07 – 14:55:41')).toBeInTheDocument();
+  });
+
+  it('leaves a preset to its own button', () => {
+    picker({ from: now - 60 * MINUTE, to: now, label: '1 h', prose: 'the last 1 h' });
+    // The highlighted "1 h" says it; a second name would only repeat it.
+    expect(screen.getAllByText('1 h')).toHaveLength(1);
+  });
+
+  it('opens the custom form on what is on screen, live or preset', () => {
+    // Live: the form used to carry the hour before the page was loaded,
+    // which on a tab open since the morning is a window from the morning.
+    const { unmount } = render(<RangePicker range={null} onChange={vi.fn()} />);
+    vi.setSystemTime(now + 120 * MINUTE);
+    fireEvent.click(screen.getByRole('button', { name: 'Custom' }));
+    // A round time loses its seconds on the way into the field; that is
+    // the browser's spelling, not our window.
+    expect((screen.getByLabelText('Range start') as HTMLInputElement).value).toMatch(/^2026-09-10T16:00/);
+    expect((screen.getByLabelText('Range end') as HTMLInputElement).value).toMatch(/^2026-09-10T17:00/);
+    unmount();
+    vi.setSystemTime(now);
+
+    // A preset hands its own window over, not the default hour.
+    render(<RangePicker range={{ from: now - 6 * 60 * MINUTE, to: now, label: '6 h', prose: 'the last 6 h' }} onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Custom' }));
+    expect((screen.getByLabelText('Range start') as HTMLInputElement).value).toMatch(/^2026-09-10T09:00/);
+  });
+
   it('opens the custom form on the window that is showing', () => {
     // A window dragged out of a chart lands on odd seconds, and the form
     // has to show them: rounding to the minute on the way in would move

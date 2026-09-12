@@ -88,12 +88,21 @@ export default function RangePicker({ range, onChange }: { range: TimeRange | nu
     onChange(windowRange(f, t));
   };
 
-  // The form opens on the window that is showing, so a rough drag across a
-  // chart can be corrected to the second instead of typed out again.
+  /**
+   * The form always opens on what is on screen, whichever way it was chosen:
+   * the window dragged out of a chart, the preset that is selected, or the
+   * last hour while the view is live. It used to open on the last hour as it
+   * stood when the page was loaded -- on a tab that had been open since the
+   * morning, clicking Custom offered a window from the morning.
+   *
+   * "All" reaches back to wherever the database begins, which is not a time
+   * the browser knows; there the last hour of it is the honest offer.
+   */
   const toggleCustom = () => {
-    if (!custom && range && range.from > 0) {
-      setFrom(toLocalInput(range.from));
-      setTo(toLocalInput(range.to));
+    if (!custom) {
+      const end = range ? range.to : Date.now();
+      setFrom(toLocalInput(range && range.from > 0 ? range.from : end - 3600_000));
+      setTo(toLocalInput(end));
     }
     setCustom(c => !c);
   };
@@ -110,6 +119,11 @@ export default function RangePicker({ range, onChange }: { range: TimeRange | nu
   const span = range ? range.to - range.from : 0;
   // A window with a start can be zoomed and panned; "All" has none.
   const zoomable = !!range && range.from > 0 && span > 0;
+  // A window that is not one of the presets was dragged out of a chart or
+  // typed into the form. Nothing in this row said which one it was -- the
+  // reader had to open the form to find out what they were looking at -- so
+  // it is named here, where it was chosen.
+  const picked = range && !PRESETS.some(p => p.label === range.label) ? range : null;
 
   return (
     <div className="flex flex-wrap items-center gap-1" title={retentionLabel(retention)}>
@@ -122,13 +136,17 @@ export default function RangePicker({ range, onChange }: { range: TimeRange | nu
           {p.label}
         </button>
       ))}
-      <button
-        type="button"
-        className={cn('btn btn-xs', custom || (range && !PRESETS.some(p => p.label === range.label)) ? 'btn-primary' : 'btn-outline')}
-        onClick={toggleCustom}
-      >
+      <button type="button" className={cn('btn btn-xs', custom || picked ? 'btn-primary' : 'btn-outline')} onClick={toggleCustom}>
         Custom
       </button>
+      {picked && !custom && (
+        <span
+          className="text-xs text-muted font-mono tabular-nums whitespace-nowrap ml-0.5"
+          title="The window on screen. Drag across a chart for another one, or Custom to type it."
+        >
+          {picked.label}
+        </span>
+      )}
       {/* Zooming out and stepping sideways only exist once a window does, so
           they appear at the end of the row, where nothing has to move for
           them. */}
