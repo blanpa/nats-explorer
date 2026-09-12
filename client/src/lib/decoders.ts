@@ -103,6 +103,26 @@ function plain(v: unknown): unknown {
 }
 
 /**
+ * The message types a `.proto` defines, fully qualified and in the order
+ * they are written. Typing `acme.Reading` from memory is how a rule ends up
+ * decoding nothing, and the file already says what is in it.
+ */
+export async function messageTypesOf(schema: string): Promise<string[]> {
+  if (!schema.trim()) return [];
+  const protobuf = await import('protobufjs');
+  const { root } = protobuf.parse(schema, { keepCase: true });
+  const out: string[] = [];
+  const walk = (ns: PbNamespace) => {
+    for (const nested of ns.nestedArray) {
+      if ('fields' in nested && 'decode' in nested) out.push(nested.fullName.replace(/^\./, ''));
+      if ('nestedArray' in nested) walk(nested as PbNamespace);
+    }
+  };
+  walk(root);
+  return out;
+}
+
+/**
  * Encodes a value with a rule's schema: the way back through the same
  * `.proto` the payloads are read with. Only protobuf, because that is the
  * one format where writing a message by hand is otherwise out of reach --

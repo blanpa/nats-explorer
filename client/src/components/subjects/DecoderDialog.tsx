@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import { type DecoderFormat, type DecoderRule, FORMAT_LABELS, newRule, useDecoders } from '../../lib/decoders';
+import { type DecoderFormat, type DecoderRule, FORMAT_LABELS, messageTypesOf, newRule, useDecoders } from '../../lib/decoders';
 import { cn } from '../../lib/utils';
 import { Button, IconButton } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
@@ -33,6 +33,31 @@ function DecoderEditor({ onClose, prefill }: { onClose: () => void; prefill?: st
   );
 
   const patch = (p: Partial<DecoderRule>) => setDraft(d => (d ? { ...d, ...p } : d));
+
+  // What the pasted .proto defines, so the message type is chosen rather
+  // than remembered. A file that does not parse says so here, which is the
+  // earliest anyone could be told.
+  const [types, setTypes] = useState<string[]>([]);
+  const [typesError, setTypesError] = useState<string | null>(null);
+  const schema = draft?.format === 'protobuf' ? (draft.schema ?? '') : '';
+  useEffect(() => {
+    let live = true;
+    if (!schema.trim()) {
+      setTypes([]);
+      setTypesError(null);
+      return;
+    }
+    messageTypesOf(schema)
+      .then(found => {
+        if (!live) return;
+        setTypes(found);
+        setTypesError(found.length ? null : 'This .proto defines no message type.');
+      })
+      .catch(err => live && (setTypes([]), setTypesError((err as Error).message)));
+    return () => {
+      live = false;
+    };
+  }, [schema]);
   const isNew = !!draft && !rules.some(r => r.id === draft.id);
   const canSave = !!draft && draft.pattern.trim().length > 0 && (draft.format === 'msgpack' || !!draft.schema?.trim());
 
@@ -112,8 +137,27 @@ function DecoderEditor({ onClose, prefill }: { onClose: () => void; prefill?: st
                 </Field>
               </div>
               {draft.format === 'protobuf' && (
-                <Field label="Message type" hint="Fully qualified; the first message in the file when empty.">
-                  <Input mono value={draft.messageType ?? ''} onChange={e => patch({ messageType: e.target.value })} placeholder="acme.Reading" />
+                <Field label="Message type" hint="Fully qualified; the first message in the file when empty. The list comes from the .proto below.">
+                  <Input
+                    mono
+                    list="decoder-message-types"
+                    value={draft.messageType ?? ''}
+                    onChange={e => patch({ messageType: e.target.value })}
+                    placeholder={types[0] ?? 'acme.Reading'}
+                  />
+                  {/* A datalist, not a select: the file may not parse yet,
+                      and a half-written rule must still be typed into. */}
+                  <datalist id="decoder-message-types">
+                    {types.map(t => (
+                      <option key={t} value={t} />
+                    ))}
+                  </datalist>
+                  {typesError && <p className="text-xs text-warn mt-1">{typesError}</p>}
+                  {!typesError && types.length > 0 && (
+                    <p className="text-xs text-faint mt-1">
+                      {types.length} message type{types.length === 1 ? '' : 's'} in this .proto
+                    </p>
+                  )}
                 </Field>
               )}
               {draft.format !== 'msgpack' && (
