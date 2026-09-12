@@ -121,6 +121,63 @@ func TestStaleFiresAndResolves(t *testing.T) {
 	}
 }
 
+// A plant has two thousand subjects at a dozen rates, and nobody maintains
+// a timeout per subject. The rule learns each one's rhythm instead.
+func TestStaleLearnsTheSubjectsOwnRhythm(t *testing.T) {
+	h := newHarness(t, Rule{ID: "r1", Name: "silent", Pattern: "plant.>", StaleAuto: true, Enabled: true})
+	// A fast subject every second, a slow one every minute.
+	for i := 0; i < 12; i++ {
+		h.now += 1000
+		h.e.Observe("c", rec("plant.fast", `1`))
+		if i%60 == 0 {
+			h.e.Observe("c", rec("plant.slow", `1`))
+		}
+	}
+	h.e.CheckStale()
+	if got := h.states(); len(got) != 0 {
+		t.Fatalf("nothing is late yet: %v", got)
+	}
+	// Ten seconds of silence is nothing for the slow subject and a lifetime
+	// for the fast one.
+	h.now += 11_000
+	h.e.CheckStale()
+	if got := h.states(); len(got) != 1 || got[0] != "plant.fast:stale" {
+		t.Fatalf("states = %v", got)
+	}
+
+	// A subject that has sent twice has shown no rhythm, and guessing at one
+	// would fire on every new subject.
+	h2 := newHarness(t, Rule{ID: "r1", Name: "silent", Pattern: "plant.>", StaleAuto: true, Enabled: true})
+	h2.e.Observe("c", rec("plant.new", `1`))
+	h2.now += 1000
+	h2.e.Observe("c", rec("plant.new", `1`))
+	h2.now += 600_000
+	h2.e.CheckStale()
+	if got := h2.states(); len(got) != 0 {
+		t.Fatalf("a subject with no rhythm must not fire: %v", got)
+	}
+}
+
+// The floor is the reader's word on how soon is too soon, whatever the
+// subject's own rhythm says.
+func TestStaleAutoKeepsTheFloor(t *testing.T) {
+	h := newHarness(t, Rule{ID: "r1", Name: "silent", Pattern: "plant.>", StaleAuto: true, StaleAfter: 300, Enabled: true})
+	for i := 0; i < 12; i++ {
+		h.now += 1000
+		h.e.Observe("c", rec("plant.fast", `1`))
+	}
+	h.now += 60_000 // six times the learned threshold, but under the floor
+	h.e.CheckStale()
+	if got := h.states(); len(got) != 0 {
+		t.Fatalf("the floor has not passed: %v", got)
+	}
+	h.now += 300_000
+	h.e.CheckStale()
+	if got := h.states(); len(got) != 1 {
+		t.Fatalf("past the floor it is stale: %v", got)
+	}
+}
+
 func TestWebhookAndRuleChanges(t *testing.T) {
 	h := newHarness(t, Rule{ID: "r1", Name: "hot", Pattern: "plant.>", Expr: "payload.temp > 80", Webhook: "http://hook", Enabled: true})
 	h.e.Observe("c", rec("plant.a", `{"temp": 90}`))

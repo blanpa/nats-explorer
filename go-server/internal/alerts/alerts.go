@@ -32,11 +32,17 @@ type Rule struct {
 	// alert resolves. Empty means the rule only watches for silence.
 	Expr string `json:"expr,omitempty"`
 	// StaleAfter marks a subject as stale after this many seconds without
-	// a message; 0 disables the check.
-	StaleAfter int    `json:"staleAfter,omitempty"`
-	Severity   string `json:"severity"`
-	Webhook    string `json:"webhook,omitempty"`
-	Enabled    bool   `json:"enabled"`
+	// a message; 0 disables the check. With StaleAuto it is a floor rather
+	// than the threshold.
+	StaleAfter int `json:"staleAfter,omitempty"`
+	// StaleAuto learns each subject's own rhythm instead of being told one.
+	// A plant has two thousand subjects sending at a dozen different rates,
+	// and nobody maintains a timeout per subject; the gaps between the
+	// messages already say what normal is.
+	StaleAuto bool   `json:"staleAuto,omitempty"`
+	Severity  string `json:"severity"`
+	Webhook   string `json:"webhook,omitempty"`
+	Enabled   bool   `json:"enabled"`
 }
 
 // States of an alert.
@@ -100,6 +106,48 @@ type subjectState struct {
 	preview  string
 	firing   bool
 	stale    bool
+	// gaps between the last messages, in milliseconds, for the learned
+	// silence threshold. A ring, because a subject runs for months.
+	gaps  [staleWindow]int64
+	gapsN int
+}
+
+// How many gaps the learned threshold is built from, and how many are
+// needed before it will fire at all: a subject that has sent twice has not
+// shown a rhythm, and firing on it would be guesswork.
+const (
+	staleWindow  = 16
+	staleMinGaps = 8
+	// staleFactor is how many typical gaps of silence count as stale. Ten
+	// is late enough that jitter, a retry or a slow batch never fires it,
+	// and early enough to matter: a sensor sending every five seconds is
+	// reported after a minute.
+	staleFactor = 10
+)
+
+// typicalGap is the pause a subject normally has between messages, in
+// milliseconds. The upper quartile rather than the average: a subject that
+// sends a burst every minute has many tiny gaps and a few big ones, and the
+// average of those is a number that happens to no one.
+func (st *subjectState) typicalGap() int64 {
+	n := st.gapsN
+	if n > staleWindow {
+		n = staleWindow
+	}
+	if n < staleMinGaps {
+		return 0
+	}
+	sorted := make([]int64, n)
+	copy(sorted, st.gaps[:n])
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	return sorted[(n*3)/4]
+}
+
+func (st *subjectState) noteGap(now int64) {
+	if st.lastSeen > 0 && now > st.lastSeen {
+		st.gaps[st.gapsN%staleWindow] = now - st.lastSeen
+		st.gapsN++
+	}
 }
 
 // Engine evaluates rules and keeps the active alerts and the event log.
@@ -165,7 +213,7 @@ func Validate(r *Rule) error {
 	if r.Pattern == "" || strings.ContainsAny(r.Pattern, " \t\n") {
 		return errors.New("a rule needs a subject pattern without whitespace")
 	}
-	if r.Expr == "" && r.StaleAfter <= 0 {
+	if r.Expr == "" && r.StaleAfter <= 0 && !r.StaleAuto {
 		return errors.New("a rule needs an expression, a stale timeout, or both")
 	}
 	if r.Expr != "" {
@@ -229,7 +277,7 @@ func (e *Engine) SetRules(rules []Rule) error {
 	e.states.Range(func(k, v any) bool {
 		st := v.(*subjectState)
 		n, ok := byID[st.ruleID]
-		if !ok || !n.Enabled || n.Pattern != old[st.ruleID].patternOr("") || n.Expr != old[st.ruleID].exprOr("") || n.StaleAfter != old[st.ruleID].staleOr(0) {
+		if !ok || !n.Enabled || n.Pattern != old[st.ruleID].patternOr("") || n.Expr != old[st.ruleID].exprOr("") || n.StaleAfter != old[st.ruleID].staleOr(0) || n.StaleAuto != old[st.ruleID].staleAutoOr(false) {
 			e.states.Delete(k)
 			e.mu.Lock()
 			delete(e.active, k.(string))
@@ -260,6 +308,13 @@ func (c *compiled) staleOr(def int) int {
 		return def
 	}
 	return c.StaleAfter
+}
+
+func (c *compiled) staleAutoOr(def bool) bool {
+	if c == nil {
+		return def
+	}
+	return c.StaleAuto
 }
 
 func key(ruleID, connID, subject string) string {
@@ -296,6 +351,7 @@ func (e *Engine) Observe(connID string, r *message.Record) {
 		}
 		st := v.(*subjectState)
 		st.mu.Lock()
+		st.noteGap(now)
 		st.lastSeen = now
 		if st.stale {
 			st.stale = false
@@ -409,11 +465,24 @@ func (e *Engine) CheckStale() {
 	e.states.Range(func(_, v any) bool {
 		st := v.(*subjectState)
 		c := byID[st.ruleID]
-		if c == nil || !c.Enabled || c.StaleAfter <= 0 {
+		if c == nil || !c.Enabled || (c.StaleAfter <= 0 && !c.StaleAuto) {
 			return true
 		}
 		st.mu.Lock()
-		if !st.stale && st.lastSeen > 0 && now-st.lastSeen > int64(c.StaleAfter)*1000 {
+		after := int64(c.StaleAfter) * 1000
+		if c.StaleAuto {
+			learned := st.typicalGap() * staleFactor
+			// Until the subject has shown a rhythm there is nothing to be
+			// late against, and a floor the reader set still applies.
+			if learned == 0 {
+				st.mu.Unlock()
+				return true
+			}
+			if learned > after {
+				after = learned
+			}
+		}
+		if !st.stale && st.lastSeen > 0 && now-st.lastSeen > after {
 			st.stale = true
 			e.change(c, st, StateStale, st.preview, now)
 		}

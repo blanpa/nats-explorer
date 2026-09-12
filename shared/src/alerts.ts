@@ -14,6 +14,12 @@ export interface AlertRule {
   expr?: string;
   /** seconds without a message after which the subject counts as silent; 0 disables */
   staleAfter?: number;
+  /**
+   * Learns each subject's own rhythm instead of being told a timeout: a
+   * subject is reported after ten times its usual gap between messages.
+   * `staleAfter` is then a floor rather than the threshold.
+   */
+  staleAuto?: boolean;
   severity: AlertSeverity;
   /** optional URL that receives a JSON POST on every state change */
   webhook?: string;

@@ -30,6 +30,8 @@ describe('validateRule', () => {
     expect(validateRule(rule({ pattern: 'a.>.b' }))).toMatch(/last token/);
     expect(validateRule(rule({ expr: '', staleAfter: 0 }))).toMatch(/expression/);
     expect(validateRule(rule({ staleAfter: -1 }))).toMatch(/negative/);
+    // Learning is a condition of its own: no expression and no timeout needed.
+    expect(validateRule(rule({ expr: '', staleAuto: true }))).toBeNull();
     expect(validateRule(rule({ webhook: 'example.com' }))).toMatch(/http/);
     expect(validateRule(rule({ webhook: 'https://example.com/hook' }))).toBeNull();
   });
@@ -40,6 +42,9 @@ describe('rule and alert helpers', () => {
     expect(describeRule(rule())).toBe('payload.temp > 30');
     expect(describeRule(rule({ staleAfter: 60 }))).toBe('payload.temp > 30 or silent for 60s');
     expect(describeRule(rule({ expr: '', staleAfter: 60 }))).toBe('silent for 60s');
+    // A rule that learns says what it learned to expect.
+    expect(describeRule(rule({ expr: '', staleAuto: true }))).toBe('silent for ten times its usual gap');
+    expect(describeRule(rule({ expr: '', staleAuto: true, staleAfter: 60 }))).toContain('at least 60s');
   });
 
   it('sorts the worst and newest alerts first', () => {

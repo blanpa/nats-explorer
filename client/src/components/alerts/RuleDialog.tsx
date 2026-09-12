@@ -6,7 +6,7 @@ import { alertsApi } from '../../lib/api.alerts';
 import { useAlerts } from '../../store/alerts';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
-import { Field, Input, Select } from '../ui/Input';
+import { Checkbox, Field, Input, Select } from '../ui/Input';
 import { toast } from '../ui/Toast';
 
 /** Starting points for a rule, including the one a pinned schema unlocks. */
@@ -24,7 +24,7 @@ export default function RuleDialog({ rule, onClose }: { rule: AlertRule; onClose
   const [test, setTest] = useState<AlertTestResult | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
   const patch = (p: Partial<AlertRule>) => setDraft(d => ({ ...d, ...p }));
-  const ready = draft.pattern.trim().length > 0 && (!!draft.expr?.trim() || !!draft.staleAfter);
+  const ready = draft.pattern.trim().length > 0 && (!!draft.expr?.trim() || !!draft.staleAfter || !!draft.staleAuto);
 
   const runTest = async () => {
     setTestError(null);
@@ -98,7 +98,10 @@ export default function RuleDialog({ rule, onClose }: { rule: AlertRule; onClose
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <Field label="Silent after (s)" hint="0 turns it off.">
+          <Field
+            label={draft.staleAuto ? 'Not before (s)' : 'Silent after (s)'}
+            hint={draft.staleAuto ? 'A floor under the learned threshold; 0 leaves it to the subject.' : '0 turns it off.'}
+          >
             <Input type="number" min={0} value={draft.staleAfter ?? 0} onChange={e => patch({ staleAfter: Math.max(0, Number(e.target.value) || 0) })} />
           </Field>
           <Field label="Severity">
@@ -112,6 +115,16 @@ export default function RuleDialog({ rule, onClose }: { rule: AlertRule; onClose
             <Input mono value={draft.webhook ?? ''} onChange={e => patch({ webhook: e.target.value })} placeholder="https://…" />
           </Field>
         </div>
+
+        {/* A plant has two thousand subjects sending at a dozen rates, and
+            nobody maintains a timeout per subject. The gaps between the
+            messages already say what normal is for each one. */}
+        <Checkbox
+          label="Learn each subject's own rhythm"
+          description="Instead of one timeout for every subject the rule covers, each subject is reported after ten times its usual gap between messages — a sensor sending every five seconds after a minute, an hourly batch after ten hours. A subject that has not sent at least eight times has shown no rhythm and is never reported."
+          checked={!!draft.staleAuto}
+          onChange={e => patch({ staleAuto: e.target.checked })}
+        />
 
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" icon={<FlaskConical size={13} />} disabled={!draft.pattern.trim()} onClick={runTest}>

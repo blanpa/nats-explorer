@@ -39,7 +39,7 @@ export function validateRule(rule: AlertRule): string | null {
   const tokens = pattern.split('.');
   if (tokens.some(t => t === '')) return 'A subject pattern cannot have empty tokens.';
   if (tokens.some((t, i) => t === '>' && i !== tokens.length - 1)) return 'The > wildcard is only allowed as the last token.';
-  if (!rule.expr?.trim() && !(rule.staleAfter && rule.staleAfter > 0)) return 'A rule needs an expression, a silence timeout, or both.';
+  if (!rule.expr?.trim() && !(rule.staleAfter && rule.staleAfter > 0) && !rule.staleAuto) return 'A rule needs an expression, a silence timeout, or both.';
   if ((rule.staleAfter ?? 0) < 0) return 'The silence timeout cannot be negative.';
   if (rule.webhook?.trim() && !/^https?:\/\//.test(rule.webhook.trim())) return 'The webhook must be an http:// or https:// URL.';
   return null;
@@ -49,7 +49,8 @@ export function validateRule(rule: AlertRule): string | null {
 export function describeRule(rule: AlertRule): string {
   const parts: string[] = [];
   if (rule.expr?.trim()) parts.push(rule.expr.trim());
-  if (rule.staleAfter && rule.staleAfter > 0) parts.push(`silent for ${rule.staleAfter}s`);
+  if (rule.staleAuto) parts.push(rule.staleAfter ? `silent for ten times its usual gap, at least ${rule.staleAfter}s` : 'silent for ten times its usual gap');
+  else if (rule.staleAfter && rule.staleAfter > 0) parts.push(`silent for ${rule.staleAfter}s`);
   return parts.join(' or ');
 }
 
