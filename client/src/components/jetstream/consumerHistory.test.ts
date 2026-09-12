@@ -1,6 +1,16 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { ConsumerInfo } from 'shared';
-import { type ConsumerSample, clearConsumerSamples, consumerSamples, consumerSeries, lagOf, pendingTrend, recordConsumer } from './consumerHistory';
+import {
+  type ConsumerSample,
+  clearConsumerSamples,
+  consumerSamples,
+  consumerSeries,
+  describeBacklog,
+  drainForecast,
+  lagOf,
+  pendingTrend,
+  recordConsumer,
+} from './consumerHistory';
 
 const info = (over: Partial<ConsumerInfo> = {}): ConsumerInfo =>
   ({
@@ -67,5 +77,65 @@ describe('pendingTrend', () => {
     expect(pendingTrend([sample(5), sample(5), sample(5), sample(5), sample(5)])).toBe('flat');
     expect(pendingTrend([sample(0), sample(1), sample(0)])).toBe('flat');
     expect(pendingTrend([sample(1), sample(2)])).toBe('flat');
+  });
+});
+
+describe('drainForecast', () => {
+  /** Samples every five seconds, pending changing by `step` each time. */
+  const run = (from: number, step: number, count = 10): ConsumerSample[] =>
+    Array.from({ length: count }, (_, i) => ({
+      t: 1_000_000 + i * 5000,
+      pending: Math.max(0, from + step * i),
+      ackPending: 0,
+      redelivered: 0,
+      deliveredStreamSeq: i,
+      waiting: 0,
+    }));
+
+  it('says when a backlog will be empty', () => {
+    // 2 000 behind, 200 fewer every five seconds: 40/s. The last sample is
+    // 200, so five seconds to go.
+    const f = drainForecast(run(2000, -200))!;
+    expect(f.direction).toBe('down');
+    expect(f.perSecond).toBeCloseTo(-40, 5);
+    expect(f.etaMs).toBeCloseTo(5000, -1);
+  });
+
+  it('gives no time to a consumer that is falling behind', () => {
+    const f = drainForecast(run(100, 60))!;
+    expect(f.direction).toBe('up');
+    expect(f.etaMs).toBeNull();
+  });
+
+  it('calls a queue that barely moves flat', () => {
+    const f = drainForecast(run(500, 0))!;
+    expect(f.direction).toBe('flat');
+    expect(f.etaMs).toBeNull();
+  });
+
+  it('says nothing from one poll, or from polls a moment apart', () => {
+    expect(drainForecast(run(500, -10, 2))).toBeNull();
+    const tooFast = run(500, -10, 6).map((s, i) => ({ ...s, t: 1_000_000 + i * 100 }));
+    expect(drainForecast(tooFast)).toBeNull();
+  });
+});
+
+describe('describeBacklog', () => {
+  const samples = (step: number) =>
+    Array.from({ length: 10 }, (_, i) => ({
+      t: 1_000_000 + i * 5000,
+      pending: 2000 + step * i,
+      ackPending: 0,
+      redelivered: 0,
+      deliveredStreamSeq: i,
+      waiting: 0,
+    }));
+
+  it('turns the numbers into the sentence someone can act on', () => {
+    expect(describeBacklog(200, drainForecast(samples(-200)))).toContain('catching up at 40/s');
+    expect(describeBacklog(200, drainForecast(samples(-200)))).toContain('empty in about');
+    expect(describeBacklog(2540, drainForecast(samples(60)))).toContain('not catching up');
+    expect(describeBacklog(2000, drainForecast(samples(0)))).toContain('holding steady');
+    expect(describeBacklog(2000, null)).toContain('watching for a minute');
   });
 });

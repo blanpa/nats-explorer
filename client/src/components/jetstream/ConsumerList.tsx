@@ -12,7 +12,7 @@ import { toast } from '../ui/Toast';
 import { useCanWrite } from '../../lib/auth';
 import { RateChart } from '../ui/RateChart';
 import AckPending from './AckPending';
-import { consumerSamples, consumerSeries, lagOf, pendingTrend, recordConsumer } from './consumerHistory';
+import { consumerSamples, consumerSeries, describeBacklog, drainForecast, lagOf, pendingTrend, recordConsumer } from './consumerHistory';
 
 export default function ConsumerList({
   connId,
@@ -239,6 +239,10 @@ export default function ConsumerList({
                                 ]}
                                 format={v => formatNumber(Math.round(v))}
                               />
+                              {/* The number on its own is not actionable: what
+                                  matters is whether it is being worked off,
+                                  and by when. */}
+                              <p className="text-xs text-muted mt-1">{describeBacklog(c.numPending, drainForecast(samples))}</p>
                             </div>
                           )}
                         </td>
