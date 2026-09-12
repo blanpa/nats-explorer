@@ -16,6 +16,8 @@ export interface SchemaField {
   min?: number;
   max?: number;
   enum?: string[];
+  /** the shape every sample of a string field had, e.g. "date-time" */
+  format?: string;
 }
 
 /** A difference between the older and the newer half of the samples. */
@@ -36,6 +38,8 @@ export interface SubjectSchema {
   drift: SchemaDrift[];
   from: number;
   to: number;
+  /** the payloads have more fields than the backend reports; the list is a beginning */
+  truncated?: boolean;
 }
 
 /**

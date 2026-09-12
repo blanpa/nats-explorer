@@ -101,6 +101,46 @@ describe('toJsonSchema', () => {
     expect(mixed.properties.code.description).toContain('observed strings: a, b');
   });
 
+  // The backend folds the two, but a schema pinned before it did still
+  // carries both, and `["integer", "number"]` is a union with itself.
+  it('writes a field seen with integers and floats as a number', () => {
+    const doc = JSON.parse(
+      toJsonSchema(
+        's',
+        schemaOf([
+          {
+            ...field('v', 'number'),
+            types: [
+              { type: 'number', count: 6 },
+              { type: 'integer', count: 4 },
+            ],
+          },
+        ]),
+      ),
+    );
+    expect(doc.properties.v.type).toBe('number');
+    expect(
+      toTypeScript(
+        's',
+        schemaOf([
+          {
+            ...field('v', 'number'),
+            types: [
+              { type: 'number', count: 6 },
+              { type: 'integer', count: 4 },
+            ],
+          },
+        ]),
+      ),
+    ).toContain('v: number;');
+  });
+
+  it('carries the format of a timestamp field', () => {
+    const doc = JSON.parse(toJsonSchema('s', schemaOf([{ ...field('at', 'string'), format: 'date-time', example: '"2026-09-12T08:04:31Z"' }])));
+    expect(doc.properties.at.format).toBe('date-time');
+    expect(doc.properties.at.description).toContain('RFC 3339');
+  });
+
   it('adds null to the type instead of dropping it', () => {
     const doc = JSON.parse(
       toJsonSchema(

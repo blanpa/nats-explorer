@@ -7,7 +7,7 @@ import (
 
 func expected() *Expected {
 	return &Expected{Fields: []ExpectedField{
-		{Path: "v", Types: []string{"integer", "number"}, Required: true},
+		{Path: "v", Types: []string{"number"}, Required: true},
 		{Path: "unit", Types: []string{"string"}, Required: true, Enum: []string{"C", "F"}},
 		{Path: "note", Types: []string{"string"}},
 		{Path: "meta", Types: []string{"object"}, Required: true},
@@ -44,7 +44,7 @@ func TestCheckReportsMissingWrongAndOutOfEnum(t *testing.T) {
 	e := expected()
 	cases := []struct{ payload, want string }{
 		{`{"unit":"C","meta":{"id":"m"}}`, "v: missing"},
-		{`{"v":"warm","unit":"C","meta":{"id":"m"}}`, "v: string, expected integer or number"},
+		{`{"v":"warm","unit":"C","meta":{"id":"m"}}`, "v: string, expected number"},
 		{`{"v":1,"unit":"K","meta":{"id":"m"}}`, "unit: K, expected C or F"},
 		{`{"v":1,"unit":"C","meta":{}}`, "meta.id: missing"},
 		{`{"v":1,"unit":"C","meta":{"id":"m"},"tags":[1]}`, "tags[]: integer, expected string"},
@@ -57,6 +57,19 @@ func TestCheckReportsMissingWrongAndOutOfEnum(t *testing.T) {
 		if !strings.Contains(got, c.want) {
 			t.Errorf("%s\n got: %s\nwant: %s", c.payload, got, c.want)
 		}
+	}
+}
+
+// A number field pinned from floats still has to accept the message that
+// happens to send a whole one; the other way round is a real type change.
+func TestCheckTakesIntegersForNumbers(t *testing.T) {
+	e := expected()
+	if vs := e.Check("json", []byte(`{"v":21,"unit":"C","meta":{"id":"m"}}`)); len(vs) > 0 {
+		t.Errorf("an integer satisfies a number: %s", reasons(vs))
+	}
+	whole := &Expected{Fields: []ExpectedField{{Path: "v", Types: []string{"integer"}}}}
+	if got := reasons(whole.Check("json", []byte(`{"v":21.5}`))); !strings.Contains(got, "v: number, expected integer") {
+		t.Errorf("a float in an integer field is a violation, got %q", got)
 	}
 }
 

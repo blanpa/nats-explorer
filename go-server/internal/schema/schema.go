@@ -6,10 +6,15 @@
 package schema
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"math"
+	"regexp"
 	"sort"
 	"strconv"
+	"time"
+	"unicode/utf8"
 
 	"nats-explorer/internal/message"
 )
@@ -48,6 +53,11 @@ type Field struct {
 	Min      *float64    `json:"min,omitempty"`
 	Max      *float64    `json:"max,omitempty"`
 	Enum     []string    `json:"enum,omitempty"`
+	// Format names the shape of a string field when every sample had it:
+	// "date-time" for RFC 3339 timestamps. It is the one shape worth
+	// naming -- a timestamp is what a consumer of the schema most often
+	// wants typed, and every JSON Schema tool knows the keyword.
+	Format string `json:"format,omitempty"`
 }
 
 // Drift is a difference between the older and the newer half of the samples.
@@ -69,8 +79,12 @@ type Schema struct {
 	Kinds  map[string]int `json:"kinds"`
 	Fields []Field        `json:"fields"`
 	Drift  []Drift        `json:"drift"`
-	From   int64          `json:"from"`
-	To     int64          `json:"to"`
+	// Truncated: the payloads have more paths than MaxFields, so the field
+	// list is a beginning, not the whole shape. Saying nothing here would
+	// let a 300-field payload read as a 200-field one.
+	Truncated bool  `json:"truncated,omitempty"`
+	From      int64 `json:"from"`
+	To        int64 `json:"to"`
 }
 
 // stat accumulates one path across samples.
@@ -83,6 +97,8 @@ type stat struct {
 	strings  map[string]struct{}
 	tooMany  bool
 	strCount int
+	// dates counts the strings that are RFC 3339 timestamps.
+	dates int
 	// first is the order the path was met in, so the report keeps document order.
 	first int
 }
@@ -116,8 +132,8 @@ func Infer(msgs []message.NatsMessage) Schema {
 		if kind != "json" {
 			continue
 		}
-		var doc any
-		if err := json.Unmarshal([]byte(m.Payload), &doc); err != nil {
+		doc, err := decode([]byte(m.Payload))
+		if err != nil {
 			s.Kinds["json"]--
 			s.Kinds["string"]++
 			continue
@@ -132,6 +148,7 @@ func Infer(msgs []message.NatsMessage) Schema {
 		}
 	}
 	s.Fields = all.fields()
+	s.Truncated = all.dropped
 	if len(sorted) >= 2 && older.samples > 0 && newer.samples > 0 {
 		s.Drift = drift(older, newer, sorted[half].Timestamp)
 	}
@@ -143,6 +160,8 @@ type collector struct {
 	paths   map[string]*stat
 	order   int
 	samples int
+	// dropped: a path was met after the budget was spent.
+	dropped bool
 }
 
 func newCollector() *collector {
@@ -159,6 +178,7 @@ func (c *collector) stat(path string) *stat {
 	st, ok := c.paths[path]
 	if !ok {
 		if len(c.paths) >= MaxFields {
+			c.dropped = true
 			return nil
 		}
 		st = newStat(c.order)
@@ -219,13 +239,59 @@ func WalkDoc(path string, v any, depth int, visit func(path string, v any) bool)
 	}
 }
 
+// decode parses a payload keeping every number as it was written. JSON has
+// one number type, but `21` and `21.0` are not the same statement about a
+// field, and float64 forgets which of the two was sent -- along with the
+// last digits of anything above 2^53, which is where message and sequence
+// ids live.
+func decode(payload []byte) (any, error) {
+	dec := json.NewDecoder(bytes.NewReader(payload))
+	dec.UseNumber()
+	var doc any
+	if err := dec.Decode(&doc); err != nil {
+		return nil, err
+	}
+	// A decoder reads one value and stops; anything after it means the
+	// payload was never one document.
+	if dec.More() {
+		return nil, errTrailing
+	}
+	return doc, nil
+}
+
+var errTrailing = errors.New("trailing data after the JSON value")
+
+// intLiteral is a number written without a fraction or an exponent. `21.0`
+// is a float that happens to be whole right now; reading it as an integer is
+// how a derived schema ends up rejecting the first 21.5.
+var intLiteral = regexp.MustCompile(`^-?[0-9]+$`)
+
+// numeric is the value of a number, whichever way the document was decoded.
+func numeric(v any) (float64, bool) {
+	switch x := v.(type) {
+	case float64:
+		return x, true
+	case json.Number:
+		f, err := x.Float64()
+		return f, err == nil
+	}
+	return 0, false
+}
+
 func typeOf(v any) string {
 	switch x := v.(type) {
 	case nil:
 		return "null"
 	case bool:
 		return "bool"
+	case json.Number:
+		if intLiteral.MatchString(x.String()) {
+			return "integer"
+		}
+		return "number"
 	case float64:
+		// Documents that never went through decode carry plain float64s;
+		// there the value is all that is left to go by.
 		if x == math.Trunc(x) && math.Abs(x) < 1e15 {
 			return "integer"
 		}
@@ -247,19 +313,22 @@ func (st *stat) observe(v any) {
 	if st.example == "" {
 		st.example = example(v)
 	}
-	switch x := v.(type) {
-	case float64:
-		if !st.hasNum || x < st.min {
-			st.min = x
+	if f, ok := numeric(v); ok {
+		if !st.hasNum || f < st.min {
+			st.min = f
 		}
-		if !st.hasNum || x > st.max {
-			st.max = x
+		if !st.hasNum || f > st.max {
+			st.max = f
 		}
 		st.hasNum = true
-	case string:
+	}
+	if s, ok := v.(string); ok {
 		st.strCount++
+		if _, err := time.Parse(time.RFC3339, s); err == nil {
+			st.dates++
+		}
 		if !st.tooMany {
-			st.strings[x] = struct{}{}
+			st.strings[s] = struct{}{}
 			if len(st.strings) > enumMax {
 				st.tooMany = true
 				st.strings = nil
@@ -281,7 +350,13 @@ func example(v any) string {
 		s = string(b)
 	}
 	if len(s) > maxExample {
-		s = s[:maxExample-1] + "…"
+		// Cut on a rune, not on a byte: half of an umlaut is not a
+		// character, and an example is shown as text.
+		cut := maxExample - 1
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = s[:cut] + "…"
 	}
 	return s
 }
@@ -319,7 +394,7 @@ func (c *collector) fields() []Field {
 	out := make([]Field, 0, len(c.paths))
 	for path, st := range c.paths {
 		f := Field{Path: path, Presence: float64(st.present) / float64(max(1, c.samples)), Example: st.example}
-		for t, n := range st.types {
+		for t, n := range numbersMerged(st.types) {
 			f.Types = append(f.Types, TypeCount{Type: t, Count: n})
 		}
 		sort.Slice(f.Types, func(i, j int) bool {
@@ -332,6 +407,9 @@ func (c *collector) fields() []Field {
 			mn, mx := st.min, st.max
 			f.Min, f.Max = &mn, &mx
 		}
+		if st.strCount > 0 && st.dates == st.strCount {
+			f.Format = "date-time"
+		}
 		if !st.tooMany && st.strCount >= enumMinSamples && len(st.strings) > 0 && len(st.strings) <= enumMax {
 			for v := range st.strings {
 				f.Enum = append(f.Enum, v)
@@ -341,6 +419,23 @@ func (c *collector) fields() []Field {
 		out = append(out, f)
 	}
 	sort.Slice(out, func(i, j int) bool { return c.paths[out[i].Path].first < c.paths[out[j].Path].first })
+	return out
+}
+
+// numbersMerged folds integers into numbers once a field has been seen with
+// both: a field that carries 21 in one message and 21.5 in the next is a
+// number field, not a field with two types. Integers keep standing on their
+// own as long as nothing else was ever sent.
+func numbersMerged(types map[string]int) map[string]int {
+	if types["integer"] == 0 || types["number"] == 0 {
+		return types
+	}
+	out := make(map[string]int, len(types))
+	for t, n := range types {
+		out[t] = n
+	}
+	out["number"] += out["integer"]
+	delete(out, "integer")
 	return out
 }
 

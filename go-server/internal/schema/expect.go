@@ -1,7 +1,6 @@
 package schema
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 )
@@ -92,8 +91,8 @@ func (e *Expected) Check(kind string, payload []byte) []Violation {
 	if kind != "json" {
 		return []Violation{{Kind: "payload", Got: "payload is not JSON"}}
 	}
-	var doc any
-	if err := json.Unmarshal(payload, &doc); err != nil {
+	doc, err := decode(payload)
+	if err != nil {
 		return []Violation{{Kind: "payload", Got: "payload is not valid JSON"}}
 	}
 
@@ -113,7 +112,7 @@ func (e *Expected) Check(kind string, payload []byte) []Violation {
 			// An unknown branch has no expectations below it either.
 			return e.Strict
 		}
-		if got := typeOf(v); len(f.Types) > 0 && !contains(f.Types, got) {
+		if got := typeOf(v); len(f.Types) > 0 && !accepts(f.Types, got) {
 			out = append(out, Violation{Path: path, Kind: "type", Want: join(f.Types), Got: got})
 		}
 		if len(f.Enum) > 0 {
@@ -140,6 +139,13 @@ func Strings(vs []Violation) []string {
 		out[i] = v.String()
 	}
 	return out
+}
+
+// accepts reports whether a value of the given type satisfies one of the
+// pinned types. An integer is a whole number, so a field pinned as a number
+// is not violated by the message that happens to send 21 instead of 21.5.
+func accepts(want []string, got string) bool {
+	return contains(want, got) || (got == "integer" && contains(want, "number"))
 }
 
 func contains(list []string, s string) bool {

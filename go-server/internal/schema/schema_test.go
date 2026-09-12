@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"nats-explorer/internal/message"
 )
@@ -41,7 +42,8 @@ func TestTypesPresenceAndRanges(t *testing.T) {
 	if temp.Presence != 1 || *temp.Min != 19.25 || *temp.Max != 22 {
 		t.Fatalf("temp = %+v", temp)
 	}
-	if temp.Types[0] != (TypeCount{"number", 2}) || temp.Types[1] != (TypeCount{"integer", 1}) {
+	// 22 among the floats does not make the field an integer one.
+	if len(temp.Types) != 1 || temp.Types[0] != (TypeCount{"number", 3}) {
 		t.Fatalf("temp types = %+v", temp.Types)
 	}
 	name := field(t, s, "name")
@@ -66,6 +68,73 @@ func TestTypesPresenceAndRanges(t *testing.T) {
 	}
 }
 
+// How a number was written is the only word the producer has on whether the
+// field is whole: JSON has one number type, and 21.0 read as an integer is
+// how a schema ends up rejecting the first 21.5.
+func TestIntegerAndFloatComeFromTheLiteral(t *testing.T) {
+	s := Infer([]message.NatsMessage{
+		msg(1, `{"whole": 21, "float": 21.0, "exp": 1e3, "id": 9007199254740993, "neg": -3}`),
+	})
+	for path, want := range map[string]string{"whole": "integer", "float": "number", "exp": "number", "id": "integer", "neg": "integer"} {
+		if got := field(t, s, path).Types[0].Type; got != want {
+			t.Errorf("%s = %s, want %s", path, got, want)
+		}
+	}
+	// A float64 would have rounded the id to ...92 on the way through.
+	if got := field(t, s, "id").Example; got != "9007199254740993" {
+		t.Errorf("id example = %s, the digits should survive", got)
+	}
+	if got := field(t, s, "float").Example; got != "21.0" {
+		t.Errorf("float example = %s, want the literal", got)
+	}
+}
+
+// A field that carries both is a number field, not a field of two types:
+// every integer is a number, and the union would otherwise widen the moment
+// a whole value arrives.
+func TestIntegersFoldIntoNumbers(t *testing.T) {
+	f := field(t, Infer([]message.NatsMessage{
+		msg(1, `{"v": 21}`),
+		msg(2, `{"v": 21.5}`),
+		msg(3, `{"v": 22}`),
+	}), "v")
+	if len(f.Types) != 1 || f.Types[0] != (TypeCount{"number", 3}) {
+		t.Fatalf("types = %+v", f.Types)
+	}
+	if *f.Min != 21 || *f.Max != 22 {
+		t.Fatalf("range = %v..%v", *f.Min, *f.Max)
+	}
+}
+
+// An example is text on a screen; a byte cut through a rune would show up
+// as a replacement character in the middle of a word.
+func TestLongExampleIsCutOnARune(t *testing.T) {
+	long := strings.Repeat("ü", 60)
+	got := field(t, Infer([]message.NatsMessage{msg(1, fmt.Sprintf(`{"note": %q}`, long))}), "note").Example
+	if !strings.HasSuffix(got, "…") || !utf8.ValidString(got) {
+		t.Fatalf("example = %q, want valid UTF-8 ending in an ellipsis", got)
+	}
+}
+
+// The timestamp of a payload is a string like any other until the schema
+// says what shape it has; then a generator can turn it into a date.
+func TestTimestampStringsAreNamedAsSuch(t *testing.T) {
+	s := Infer([]message.NatsMessage{
+		msg(1, `{"at": "2026-09-12T08:04:31.768Z", "name": "pump", "mixed": "2026-09-12T08:04:31Z"}`),
+		msg(2, `{"at": "2026-09-12T08:04:36Z", "name": "2026-09-12T08:04:36Z", "mixed": "later"}`),
+	})
+	if got := field(t, s, "at").Format; got != "date-time" {
+		t.Errorf("at format = %q", got)
+	}
+	// One timestamp among the names says nothing about the field.
+	if got := field(t, s, "name").Format; got != "" {
+		t.Errorf("name format = %q, a field is only a date when every sample is", got)
+	}
+	if got := field(t, s, "mixed").Format; got != "" {
+		t.Errorf("mixed format = %q", got)
+	}
+}
+
 func TestEnumNeedsEnoughSamplesAndFewValues(t *testing.T) {
 	var few, many []message.NatsMessage
 	for i := 0; i < 12; i++ {
@@ -80,6 +149,27 @@ func TestEnumNeedsEnoughSamplesAndFewValues(t *testing.T) {
 	}
 	if got := field(t, Infer(few[:6]), "state").Enum; got != nil {
 		t.Fatalf("too few samples must not be an enum: %v", got)
+	}
+}
+
+// A payload with more paths than the budget is reported as far as it goes,
+// and says so; silence would make a cut list look like the whole shape.
+func TestTooManyFieldsSaysSo(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("{")
+	for i := 0; i < MaxFields+20; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, `"f%03d":%d`, i, i)
+	}
+	b.WriteString("}")
+	s := Infer([]message.NatsMessage{msg(1, b.String())})
+	if len(s.Fields) != MaxFields || !s.Truncated {
+		t.Fatalf("fields = %d, truncated = %v", len(s.Fields), s.Truncated)
+	}
+	if plenty := Infer([]message.NatsMessage{msg(1, `{"a":1,"b":2}`)}); plenty.Truncated {
+		t.Fatal("a payload that fits must not be reported as cut")
 	}
 }
 

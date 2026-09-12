@@ -260,6 +260,14 @@ export default function SchemaPanel({ subject, connId, range }: { subject: strin
                 <span>
                   from {formatNumber(jsonSamples)} message{jsonSamples === 1 ? '' : 's'}
                 </span>
+                {schema.truncated && (
+                  <span
+                    className="text-warn"
+                    title="The payloads carry more paths than the schema reports; what is listed is the beginning of the document, in the order the fields were first seen."
+                  >
+                    first {formatNumber(schema.fields.length)} fields only
+                  </span>
+                )}
                 <CopyFormats subject={subject} schema={schema} />
                 <PinControls subject={subject} data={data} reload={reload} />
                 {schema.drift.length > 0 && <span className="text-warn ml-auto">{schema.drift.length} change(s) between the older and the newer half</span>}

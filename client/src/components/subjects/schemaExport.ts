@@ -55,9 +55,14 @@ function buildTree(fields: SchemaField[]): Node {
   return root;
 }
 
-/** Types the field was seen with, most frequent first, without `null`. */
+/**
+ * Types the field was seen with, most frequent first, without `null`. A
+ * field seen with both integers and floats is a number field -- the backend
+ * already folds the two, an older pinned schema may not have.
+ */
 function valueTypes(field: SchemaField | undefined): string[] {
-  return (field?.types ?? []).map(t => t.type).filter(t => t !== 'null');
+  const types = (field?.types ?? []).map(t => t.type).filter(t => t !== 'null');
+  return types.includes('number') ? types.filter(t => t !== 'integer') : types;
 }
 
 const nullable = (field: SchemaField | undefined) => (field?.types ?? []).some(t => t.type === 'null');
@@ -92,6 +97,7 @@ function percent(presence: number): string {
 function notes(field: SchemaField): string {
   const out: string[] = [];
   if (field.presence < 1) out.push(`seen in ${percent(field.presence)} of the sampled messages`);
+  if (field.format === 'date-time') out.push('every sample was an RFC 3339 timestamp');
   if (field.min !== undefined && field.max !== undefined) {
     out.push(field.min === field.max ? `observed value ${field.min}` : `observed range ${field.min} … ${field.max}`);
   }
@@ -147,6 +153,9 @@ function jsonSchemaNode(node: Node, parentPresence: number): Record<string, unkn
     if (description) out.description = description;
     const values = closedEnum(field);
     if (values) out.enum = values;
+    // A format belongs to strings; on a field that also carried numbers it
+    // would claim more than the samples showed.
+    if (field.format && valueTypes(field).every(t => t === 'string')) out.format = field.format;
     const example = exampleValue(field);
     if (example !== undefined && !node.children.size && !node.items) out.examples = [example];
   }
