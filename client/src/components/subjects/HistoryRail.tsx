@@ -2,6 +2,8 @@ import { Loader2 } from 'lucide-react';
 import type { NatsMessage } from 'shared';
 import { messageKey } from '../../lib/messages';
 import { cn, formatBytes, formatCount, formatTime, previewPayload } from '../../lib/utils';
+import { decodedPreview, useDecodedPreviews } from '../../lib/decodedPreview';
+import { useDecoders } from '../../lib/decoders';
 import { SchemaMark } from '../ui/misc';
 import { VirtualRows } from '../ui/VirtualRows';
 
@@ -32,6 +34,8 @@ interface Props {
  */
 export default function HistoryRail({ messages, active, onPick, onLoadOlder, loadingOlder, atOldest, atCap, onScrolledAway, width }: Props) {
   const paging = !!onLoadOlder;
+  const previews = useDecodedPreviews();
+  const rules = useDecoders(s => s.rules);
   return (
     <div className="shrink-0 border-r border-line flex flex-col min-h-0" style={{ width }}>
       <div className="flex items-center h-9 px-3 border-b border-line text-xs text-muted">
@@ -68,7 +72,8 @@ export default function HistoryRail({ messages, active, onPick, onLoadOlder, loa
         rowKey={i => messageKey(messages[messages.length - 1 - i])}
         renderRow={i => {
           const m = messages[messages.length - 1 - i];
-          const p = previewPayload(m.payload, m.payloadType, 48);
+          const line = m.payloadType === 'binary' ? decodedPreview(previews, rules, m.subject, m.payload, 48) : null;
+          const p = line ? { text: line, tone: 'obj' as const } : previewPayload(m.payload, m.payloadType, 48);
           return (
             <div className={cn('list-row h-full py-0 gap-2', m === active && 'list-row-active')} onClick={() => onPick(m)}>
               {/* Against the schema pinned for this subject, if there is one. */}

@@ -2,6 +2,8 @@ import { Loader2 } from 'lucide-react';
 import type { NatsMessage } from 'shared';
 import { messageKey } from '../../lib/messages';
 import { cn, formatBytes, formatTime, previewPayload } from '../../lib/utils';
+import { decodedPreview, useDecodedPreviews } from '../../lib/decodedPreview';
+import { useDecoders } from '../../lib/decoders';
 import { ColumnGrip, useColumnWidths } from '../ui/columns';
 import { SubjectText } from '../ui/SubjectText';
 import { toneClass } from '../ui/tone';
@@ -35,6 +37,8 @@ interface Props {
  */
 export default function MessageList({ messages, subjectPrefix, onOpen, onSelect, selected, className, onLoadOlder, loadingOlder, atOldest }: Props) {
   const { widths, resize } = useColumnWidths('ne.messageListCols', DEFAULT_WIDTHS);
+  const previews = useDecodedPreviews();
+  const rules = useDecoders(s => s.rules);
   const grid = { gridTemplateColumns: `${widths.time}px ${widths.subject}px minmax(0, 1fr) ${widths.size}px` };
 
   const header = (
@@ -83,7 +87,10 @@ export default function MessageList({ messages, subjectPrefix, onOpen, onSelect,
       }
       renderRow={i => {
         const m = messages[i];
-        const p = previewPayload(m.payload, m.payloadType, 90);
+        // A decoded binary payload reads as its fields; "binary" is what is
+        // left when no rule matches or the decode has not landed yet.
+        const line = m.payloadType === 'binary' ? decodedPreview(previews, rules, m.subject, m.payload, 90) : null;
+        const p = line ? { text: line, tone: 'obj' as const } : previewPayload(m.payload, m.payloadType, 90);
         const below = subjectPrefix && m.subject.startsWith(`${subjectPrefix}.`) ? m.subject.slice(subjectPrefix.length + 1) : null;
         return (
           <div

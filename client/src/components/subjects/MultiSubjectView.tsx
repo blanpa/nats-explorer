@@ -5,6 +5,8 @@ import { useStore, type LiveView } from '../../store';
 import { loadOlder, loadOlderBranch } from '../../lib/feed';
 import { messageKey, newerFirst, recentRate } from '../../lib/messages';
 import { cn, formatCount, formatTime, previewPayload } from '../../lib/utils';
+import { decodedPreview, useDecodedPreviews } from '../../lib/decodedPreview';
+import { useDecoders } from '../../lib/decoders';
 import { Button } from '../ui/Button';
 import { PaneHeader } from '../ui/misc';
 import ExportMenu from './ExportMenu';
@@ -28,6 +30,8 @@ function rateOf(view: LiveView): number {
  * of everything that arrives on any of them, newest first.
  */
 export default function MultiSubjectView() {
+  const previews = useDecodedPreviews();
+  const rules = useDecoders(s => s.rules);
   const subjects = useStore(s => s.selectedSubjects);
   const live = useStore(s => s.live);
   const setSelectedSubject = useStore(s => s.setSelectedSubject);
@@ -99,7 +103,8 @@ export default function MultiSubjectView() {
       <div className="shrink-0 grid gap-2 p-3 border-b border-line" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
         {views.map(v => {
           const last = latestOf(v);
-          const p = last ? previewPayload(last.payload, last.payloadType, 120) : null;
+          const line = last?.payloadType === 'binary' ? decodedPreview(previews, rules, v.subject, last.payload, 120) : null;
+          const p = line ? { text: line, tone: 'obj' as const } : last ? previewPayload(last.payload, last.payloadType, 120) : null;
           const rate = rateOf(v);
           return (
             <button

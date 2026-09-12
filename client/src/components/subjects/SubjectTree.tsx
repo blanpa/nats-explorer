@@ -5,6 +5,8 @@ import { useStore } from '../../store';
 import { clearHistory, clearSubject } from '../../lib/feed';
 import { errorMessage } from '../../lib/api';
 import { cn, formatCount, previewPayload } from '../../lib/utils';
+import { decodedPreview, useDecodedPreviews } from '../../lib/decodedPreview';
+import { useDecoders } from '../../lib/decoders';
 import { toast } from '../ui/Toast';
 import { IconButton } from '../ui/Button';
 import { SearchInput } from '../ui/Input';
@@ -39,7 +41,14 @@ const Row = memo(function Row({
   onToggle: (subject: string) => void;
 }) {
   const { depth, hasChildren, expanded, guides } = item;
-  const preview = showPreview && item.last && !hasChildren ? previewPayload(item.last.payload, item.last.payloadType, 80) : null;
+  const previews = useDecodedPreviews();
+  const rules = useDecoders(s => s.rules);
+  const decodedLine = showPreview && item.last?.payloadType === 'binary' ? decodedPreview(previews, rules, item.subject, item.last.payload, 80) : null;
+  const preview = decodedLine
+    ? { text: decodedLine, tone: 'obj' as const }
+    : showPreview && item.last && !hasChildren
+      ? previewPayload(item.last.payload, item.last.payloadType, 80)
+      : null;
   // Leaves show their own rate; branches show the aggregate so hot subtrees stand out even when collapsed.
   const rate = hasChildren ? item.totalRate : item.rate;
 
