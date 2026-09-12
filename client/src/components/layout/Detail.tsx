@@ -9,6 +9,7 @@ import KvBucketView from '../kv/KvBucketView';
 import ObjStoreView from '../objectstore/ObjStoreView';
 import ServiceDetail from '../services/ServiceDetail';
 import MonitoringDashboard from '../monitoring/MonitoringDashboard';
+import EventsView from '../events/EventsView';
 import ClusterView from '../cluster/ClusterView';
 import AlertsView from '../alerts/AlertsView';
 import AuditView from '../audit/AuditView';
@@ -64,6 +65,7 @@ export default function Detail() {
           {module === 'kv' && <KvBucketView />}
           {module === 'objects' && <ObjStoreView />}
           {module === 'services' && <ServiceDetail />}
+          {module === 'events' && <EventsView />}
           {module === 'monitor' && <MonitoringDashboard />}
           {module === 'cluster' && <ClusterView />}
         </>
