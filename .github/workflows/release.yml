@@ -1,0 +1,232 @@
+name: Release
+
+# Builds installers for Windows, macOS and Linux, headless server binaries and
+# the Docker image, then publishes everything as a GitHub release.
+# Trigger: push a tag like v0.2.0, or run manually (artifacts only, no release).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  NODE_VERSION: '22'
+  WAILS_VERSION: 'v2.11.0'
+
+jobs:
+  # The UI is built once and reused by every packaging job.
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run --filter shared build
+      - run: bun run --filter client typecheck
+      - run: bun run --filter client test
+      - run: bun run --filter client build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist
+
+  desktop-linux:
+    needs: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-server/go.mod
+          cache-dependency-path: go-server/go.sum
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-3-dev libwebkit2gtk-4.1-dev nsis dpkg-dev file
+          curl -fsSL -o /usr/local/bin/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          sudo chmod +x /usr/local/bin/appimagetool
+      - run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+      - name: Build Linux packages (AppImage, .deb, tar.gz)
+        run: VERSION=${{ github.ref_name }} scripts/build-desktop.sh linux
+      - name: Smoke test the built app
+        run: |
+          sudo apt-get install -y --no-install-recommends xvfb
+          scripts/smoke-desktop.sh go-server/build/bin/nats-explorer
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux
+          path: dist/desktop/*
+
+  desktop-windows:
+    needs: frontend
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-server/go.mod
+          cache-dependency-path: go-server/go.sum
+      - run: choco install nsis -y --no-progress
+      - run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+      - name: Build Windows installer and portable zip
+        shell: bash
+        run: |
+          export PATH="$PATH:/c/Program Files (x86)/NSIS"
+          VERSION=${{ github.ref_name }} scripts/build-desktop.sh windows
+      - name: Smoke test the installer (silent install, launch, uninstall)
+        shell: pwsh
+        run: scripts/smoke-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          path: dist/desktop/*
+
+  desktop-macos:
+    needs: frontend
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-server/go.mod
+          cache-dependency-path: go-server/go.sum
+      - run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+      - name: Build universal .app and .dmg
+        run: VERSION=${{ github.ref_name }} scripts/build-desktop.sh macos
+      - name: Smoke test the app bundle
+        run: scripts/smoke-desktop.sh "$(find go-server/build/bin -path '*.app/Contents/MacOS/*' -type f | head -1)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-macos
+          path: dist/desktop/*
+
+  # Headless server (UI served from the same binary's folder) for people who run it on a box.
+  server:
+    needs: frontend
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64, name: linux-x64 }
+          - { goos: linux,   goarch: arm64, name: linux-arm64 }
+          - { goos: windows, goarch: amd64, name: windows-x64 }
+          - { goos: darwin,  goarch: amd64, name: macos-x64 }
+          - { goos: darwin,  goarch: arm64, name: macos-arm64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-server/go.mod
+          cache-dependency-path: go-server/go.sum
+      - name: Build and package
+        run: VERSION=${{ github.ref_name }} scripts/build-server.sh ${{ matrix.goos }}/${{ matrix.goarch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ matrix.name }}
+          path: dist/server/*
+
+  docker:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: 'false'
+        with:
+          context: .
+          file: go-server/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [desktop-linux, desktop-windows, desktop-macos, server, docker]
+    runs-on: ubuntu-latest
+    steps:
+      # For CHANGELOG.md; the rest of this job only needs the artifacts.
+      - uses: actions/checkout@v4
+      # Only our packages: the docker job also uploads a build-record artifact
+      # that is not needed here and made the download step fail.
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: desktop-*
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: server-*
+          merge-multiple: true
+      - name: Collect files
+        run: |
+          mkdir -p out
+          find artifacts -type f \( -name '*.exe' -o -name '*.zip' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.tar.gz' \) -exec cp {} out/ \;
+          # Every file a second time without the version in its name, so the
+          # README can link to /releases/latest/download/<name> and always
+          # hand out the current build. GitHub resolves those only for names
+          # that stay the same across releases.
+          version="${GITHUB_REF_NAME#v}"
+          for f in out/*; do
+            base=$(basename "$f")
+            stable=${base/-$version/}
+            if [ "$stable" != "$base" ]; then
+              cp "$f" "out/$stable"
+            fi
+          done
+          (cd out && sha256sum * > SHA256SUMS.txt)
+          ls -la out
+      # The changelog entry of this version becomes the release body; the
+      # generated notes (commits, contributors, compare link) follow it.
+      - name: Release notes from the changelog
+        run: scripts/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: ${{ runner.temp }}/notes.md
+          generate_release_notes: true
+          files: out/*

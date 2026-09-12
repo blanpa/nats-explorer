@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+*.log
+.vite/
+release/
+*.tsbuildinfo
+e2e/test-results/
+e2e/playwright-report/
+go-server/build/bin/
+go-server/frontend/
+go-server/build/wailsjs/
+go-server/build/windows/installer/tmp/

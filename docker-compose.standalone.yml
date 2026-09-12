@@ -1,0 +1,19 @@
+# NATS Explorer alone, for an existing NATS server: the released image, no
+# build step. Add the server in the connection dialog after the first start.
+services:
+  nats-explorer:
+    image: ghcr.io/blanpa/nats-explorer:latest
+    ports:
+      - "3002:3002"
+    environment:
+      - PORT=3002
+      # Keep a copy of every message for three days; the UI loads time ranges
+      # from it. Drop both lines for a memory-only history.
+      - HISTORY_DB=/data/history.db
+      - HISTORY_RETENTION=72h
+    volumes:
+      - explorer-data:/data
+    restart: unless-stopped
+
+volumes:
+  explorer-data:

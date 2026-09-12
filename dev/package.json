@@ -1,0 +1,16 @@
+{
+  "name": "nats-dev",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "docker compose up -d && echo 'Dev NATS server: nats://localhost:4230' && echo 'Monitoring: http://localhost:8230'",
+    "stop": "docker compose down",
+    "seed": "bun seed.mjs",
+    "simulate": "bun simulate.mjs",
+    "dev": "docker compose up -d && sleep 2 && bun seed.mjs && bun simulate.mjs"
+  },
+  "dependencies": {
+    "nats": "^2.28.0"
+  }
+}

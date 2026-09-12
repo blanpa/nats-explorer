@@ -1,0 +1,200 @@
+import { useMemo } from 'react';
+import { X } from 'lucide-react';
+import type { Aggregation, HistorySeries, NatsMessage } from 'shared';
+import { readSetting, writeSetting } from '../../lib/utils';
+import { Checkbox } from '../ui/Input';
+import { IconButton } from '../ui/Button';
+import { Hint, Segmented } from '../ui/misc';
+import { delayLabel, isDelayField } from '../../lib/payloadTime';
+import ValueChart, { CHART_TYPES, type ChartSeries, type ChartType, colorForIndex, mergePoints, type Point } from './ValueChart';
+
+/**
+ * Several fields at once. Two questions decide what the panel looks like,
+ * and neither has one right answer, so both are the reader's:
+ *
+ *   - one chart or one per field. Overlaying compares shapes; separate
+ *     charts each keep their own axis, which is the only honest way to show
+ *     a temperature next to a counter.
+ *   - which reduction. Every downsample throws something away; "what was the
+ *     peak", "what was it on average" and "how fast is this climbing" are
+ *     different questions about the same field.
+ */
+
+export const AGGREGATIONS: { id: Aggregation; label: string; hint: string }[] = [
+  {
+    id: 'minmax',
+    label: 'Min/Max',
+    hint: 'Both extremes of every bucket, so a spike between two samples still shows. The only one that never hides an outlier.',
+  },
+  { id: 'avg', label: 'Avg', hint: 'The mean of every bucket: the trend without the noise.' },
+  { id: 'min', label: 'Min', hint: 'The lowest value of every bucket.' },
+  { id: 'max', label: 'Max', hint: 'The highest value of every bucket.' },
+  { id: 'sum', label: 'Sum', hint: 'The values of a bucket added up: for quantities per message, not for levels.' },
+  { id: 'count', label: 'Count', hint: 'How many messages carried the field, which is about the traffic rather than the value.' },
+  { id: 'rate', label: 'Rate/s', hint: 'The change per second: what a counter (parts, kWh, bytes) is actually doing. Its raw value is a staircase.' },
+];
+
+export type ChartLayout = 'overlay' | 'separate';
+
+const TYPE_KEY = 'ne.chartType';
+const LAYOUT_KEY = 'ne.chartLayout';
+const AGG_KEY = 'ne.chartAgg';
+const NORMALIZE_KEY = 'ne.chartNormalize';
+
+function saved<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
+  const v = readSetting<string>(key, fallback);
+  return (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
+}
+
+export const savedChartType = () =>
+  saved<ChartType>(
+    TYPE_KEY,
+    CHART_TYPES.map(t => t.id),
+    'line',
+  );
+export const savedLayout = () => saved<ChartLayout>(LAYOUT_KEY, ['overlay', 'separate'], 'separate');
+export const savedAgg = () =>
+  saved<Aggregation>(
+    AGG_KEY,
+    AGGREGATIONS.map(a => a.id),
+    'minmax',
+  );
+export const savedNormalize = () => readSetting<boolean>(NORMALIZE_KEY, true);
+
+export interface ChartSettings {
+  type: ChartType;
+  layout: ChartLayout;
+  agg: Aggregation;
+  normalize: boolean;
+}
+
+interface Props {
+  fields: string[];
+  /** live messages of the subject; those newer than a series are appended */
+  messages: NatsMessage[];
+  /** what the server answered per field */
+  seriesByField: Record<string, HistorySeries | null | undefined>;
+  settings: ChartSettings;
+  onSettings: (patch: Partial<ChartSettings>) => void;
+  onRemove: (field: string) => void;
+  onClear: () => void;
+  onPick?: (point: Point, field: string) => void;
+  marker?: Point | null;
+  /** dragging across a chart picks that stretch of time as the time range */
+  onZoom?: (from: number, to: number) => void;
+}
+
+export default function ChartPanel({ fields, messages, seriesByField, settings, onSettings, onRemove, onClear, onPick, marker, onZoom }: Props) {
+  const { type, layout, agg, normalize } = settings;
+
+  const series: ChartSeries[] = useMemo(
+    () =>
+      fields.map((field, i) => ({
+        field,
+        label: isDelayField(field) ? delayLabel(field) : field,
+        color: colorForIndex(i),
+        points: mergePoints(seriesByField[field], messages, field, agg),
+        info: seriesByField[field],
+      })),
+    [fields, seriesByField, messages, agg],
+  );
+
+  if (fields.length === 0) return null;
+  const many = fields.length > 1;
+  const aggHint = AGGREGATIONS.find(a => a.id === agg)?.hint;
+
+  return (
+    <div className="card p-3 flex flex-col gap-2">
+      {/*
+        The settings come first, and the fields below them. Charting a
+        second field used to add both a chip and the layout control to one
+        shared row, so the settings moved twice over -- down a line and
+        sideways -- while the reader was still clicking numbers to add.
+        Above the chips nothing they do can push the settings around.
+      */}
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-muted">Charting</span>
+        {onZoom && (
+          <Hint text="Drag across a chart to zoom into that stretch of time. It becomes the time range, so the history below follows it and the server reduces the points over the shorter window -- zooming in really does show more, it does not just stretch what is there. Zoom back out with the arrows next to the range." />
+        )}
+
+        <span className="ml-auto flex flex-wrap items-center gap-2">
+          {/*
+            The layout question only exists with a second field, so it sits
+            at the left of a group that hangs to the right: appearing there
+            grows the group into empty space instead of shoving the two
+            controls that were already under the cursor aside.
+          */}
+          {many && (
+            <Segmented
+              size="xs"
+              options={[
+                { id: 'separate', label: 'Separate' },
+                { id: 'overlay', label: 'One chart' },
+              ]}
+              value={layout}
+              onChange={v => onSettings({ layout: v })}
+            />
+          )}
+          <span className="inline-flex items-center gap-1">
+            <Segmented size="xs" options={AGGREGATIONS.map(a => ({ id: a.id, label: a.label }))} value={agg} onChange={v => onSettings({ agg: v })} />
+            {aggHint && <Hint text={aggHint} />}
+          </span>
+          <Segmented size="xs" options={CHART_TYPES} value={type} onChange={v => onSettings({ type: v })} />
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        {fields.map((f, i) => (
+          <span key={f} className="inline-flex items-center gap-1 rounded border border-line px-1.5 py-0.5">
+            <span className="w-2 h-2 rounded-full" style={{ background: colorForIndex(i) }} aria-hidden />
+            <span className="font-mono">{isDelayField(f) ? delayLabel(f) : f}</span>
+            <IconButton label={`Stop charting ${f}`} size="xs" onClick={() => onRemove(f)}>
+              <X size={11} />
+            </IconButton>
+          </span>
+        ))}
+        {many && (
+          <button type="button" className="text-faint hover:text-fg underline underline-offset-2" onClick={onClear}>
+            clear all
+          </button>
+        )}
+      </div>
+
+      {many && layout === 'overlay' && (
+        <Checkbox
+          label="Scale each field to its own range"
+          description="Fields with different units share one axis only if each is scaled to itself; the numbers above the chart stay the real ones. Off, they share the axis as they are, which is what comparable fields want."
+          checked={normalize}
+          onChange={e => onSettings({ normalize: e.target.checked })}
+        />
+      )}
+
+      {layout === 'overlay' || !many ? (
+        <ValueChart
+          series={series}
+          type={type}
+          normalize={many && normalize}
+          onPick={onPick}
+          marker={many ? null : marker}
+          height={many ? 200 : 160}
+          onZoom={onZoom}
+        />
+      ) : (
+        <div className="flex flex-col gap-2">
+          {series.map(s => (
+            <ValueChart key={s.field} series={[s]} type={type} onPick={onPick} marker={marker} height={130} onZoom={onZoom} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Stores the settings so a chart opens the way the last one was left. */
+export function persistChartSettings(s: ChartSettings) {
+  writeSetting(TYPE_KEY, s.type);
+  writeSetting(LAYOUT_KEY, s.layout);
+  writeSetting(AGG_KEY, s.agg);
+  writeSetting(NORMALIZE_KEY, s.normalize);
+}

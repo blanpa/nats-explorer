@@ -1,0 +1,146 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run --filter shared build
+      - run: bun run --filter client typecheck
+      - run: bun run --filter client test
+      - run: bun run --filter client build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist
+
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-server/go.mod
+          cache-dependency-path: go-server/go.sum
+      - run: cd go-server && test -z "$(gofmt -l .)"
+      # Catches dependencies that a removed feature left behind in go.mod.
+      - run: cd go-server && go mod tidy && git diff --exit-code go.mod go.sum
+      - run: cd go-server && go vet ./...
+      - run: cd go-server && go test -race -count=1 ./...
+      - run: cd go-server && CGO_ENABLED=0 go build -o ../dist/nats-explorer .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-binary
+          path: dist/nats-explorer
+
+  e2e:
+    needs: [client, go]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: server-binary
+          path: dist
+      - name: Start NATS with JetStream
+        run: docker run -d --name nats -p 4230:4222 -p 8230:8222 nats:latest --jetstream --http_port=8222
+      - name: Start NATS Explorer
+        run: |
+          chmod +x dist/nats-explorer
+          PORT=3002 PUBLIC_PATH=$PWD/client/dist HISTORY_DB=$PWD/history.db nohup dist/nats-explorer > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:3002/api/auth && break; sleep 1; done
+      - run: cd e2e && bunx playwright install --with-deps chromium
+      - run: bun run --filter e2e test
+        env:
+          CI: 'true'
+          NE_URL: http://localhost:3002
+          NATS_URL: nats://localhost:4230
+      - if: failure()
+        run: cat server.log
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: e2e/playwright-report
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Front matter, {% link %} targets, images and anchors. Cheap, and it
+      # names the broken thing instead of failing somewhere in a Liquid trace.
+      - run: scripts/check-docs.sh
+      # The real Pages build, so a Liquid or YAML error fails here and not on
+      # the deployment after the merge.
+      - uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./docs
+          destination: ./_site
+
+  desktop-linux:
+    needs: [client]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-server/go.mod
+          cache-dependency-path: go-server/go.sum
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-3-dev libwebkit2gtk-4.1-dev xvfb
+      - run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
+      - name: Build the desktop binary
+        run: |
+          mkdir -p go-server/frontend && cp -r client/dist go-server/frontend/dist
+          cd go-server && wails build -s -skipbindings -tags desktop,webkit2_41 -platform linux/amd64 -o nats-explorer
+      - run: scripts/smoke-desktop.sh go-server/build/bin/nats-explorer
+
+  docker:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [client, go, e2e]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: go-server/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository }}:latest
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

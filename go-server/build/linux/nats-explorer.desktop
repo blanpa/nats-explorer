@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=NATS Explorer
+Comment=Explore NATS subjects, JetStream, Key-Value, Object Store and monitoring
+Exec=nats-explorer
+Icon=nats-explorer
+Terminal=false
+Categories=Development;Network;
+Keywords=NATS;JetStream;messaging;MQTT;

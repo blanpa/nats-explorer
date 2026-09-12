@@ -1,0 +1,20 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "NATS Explorer",
+  "outputfilename": "nats-explorer",
+  "frontend:dir": "../client",
+  "frontend:install": "",
+  "frontend:build": "",
+  "wailsjsdir": "./build/wailsjs",
+  "author": {
+    "name": "NATS Explorer contributors"
+  },
+  "info": {
+    "companyName": "NATS Explorer",
+    "productName": "NATS Explorer",
+    "productIdentifier": "io.github.nats-explorer",
+    "productVersion": "0.3.0",
+    "copyright": "Copyright 2026 blanpa. Licensed under the GNU AGPL v3.0 or later.",
+    "comments": "Desktop explorer for NATS: subjects, JetStream, Key-Value, Object Store, services and monitoring."
+  }
+}

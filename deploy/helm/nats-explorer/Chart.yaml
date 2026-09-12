@@ -1,0 +1,14 @@
+apiVersion: v2
+name: nats-explorer
+description: A NATS management tool and message explorer, served by a single Go binary
+type: application
+# version is the chart's, appVersion the image tag the release workflow sets.
+version: 0.1.0
+appVersion: "0.3.0"
+home: https://blanpa.github.io/nats-explorer/
+sources:
+  - https://github.com/blanpa/nats-explorer
+keywords:
+  - nats
+  - jetstream
+  - messaging

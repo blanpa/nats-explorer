@@ -1,0 +1,85 @@
+# One replica on purpose. The explorer keeps the recorded messages in its own
+# memory and, with persistence on, in a SQLite file beside it; two pods would
+# each see half the traffic and answer a browser with half a history. Scale
+# the NATS cluster, not this.
+replicaCount: 1
+
+image:
+  repository: ghcr.io/blanpa/nats-explorer
+  # Empty uses the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 3002
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: nats-explorer.example.com
+  # The path the explorer is served under. Anything but "/" is passed to the
+  # container as BASE_PATH, so no rewrite annotation is needed: the app knows
+  # its own prefix and builds every URL with it.
+  path: /
+  tls: []
+  #  - secretName: nats-explorer-tls
+  #    hosts:
+  #      - nats-explorer.example.com
+
+# Where connections, templates and the recorded history live. Without it the
+# UI keeps its state in the browser and the history is gone on restart.
+persistence:
+  enabled: false
+  size: 5Gi
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  mountPath: /data
+
+# Settings of the explorer itself. See docs/installation.md for the full list.
+config:
+  # In-memory budget for the recorded history, MB.
+  historyMb: 256
+  # Keep a SQLite copy of the history. Needs persistence.enabled.
+  persistHistory: false
+  historyRetention: 72h
+  # Extra environment, e.g. SOURCE_URL or ROLLUP_RETENTION.
+  extraEnv: {}
+
+auth:
+  # "none", "token" or "users".
+  mode: none
+  # With mode "token": taken from an existing secret when secretName is set,
+  # otherwise the chart creates one from this value.
+  token: ""
+  secretName: ""
+  # With mode "users": a secret holding a "users" key with
+  # name:role:bcrypt-hash lines.
+  usersSecretName: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+
+podAnnotations: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  fsGroup: 65532
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
