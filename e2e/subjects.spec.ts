@@ -25,7 +25,8 @@ test('live tree, detail, chart and branch view', async ({ page }) => {
   // Chart a number: at least two points exist.
   await page.locator('.jv-chartable').first().click();
   await expect(page.getByRole('button', { name: /Chart: value/ })).toBeVisible();
-  await expect(page.locator('.card svg path[stroke-width="1.6"]')).toBeVisible();
+  // The line comes in a piece per stretch of messages, so take the first.
+  await expect(page.locator('.card svg path[stroke-width="1.6"]').first()).toBeVisible();
 
   // Branch view: selecting a parent shows what flows below it.
   await page.getByRole('treeitem').filter({ hasText: 'live' }).first().click();

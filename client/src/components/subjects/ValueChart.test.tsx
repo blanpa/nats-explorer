@@ -182,12 +182,17 @@ describe('mergePoints', () => {
     expect(mergePoints(empty, messages, 'temp', 'minmax').map(p => p.t)).toEqual([1000, 2000, 3000]);
   });
 
-  it('leaves a reduced series alone', () => {
-    // An average or a count is a reduction; putting one raw message next to
-    // it would make the last bucket jump.
-    for (const agg of ['avg', 'sum', 'count', 'rate', 'min', 'max'] as const) {
-      expect(mergePoints(series(agg), messages, 'temp', agg).map(p => p.t)).toEqual([1000]);
+  it('continues a reduced series in the buckets the server used', () => {
+    // A raw message must not stand next to reduced ones -- but the same
+    // reduction applied again may. One sample behind one point means every
+    // live message is a bucket of its own.
+    for (const agg of ['avg', 'sum', 'count', 'min', 'max'] as const) {
+      expect(mergePoints(series(agg), messages, 'temp', agg).map(p => p.t)).toEqual([1000, 2000, 3000]);
     }
+    expect(mergePoints(series('avg'), messages, 'temp', 'avg').map(p => p.v)).toEqual([20, 30, 25]);
+    expect(mergePoints(series('count'), messages, 'temp', 'count').map(p => p.v)).toEqual([20, 1, 1]);
+    // A rate is a difference, so it needs two buckets before it says anything.
+    expect(mergePoints(series('rate'), messages, 'temp', 'rate').map(p => p.t)).toEqual([1000, 3000]);
   });
 
   it('uses the messages alone when there is no series yet', () => {

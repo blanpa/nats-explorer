@@ -85,16 +85,97 @@ export function decimate(points: Point[], buckets: number): Point[] {
 }
 
 /**
- * Series points plus live messages the series does not cover yet.
+ * How long a silence has to be before the line is cut there.
  *
- * Only the raw min/max reduction can be extended this way. Appending one
- * message to an average, a sum or a count would put an unreduced value next
- * to reduced ones and the last bucket would jump; those wait for the next
- * answer from the server instead.
+ * A chart that joins the point before a two-minute outage to the point after
+ * it draws a value the subject never sent, and a straight ramp is exactly
+ * what a steady sensor looks like -- the one reading a reader is most likely
+ * to trust. Anything four times the usual distance apart is a gap, not a
+ * step; the usual distance is taken as the upper quartile of the distances,
+ * because decimated points come in pairs and half the distances are the tiny
+ * one inside a bucket.
  */
+export const GAP_FACTOR = 4;
+
+export function gapAfter(points: Point[]): number {
+  if (points.length < 5) return Number.POSITIVE_INFINITY;
+  const deltas: number[] = [];
+  for (let i = 1; i < points.length; i++) {
+    const d = points[i].t - points[i - 1].t;
+    if (d > 0) deltas.push(d);
+  }
+  if (deltas.length < 4) return Number.POSITIVE_INFINITY;
+  deltas.sort((a, b) => a - b);
+  const usual = deltas[Math.min(deltas.length - 1, Math.floor(deltas.length * 0.75))];
+  return usual * GAP_FACTOR;
+}
+
+/** The points as the stretches that were actually sent, silences cut out. */
+export function splitOnGaps(points: Point[], gap = gapAfter(points)): Point[][] {
+  if (!Number.isFinite(gap)) return [points];
+  const out: Point[][] = [];
+  let run: Point[] = [];
+  for (const p of points) {
+    if (run.length && p.t - run[run.length - 1].t > gap) {
+      out.push(run);
+      run = [];
+    }
+    run.push(p);
+  }
+  if (run.length) out.push(run);
+  return out;
+}
+
+/**
+ * One more point of a reduced series, from the messages that arrived after
+ * the server answered.
+ *
+ * A raw message cannot be appended to an average or a sum, but the same
+ * reduction can be applied again. The server buckets by sample count, not by
+ * the clock: with `samples` messages behind `points` points, every `size` of
+ * them make one more point, reduced the way the ones before it were. Only
+ * whole buckets are added -- a half-filled average climbs while it fills and
+ * would read as a movement in the data that never happened.
+ */
+export function extendSeries(series: HistorySeries, live: Point[], agg: Aggregation): Point[] {
+  const size = Math.max(1, Math.round(series.samples / Math.max(1, series.points.length)));
+  const chunks: Point[][] = [];
+  for (let i = 0; i + size <= live.length; i += size) chunks.push(live.slice(i, i + size));
+  const last = (c: Point[]) => c[c.length - 1];
+  if (agg === 'rate') {
+    // A rate is a difference between neighbours, and the server's last point
+    // is already a rate -- there is no value to continue from, so the live
+    // ones start with the first pair of their own. A counter that goes
+    // backwards (a restart, a wrap) reads as no change, as on the server.
+    const out: Point[] = [];
+    for (let i = 1; i < chunks.length; i++) {
+      const a = last(chunks[i - 1]);
+      const b = last(chunks[i]);
+      const dt = (b.t - a.t) / 1000;
+      if (dt > 0) out.push({ t: b.t, v: Math.max(0, (b.v - a.v) / dt) });
+    }
+    return out;
+  }
+  return chunks.map(c => {
+    const sum = c.reduce((n, p) => n + p.v, 0);
+    switch (agg) {
+      case 'min':
+        return { t: last(c).t, v: Math.min(...c.map(p => p.v)) };
+      case 'max':
+        return { t: last(c).t, v: Math.max(...c.map(p => p.v)) };
+      case 'sum':
+        return { t: last(c).t, v: sum };
+      case 'count':
+        return { t: last(c).t, v: c.length };
+      default:
+        return { t: last(c).t, v: sum / c.length };
+    }
+  });
+}
+
+/** Series points plus the live messages the series does not cover yet. */
 export function mergePoints(series: HistorySeries | null | undefined, messages: NatsMessage[], fieldPath: string, agg: Aggregation = 'minmax'): Point[] {
   const out: Point[] = series ? series.points.map(([t, v]) => ({ t, v })) : [];
-  if (series && agg !== 'minmax') return out;
   // Where the server's answer ends, by the clock. It used to be by sequence
   // number, and those restart at one with every reconnect: after a restart
   // "newer than 16 624" was every live message, and the chart stopped
@@ -102,13 +183,19 @@ export function mergePoints(series: HistorySeries | null | undefined, messages: 
   const after = out.length ? out[out.length - 1].t : 0;
   const delay = isDelayField(fieldPath);
   const path = delay ? delaySource(fieldPath) : fieldPath;
+  const live: Point[] = [];
   for (const m of messages) {
     if (m.payloadType !== 'json') continue;
     if (series && m.timestamp <= after) continue;
     const v = delay ? delayOf(m, path) : extractNumber(m.payload, path);
-    if (v !== null) out.push({ t: m.timestamp, v });
+    if (v !== null) live.push({ t: m.timestamp, v });
   }
-  return out;
+  // Raw points are their own reduction, so min/max simply grows by message.
+  if (!series || agg === 'minmax') return out.concat(live);
+  // A minute rollup is the one thing that cannot be continued here: its
+  // buckets are the clock's, not the samples', and the server owns them.
+  if (series.source === 'rollup') return out;
+  return out.concat(extendSeries(series, live, agg));
 }
 
 export type ChartType = 'line' | 'area' | 'step' | 'bars' | 'dots';
@@ -119,6 +206,39 @@ export const CHART_TYPES: { id: ChartType; label: string }[] = [
   { id: 'bars', label: 'Bars' },
   { id: 'dots', label: 'Dots' },
 ];
+
+/**
+ * Where the horizontal lines of the axis go.
+ *
+ * Four lines spread evenly between the extremes label the axis with
+ * whatever the data happens to end at: a sensor that only ever reports
+ * 22.3 and 22.4 gets lines at 22.37 and 22.33, digits that exist for no
+ * reason. A round step reads as a scale instead -- 22.30, 22.35, 22.40 --
+ * and says what a pixel is worth. The extremes are still named in the
+ * header, so nothing is lost by not labelling them here.
+ */
+export function niceTicks(min: number, max: number, want = 4): number[] {
+  if (!(max > min) || !Number.isFinite(min) || !Number.isFinite(max)) return [min];
+  const mag = 10 ** Math.floor(Math.log10((max - min) / want));
+  // Multiples of the step rather than repeated addition: 0.1 added thirty
+  // times is 3.0000000000000004, and that is what the label would say.
+  const at = (step: number) => {
+    const out: number[] = [];
+    for (let i = Math.ceil(min / step); i * step <= max + step * 1e-9; i++) out.push(Number((i * step).toPrecision(12)));
+    return out;
+  };
+  // The widest step that still draws enough lines to read the scale by.
+  // Widest, because 19 · 20 · 21 says as much as 19 · 19.5 · 20 · 20.5 · 21
+  // and says it with half the ink; enough, because two lines on a chart are
+  // a scale only in the arithmetic sense.
+  let best = at(mag);
+  for (const m of [2, 2.5, 5, 10]) {
+    const ticks = at(m * mag);
+    if (ticks.length < want - 1) break;
+    best = ticks;
+  }
+  return best.length ? best : [min, max];
+}
 
 export function niceNumber(v: number): string {
   const abs = Math.abs(v);
@@ -201,7 +321,9 @@ export default function ValueChart({ series, height = 160, onPick, marker, type,
     );
   }
 
-  const pad = { top: 14, right: 14, bottom: 22, left: 56 };
+  // Room for the axis labels, which are read at arm's length on a screen
+  // full of other numbers: 11px, the size everything else in the panel is.
+  const pad = { top: 14, right: 14, bottom: 24, left: 60 };
   const w = width - pad.left - pad.right;
   const h = height - pad.top - pad.bottom;
 
@@ -238,7 +360,7 @@ export default function ValueChart({ series, height = 160, onPick, marker, type,
       ? points.map((p, i) => (i ? `H${x(p.t).toFixed(1)} V${y(p.v).toFixed(1)}` : `M${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`)).join(' ')
       : points.map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
 
-  const yTicks = Array.from({ length: 4 }, (_, i) => (normalize ? i / 3 : axisMin + ((axisMax - axisMin) * i) / 3));
+  const yTicks = normalize ? niceTicks(0, 1, 5) : niceTicks(axisMin, axisMax);
   const yAt = (v: number) => (normalize ? pad.top + h - v * h : yOf(drawable[0])(v));
   const xTickCount = Math.min(6, Math.max(2, Math.floor(w / 110)));
   const xTicks = Array.from({ length: xTickCount }, (_, i) => t0 + (tRange * i) / (xTickCount - 1));
@@ -318,6 +440,11 @@ export default function ValueChart({ series, height = 160, onPick, marker, type,
   const single = drawable.length === 1 ? drawable[0] : null;
   const totalPoints = series.reduce((n, s) => n + s.points.length, 0);
   const info = single?.s.info;
+  // The server counted what it had when it answered; the live messages
+  // appended since are on the screen too. Reporting only the server's count
+  // next to the points drawn reads as a contradiction -- "80 pts, 79 in
+  // history" -- for what is really the same messages counted a moment apart.
+  const inHistory = info ? info.samples + Math.max(0, (single?.s.points.length ?? 0) - info.points.length) : 0;
   const barWidth = single ? Math.max(1, Math.min(14, (w / single.points.length) * 0.7)) : 0;
   const zeroY = single ? (normalize ? pad.top + h : yOf(single)(0)) : 0;
 
@@ -330,7 +457,9 @@ export default function ValueChart({ series, height = 160, onPick, marker, type,
             <span key={d.s.field} className="flex items-baseline gap-1.5 min-w-0">
               <span className="w-2 h-2 rounded-full shrink-0 self-center" style={{ background: d.s.color }} aria-hidden />
               <span className="font-mono text-muted truncate">{d.s.label ?? d.s.field}</span>
-              <span className="font-mono font-semibold text-fg tabular-nums">{niceNumber(at.v)}</span>
+              {/* The one number the chart is about; the rest of the row is
+                  what it is called and where it stands. */}
+              <span className="font-mono font-semibold text-fg tabular-nums text-md leading-none">{niceNumber(at.v)}</span>
             </span>
           );
         })}
@@ -347,7 +476,7 @@ export default function ValueChart({ series, height = 160, onPick, marker, type,
         <span className="ml-auto min-w-0 truncate text-faint font-mono tabular-nums">
           {single ? `min ${niceNumber(single.min)} · max ${niceNumber(single.max)} · ` : ''}
           {formatCount(totalPoints)} pts
-          {info && info.samples > 0 && <span> · {formatCount(info.samples)} in history</span>}
+          {info && inHistory > 0 && <span> · {formatCount(inHistory)} in history</span>}
           {/* Over long ranges the points are minute aggregates, not messages. */}
           {info?.source === 'rollup' && <span> · per minute</span>}
           {normalize && <span> · scaled per field</span>}
@@ -370,7 +499,7 @@ export default function ValueChart({ series, height = 160, onPick, marker, type,
         {yTicks.map((v, i) => (
           <g key={i}>
             <line x1={pad.left} x2={width - pad.right} y1={yAt(v)} y2={yAt(v)} stroke="rgb(var(--border))" strokeDasharray="2 4" />
-            <text x={pad.left - 6} y={yAt(v) + 3} textAnchor="end" className="text-2xs font-mono" fill="rgb(var(--fg-faint))">
+            <text x={pad.left - 6} y={yAt(v) + 4} textAnchor="end" className="text-xs font-mono" fill="rgb(var(--fg-faint))">
               {normalize ? `${Math.round(v * 100)}%` : niceNumber(v)}
             </text>
           </g>
@@ -379,9 +508,9 @@ export default function ValueChart({ series, height = 160, onPick, marker, type,
           <text
             key={i}
             x={x(t)}
-            y={height - 6}
+            y={height - 7}
             textAnchor={i === 0 ? 'start' : i === xTicks.length - 1 ? 'end' : 'middle'}
-            className="text-2xs font-mono"
+            className="text-xs font-mono"
             fill="rgb(var(--fg-faint))"
           >
             {formatTime(t, false)}
@@ -408,18 +537,32 @@ export default function ValueChart({ series, height = 160, onPick, marker, type,
         {drawable.map(d => {
           if (type === 'bars' && single) return null;
           const y = yOf(d);
-          const line = pathOf(d.points, y);
+          // Each stretch is drawn on its own, so a silence stays a hole
+          // instead of a line the subject never sent.
+          const runs = splitOnGaps(d.points);
           const last = d.points[d.points.length - 1];
           return (
             <g key={d.s.field}>
-              {type === 'area' && (
-                <path d={`${line} L${x(last.t).toFixed(1)},${pad.top + h} L${x(d.points[0].t).toFixed(1)},${pad.top + h} Z`} fill={d.s.color} opacity={0.12} />
-              )}
-              {type === 'dots' ? (
-                d.points.map((p, i) => <circle key={i} cx={x(p.t)} cy={y(p.v)} r={2.5} fill={d.s.color} />)
-              ) : (
-                <path d={line} fill="none" stroke={d.s.color} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
-              )}
+              {type === 'area' &&
+                runs.map((run, i) => (
+                  <path
+                    key={i}
+                    d={`${pathOf(run, y)} L${x(run[run.length - 1].t).toFixed(1)},${pad.top + h} L${x(run[0].t).toFixed(1)},${pad.top + h} Z`}
+                    fill={d.s.color}
+                    opacity={0.12}
+                  />
+                ))}
+              {type === 'dots'
+                ? d.points.map((p, i) => <circle key={i} cx={x(p.t)} cy={y(p.v)} r={2.5} fill={d.s.color} />)
+                : runs.map((run, i) =>
+                    // A stretch of one message is a dot; a path through one
+                    // point draws nothing at all.
+                    run.length === 1 ? (
+                      <circle key={i} cx={x(run[0].t)} cy={y(run[0].v)} r={1.8} fill={d.s.color} />
+                    ) : (
+                      <path key={i} d={pathOf(run, y)} fill="none" stroke={d.s.color} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+                    ),
+                  )}
               {type !== 'dots' && <circle cx={x(last.t)} cy={y(last.v)} r="3" fill={d.s.color} stroke="rgb(var(--bg-1))" strokeWidth="1.5" />}
             </g>
           );
