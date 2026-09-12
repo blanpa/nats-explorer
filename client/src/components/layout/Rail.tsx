@@ -1,4 +1,21 @@
-import { Activity, Archive, Bell, KeyRound, Layers, Moon, Network, Radio, ScrollText, Send, Server, Settings, Siren, Sun, type LucideIcon } from 'lucide-react';
+import {
+  Activity,
+  Archive,
+  Bell,
+  KeyRound,
+  Layers,
+  Moon,
+  Network,
+  Radio,
+  ScrollText,
+  Send,
+  Server,
+  Settings,
+  Siren,
+  Sun,
+  Table2,
+  type LucideIcon,
+} from 'lucide-react';
 import { MODULES, useStore, type Module } from '../../store';
 import { useAlerts, worstSeverity } from '../../store/alerts';
 import { Tooltip } from '../ui/misc';
@@ -6,6 +23,7 @@ import { cn } from '../../lib/utils';
 
 const ICONS: Record<Module, LucideIcon> = {
   subjects: Network,
+  state: Table2,
   jetstream: Layers,
   kv: KeyRound,
   objects: Archive,

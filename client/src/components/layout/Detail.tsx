@@ -10,6 +10,7 @@ import ObjStoreView from '../objectstore/ObjStoreView';
 import ServiceDetail from '../services/ServiceDetail';
 import MonitoringDashboard from '../monitoring/MonitoringDashboard';
 import EventsView from '../events/EventsView';
+import StateView from '../state/StateView';
 import ClusterView from '../cluster/ClusterView';
 import AlertsView from '../alerts/AlertsView';
 import AuditView from '../audit/AuditView';
@@ -61,6 +62,7 @@ export default function Detail() {
       ) : (
         <>
           {module === 'subjects' && <SubjectDetail />}
+          {module === 'state' && <StateView />}
           {module === 'jetstream' && <StreamDetail />}
           {module === 'kv' && <KvBucketView />}
           {module === 'objects' && <ObjStoreView />}

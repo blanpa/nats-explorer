@@ -7,10 +7,11 @@ import { byArrival, messageKey } from '../lib/messages';
 import { clearAsyncCache } from '../lib/useAsync';
 import { ancestorsOf, type FlatNode } from '../components/subjects/tree';
 
-export type Module = 'subjects' | 'jetstream' | 'kv' | 'objects' | 'services' | 'requests' | 'events' | 'monitor' | 'cluster' | 'alerts' | 'audit';
+export type Module = 'subjects' | 'state' | 'jetstream' | 'kv' | 'objects' | 'services' | 'requests' | 'events' | 'monitor' | 'cluster' | 'alerts' | 'audit';
 
 export const MODULES: { id: Module; label: string; hasExplorer: boolean }[] = [
   { id: 'subjects', label: 'Subjects', hasExplorer: true },
+  { id: 'state', label: 'State', hasExplorer: false },
   { id: 'jetstream', label: 'JetStream', hasExplorer: true },
   { id: 'kv', label: 'Key-Value', hasExplorer: true },
   { id: 'objects', label: 'Object Store', hasExplorer: true },
