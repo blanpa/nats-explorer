@@ -73,6 +73,11 @@ func TestBroadcastDuringDisconnectDoesNotPanic(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	waitFor(t, func() bool { return hub.ClientCount() == 0 })
+	// A client leaves the map before its callback runs -- the map is who is
+	// connected, OnDisconnect is what happens afterwards -- so the count
+	// reaching zero can beat the last call by a hair, and did about once in
+	// fifty runs of the whole suite.
+	waitFor(t, func() bool { return disconnects.Load() == 20 })
 	close(stop)
 	wg.Wait()
 
