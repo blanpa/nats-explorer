@@ -83,14 +83,16 @@ Then add your server in the connection dialog. The [installation guide](https://
 ## What it does
 
 - **Subjects** -- a live tree of every subject a connection sees, virtualized and filterable, with the last value and the rate of each, and bookmarks for the ones worth coming back to
-- **Messages** -- JSON, raw and hex; history; diff to the previous message; MessagePack, Protobuf and Avro decoded into the tree; and the headers NATS sets explaining what they do
+- **Messages** -- JSON, text, XML, HTML, hex and base64 views; history; diff to the previous message or to one held as the reference; MessagePack, Protobuf and Avro decoded into the tree and into the lists; a protobuf payload read by field number even without its `.proto`; and the headers NATS sets explaining what they do
 - **Charts** -- click a number in a payload to chart that field over time, several at once with seven reductions, drag across a chart to zoom into a stretch of it, or chart the delay between the producer's clock and yours
-- **Debugging** -- what a subject would run into (subscriptions, streams, consumers, rules, schema), one message followed through the subjects it touched, the sequences a stream does not have, and the message a consumer is stuck on
+- **Debugging** -- what a subject would run into (subscriptions, streams, consumers, rules, schema), one message followed through the subjects it touched, the time between two subjects with the ones that never arrived, the sequences a stream does not have, the message a consumer is stuck on and when its backlog will be empty
+- **Events** -- the JetStream and system advisories as a log: who gave up on which message, what was terminated, which stream lost quorum, which API call was refused
+- **State** -- the newest message of every subject as one table, fields in columns, age beside it, exportable as CSV
 - **History that outlives the tab** -- an optional SQLite copy with a retention, time ranges from 15 minutes to forever, full-text search, and exports in six shapes including a `nats` CLI replay script
 - **JetStream** -- streams, consumers, messages and live tail; Key-Value buckets and Object Stores; JetStream domains for hub and leaf setups
 - **Filter and schema** -- a [CEL](https://cel.dev/) expression such as `payload.temp > 80` narrows tree, lists and charts; each subject's fields are read back from its own messages, and a schema pinned as expected colours the history green or red
-- **Alerts** -- rules watch a subject pattern for a condition and keep firing with no browser open, with an optional webhook
-- **Requests** -- saved templates, request/reply, and repeated runs with latency percentiles and a histogram of the replies
+- **Alerts** -- rules watch a subject pattern for a condition, or for a silence measured against the rhythm each subject has shown, and keep firing with no browser open, with an optional webhook
+- **Requests** -- saved templates, request/reply, and repeated runs with latency percentiles and a histogram of the replies; payloads written as JSON, text, XML, HTML, hex, base64 or protobuf
 - **Monitoring and cluster** -- throughput history, every node of the cluster, the JetStream meta cluster and stream placement, and a Prometheus endpoint
 - **Connections** -- several servers at once, with token, user/password, NKey, credentials or mutual TLS, and subscriptions changed live
 - **Teams** -- `admin` and `viewer` roles, session cookies, and an audit log of every write

@@ -26,12 +26,27 @@ nav_order: 3
 - Filter with several words; system roots (`$JS`, `$KV`, `$SYS`, `_INBOX`, …) are hidden behind a toggle
 - Selecting a branch shows the recent messages of everything below it
 - Large subject spaces cost what is on screen, not what the server sees: see [Performance](#performance)
+- Two subscriptions that overlap -- `uns.>` next to `uns.acme.>` -- are marked "doubled": NATS delivers one copy per subscription, so every message below the narrower pattern arrives twice, the rates and counts double, and nothing else says why
+
+## State
+
+A message list answers "what was sent". In front of a running plant the question is "what is it": the newest value of every sensor, setpoint and counter at once. The State module is that table -- one row per subject under a root, the scalar fields of its newest message as columns (the ones most rows carry, commonest first), and its age beside it.
+
+The age is why the table exists: a value is only as good as the moment it arrived, so a minute is marked and ten minutes are marked louder, and the Age header sorts the oldest first -- what is dead in a plant of two thousand subjects is then the first row rather than a hunt through a tree. Where the payloads carry the producer's own clock, a **Clock** column shows the gap to their arrival, and a negative one is marked: a clock running ahead is a problem, not a fast network. Copy takes what is on screen as CSV.
 
 ## Following a message
 
-A request and its reply, an order and its shipment, a saga across five services: the messages belong together and live on different subjects, and what ties them is a value inside them. "Follow this message…" in the overflow menu offers the values that could be it -- the `Nats-Msg-Id` first, then the fields whose name reads like an id, then other strings, because a guess is what that is -- searches the recorded history for it across every subject, and lists the hits in time order with the gap between each.
+A request and its reply, an order and its shipment, a saga across five services: the messages belong together and live on different subjects, and what ties them is a value inside them. "Follow this message…" in the overflow menu offers the values that could be it, searches the recorded history for the chosen one across every subject, and lists the hits in time order with the gap between each.
+
+The candidates come best first: the trace id of a W3C `traceparent` header where the producers propagate one -- the id rather than the whole header, because every message of a trace carries that id while the span id after it belongs to this message alone -- then the `Nats-Msg-Id`, then the fields whose name reads like an id, then other strings, because a guess is what that is.
 
 The gap is the point: a chain that reads `+12 ms`, `+8 ms`, `+4.2 s` says where it waited. A row opens its subject. Only recorded messages can be followed, so a subject nobody was subscribed to has none.
+
+## Time between two subjects
+
+A service's request/reply latency is measured everywhere; the hop between two published messages is measured nowhere, and it is the one the business asks about. "Time to another subject…" in the overflow menu of a subject names the second subject, offers the fields both sides carry (id-like first) and pairs the messages by that value: p50, p95, p99, the spread as a histogram and the twenty slowest with both timestamps.
+
+The headline is not the median. It is how many of the first messages never produced a second one -- "36 pairs, 4 never arrived" says something no latency number can. A second message belongs to the newest first message before it, so an id reused a day later pairs with its own run; a message on the far subject with nothing before it is counted apart.
 
 ## What matches a subject
 
@@ -112,19 +127,40 @@ Six shapes, because what an export is for decides its shape:
 
 {% raw %}The replay script quotes for the shell, carries the headers, sends binary payloads through base64 and stdin, and escapes `{{` as `{{"{{"}}` -- `nats pub` expands Go templates in the body, so a payload holding `{{Count}}` would otherwise arrive as `1`.{% endraw %} The loaded messages can also be replayed straight through the publish API, with a pause and an optional subject rewrite.
 
+## Events
+
+JetStream publishes an advisory for everything that matters -- a consumer that gave up after its last attempt, a message terminated, a stream that lost quorum, an API call that was refused -- and the system account does the same for clients and servers. They are ordinary messages on `$JS.EVENT.>` and `$SYS.>`, which is why they used to read as JSON in the subject tree; the Events module reads them as a log instead:
+
+```
+billing on ORDERS gave up on sequence 41 after 5 deliveries
+billing on ORDERS asked for sequence 7 again in 30s
+A JetStream API call failed: $JS.API.STREAM.CREATE.ORDERS
+Stream ORDERS was deleted
+```
+
+"My message never arrived" is answered by one of those lines, not by a gauge. Twenty-odd types are named and carry a severity, so **Problems** hides the healthy API calls that make up most of the traffic; a search narrows by subject, kind or wording; a row opens its payload beside the list and its subject in the tree. An advisory nobody has taught the explorer about is still listed, with its type spelled out and the payload one click away -- a new event type is a thing that happened, and swallowing it is the one failure a log must not have. What the servers publish on a timer -- statsz, the per-message ack and latency metrics -- is not an event and is left out.
+
+The list is empty for exactly one reason, and it says so: nothing is subscribed. Two buttons turn on `$JS.>` or `$SYS.>`, the second one needing a connection with a system account.
+
 ## Alerts
 
 <img src="{{ '/screenshots/alerts-dark.png' | relative_url }}" alt="The Alerts module: what is firing, the rules behind it and the log" loading="lazy">
 
 A rule watches a subject pattern for a condition: an expression that holds, a subject that stopped sending, or both. It can be written from the Alerts module, or straight from the subject it is about -- the overflow menu of a subject opens the dialog with the pattern and the name already filled in, so only the condition is left to say. The backend evaluates the rules on the message path, so they keep working while no browser is open, and an optional webhook receives a JSON POST on every state change.
 
+A silence can be watched with a timeout -- "report this subject after 60 seconds" -- or by **learning each subject's own rhythm**. One timeout cannot be right for two thousand subjects sending at a dozen rates: set it for the meter and a sensor can die for a minute unnoticed; set it for the sensor and the meter alerts every hour. With the learned threshold the engine keeps the last sixteen gaps per subject and reports it after ten times the usual one -- the upper quartile rather than the average, because a subject that sends a burst every minute has many tiny gaps and a few big ones. A subject that has not sent at least eight times has shown no rhythm and is never reported, and the timeout stays useful next to it as a floor.
+
 The Alerts module lists what is firing right now, the rules with the number of subjects each one matches, and a log of state changes. A rule can be tried against the recorded messages before it is saved, which answers "how many of my messages would this match" without waiting. The rail badge counts the active alerts from every module, and a new warning or critical alert raises a toast.
 
 ## Message detail
 
-- JSON, raw and hex views; history of the last messages; diff to the previous message
+- JSON, raw, hex and base64 views; a payload that is XML or HTML is offered as itself, indented by its tags and never rendered -- a payload is someone else's text, and this window is not the place to run it
+- History of the last messages; **diff to the previous message**, or against a message held with "Compare to this": "what changed just now" is one question, "what changed since it was still working" is the other, and that message is rarely the one before
+- **The same payload again** is marked ×2, ×3 in the lists. A repeated `Nats-Msg-Id` is already called out, and it catches what NATS knows about; a retry storm looks different -- the identical payload seconds later with a fresh id, doubling counters while the rows differ by their timestamp alone. A subject whose payload practically never changes is left alone, because that is a level rather than a retry
 - Headers with their meaning: the ones NATS sets explain themselves -- the deduplication key, the publish preconditions, the rollups, where a sourced message came from -- and a `Nats-Msg-Id` seen twice among the messages on screen is marked
-- Payload decoders: rules per subject pattern decode MessagePack, Protocol Buffers (paste the `.proto`, name the message type) or Avro (paste the schema) into the JSON tree; the rules are kept with the other settings
+- Payload decoders: rules per subject pattern decode MessagePack, Protocol Buffers (paste the `.proto`; the message types it defines are offered under the field, and a file that does not parse says so there) or Avro (paste the schema) into the JSON tree; the rules are kept with the other settings. A protobuf rule works in both directions -- the same `.proto` encodes a payload written as JSON in the publish form, so Sparkplug B and its like can be sent as well as read
+- The decoded value reaches the lists too, not only the opened message: the subject tree, the history rail, the message table and the merged view show the fields rather than the word "binary", decoded once per payload and bounded, so a subject whose payloads are all protobuf is no longer a history of identical rows
+- **Protobuf without its `.proto`**: a binary payload that parses as a protobuf message is offered as **Fields** -- field numbers as keys, repeated fields as arrays, nested messages as subtrees, which is `protoc --decode_raw` in the panel. The guesses are named above the tree rather than hidden: length-delimited bytes read as text where they are printable and as a nested message otherwise, a 64-bit field as a double where that is a number someone would write down, and a varint past 2^53 as a string because a number would round it
 - Click a number in the JSON to chart it over time as line, area, step, bars or dots
 - Click a point in that chart to see the message behind it: the value decides which one, so a peak opens the message that caused it. Points older than what the browser holds are fetched from the persistent history
 - The other way round too: the message currently shown is marked in the chart, and its value and time head the chart instead of the newest ones. Picking another message in the history rail moves the marker with it
@@ -171,7 +207,7 @@ Once a schema is pinned, every message in the history rail and in a branch list 
 
 ### Consumers and replication
 
-A consumer row carries its lag, the distance between the stream head and what the consumer has delivered, with a warning arrow when the backlog grew over the last samples. Opening a row shows pending and ack-pending over time, sampled on every refresh of the list.
+A consumer row carries its lag, the distance between the stream head and what the consumer has delivered, with a warning arrow when the backlog grew over the last samples. Opening a row shows pending and ack-pending over time, sampled on every refresh of the list, and says in words where the backlog is going: "3 400 pending, catching up at 40/s -- empty in about 1 m 25 s", or "growing by 12/s -- not catching up at this rate". A least-squares line through the samples gives both numbers; under four samples it says what it is waiting for rather than inventing a rate from one poll.
 
 It also names what the consumer is waiting for. An ack floor cannot move past a message that is never acknowledged, so a stuck consumer is nearly always stuck on the oldest of its unacknowledged messages and everything else waits behind that one. The row names it -- sequence, subject, payload, how long ago it was stored -- and lists the window behind it. A filtered consumer sees only the subjects it takes.
 
@@ -201,7 +237,8 @@ A stream that mirrors or sources from another says so, with the lag and the time
 - Saved request templates in the sidebar: name, publish or request/reply, subject, headers, payload, timeout
 - Create, edit, duplicate, delete; import and export as JSON to share collections
 - **Repeated runs**: send a template up to 10 000 times with parallel senders and an optional pause; read sent/ok/errors, throughput and the first replies
-- Variables replaced per message in subject, payload and headers: {% raw %}`{{i}}`{% endraw %} (counter), {% raw %}`{{ts}}`{% endraw %} (unix milliseconds), {% raw %}`{{uuid}}`{% endraw %}, {% raw %}`{{rand:MIN-MAX}}`{% endraw %}
+- **The payload says what it is**: JSON, Text, XML, HTML, Hex, Base64 or Protobuf. The four text formats travel as they are typed and decide what is checked and what "Format" tidies -- JSON and XML are parsed and indented, HTML claims nothing because HTML parses whatever it is given, Text is left alone. Hex reads `de ad be ef`, `DEADBEEF`, `0x` and colons alike; Base64 ignores the line breaks of a pasted block; Protobuf takes JSON and encodes it with the `.proto` of the payload decoder whose pattern matches the subject. The three byte formats are encoded in the browser, so the counter shows the bytes that will travel rather than the characters typed, and half a hex byte refuses to send where a text payload that does not parse is still sent -- reproducing what a broken producer did is the reason the form exists
+- Variables replaced per message in subject, payload and headers: {% raw %}`{{i}}`{% endraw %} (counter), {% raw %}`{{ts}}`{% endraw %} (unix milliseconds), {% raw %}`{{uuid}}`{% endraw %}, {% raw %}`{{rand:MIN-MAX}}`{% endraw %} -- in a repeated run and in a single send alike
 
 A run reports its latency as minimum, average, p50, p95, p99 and maximum, plus a histogram of where the replies landed. The shape matters: a summary hides a run where most replies are fast and a few sit on the timeout.
 

@@ -21,7 +21,7 @@ NATS Explorer is a client-server application with a Go backend and React fronten
 ```mermaid
 flowchart LR
   subgraph browser["Browser -- React SPA"]
-    ui["Modules: Subjects, JetStream, KV,<br/>Object Store, Services, Requests,<br/>Monitoring, Cluster, Alerts, Audit"]
+    ui["Modules: Subjects, State, JetStream, KV,<br/>Object Store, Services, Requests, Events,<br/>Monitoring, Cluster, Alerts, Audit"]
     worker["Feed worker<br/>MessagePack decode, tree, coalescing"]
     ui <--> worker
   end
@@ -207,7 +207,9 @@ Components are organized by feature domain under `client/src/components/`:
 ```
 components/
   subjects/       # Subject tree, message detail, payload viewer, value chart,
-                  #   JSON tree, publish panel, schema
+                  #   JSON tree, publish panel, schema, step latency
+  state/          # The newest message of every subject as a table
+  events/         # JetStream and system advisories as a log
   jetstream/      # Streams, consumers, domain switch, stream messages
   kv/             # Key-Value buckets
   objectstore/    # Object stores

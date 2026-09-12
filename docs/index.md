@@ -56,6 +56,14 @@ docker compose up -d
 filterable, with the last value and the rate per subject. Tuned for tens of
 thousands of subjects at tens of thousands of messages per second.
 
+**State.** The newest message of every subject as a table -- its fields in
+columns, its age beside it -- because in front of a running plant the question is
+not what was sent but what it is.
+
+**Events.** The advisories JetStream and the system account publish, read as a
+log: a consumer that gave up after its last attempt, a message terminated, a
+stream that lost quorum, an API call that was refused.
+
 **History that outlives the tab.** An optional SQLite copy of every message, with
 a retention, ranges from 15 minutes to 30 days -- or a window dragged out of a
 chart -- full-text search across subjects, and minute aggregates behind the long
@@ -71,8 +79,10 @@ The fields of a subject are read back from its own messages, with types, ranges
 and a marker when newer messages drift from older ones.
 
 **Alerts.** Rules watch a subject pattern for an expression that holds or for a
-subject that fell silent. They run in the backend, so they keep firing without an
-open browser, with an optional webhook.
+subject that fell silent -- after a timeout, or after ten times the rhythm that
+subject has shown, which is the only kind that scales to two thousand of them.
+They run in the backend, so they keep firing without an open browser, with an
+optional webhook.
 
 **Requests.** Saved templates, request/reply, repeated runs with latency
 percentiles and a histogram of where the replies landed.
@@ -95,7 +105,7 @@ any explorer and read like a live connection -- analysis without server access.
 
 | Pane | |
 |:--|:--|
-| **Rail** | the modules: Subjects, JetStream, Key-Value, Object Store, Services, Requests, Monitoring, Cluster, Alerts, Audit log |
+| **Rail** | the modules: Subjects, State, JetStream, Key-Value, Object Store, Services, Requests, Events, Monitoring, Cluster, Alerts, Audit log |
 | **Explorer** | the tree or list of the current module |
 | **Detail** | messages with JSON, raw and hex views, history, diff and charts; the stream, bucket, store and request editors; the dashboards |
 
