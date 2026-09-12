@@ -14,6 +14,7 @@ import {
   LineChart,
   MoreVertical,
   MousePointerClick,
+  Pin,
   Send,
   Timer,
   X,
@@ -141,6 +142,11 @@ function SingleSubjectView() {
   const [matching, setMatching] = useState<string | null>(null);
   // The message on screen, followed through the other subjects it touched.
   const [tracing, setTracing] = useState<NatsMessage | null>(null);
+  // A message held as the one to compare against. "Diff to previous"
+  // answers "what changed just now"; the question after an incident is
+  // "what changed since it was still working", and that message is rarely
+  // the one before.
+  const [reference, setReference] = useState<NatsMessage | null>(null);
   const [stepping, setStepping] = useState<string | null>(null);
   const { data: rangedData, setData: setRangedData } = ranged;
 
@@ -621,8 +627,28 @@ function SingleSubjectView() {
                 <Button size="sm" variant="outline" active={showHistory} icon={<History size={13} />} onClick={() => setShowHistory(!showHistory)}>
                   History
                 </Button>
-                <Button size="sm" variant="outline" active={showDiff} disabled={!previous} icon={<Diff size={13} />} onClick={() => setShowDiff(v => !v)}>
-                  Diff to previous
+                <Button
+                  size="sm"
+                  variant="outline"
+                  active={showDiff}
+                  disabled={!(reference ?? previous)}
+                  icon={<Diff size={13} />}
+                  onClick={() => setShowDiff(v => !v)}
+                >
+                  {reference ? 'Diff to reference' : 'Diff to previous'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={<Pin size={13} />}
+                  title={
+                    reference
+                      ? `Comparing against the message from ${formatTime(reference.timestamp)}. Click to compare against the previous message again.`
+                      : 'Hold this message as the one to compare every other against — the last good one, usually.'
+                  }
+                  onClick={() => setReference(r => (r ? null : display))}
+                >
+                  {reference ? `Reference · ${formatTime(reference.timestamp)}` : 'Compare to this'}
                 </Button>
                 {chartFields.length > 0 && (
                   <Button size="sm" variant="outline" active icon={<LineChart size={13} />} onClick={() => setChartFields([])}>
@@ -677,10 +703,10 @@ function SingleSubjectView() {
 
               {subject && <SchemaPanel subject={subject} range={range} />}
 
-              {showDiff && previous && (
+              {showDiff && (reference ?? previous) && (
                 <div>
-                  <div className="section-title mb-1">Diff · previous → current</div>
-                  <DiffView prev={prettyJson(previous.payload)} curr={prettyJson(display.payload)} />
+                  <div className="section-title mb-1">Diff · {reference ? `reference ${formatTime(reference.timestamp)}` : 'previous'} → current</div>
+                  <DiffView prev={prettyJson((reference ?? previous)!.payload)} curr={prettyJson(display.payload)} />
                 </div>
               )}
 

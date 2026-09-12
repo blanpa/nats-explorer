@@ -1,8 +1,10 @@
+import { useMemo } from 'react';
 import { Loader2 } from 'lucide-react';
 import type { NatsMessage } from 'shared';
 import { messageKey } from '../../lib/messages';
 import { cn, formatBytes, formatTime, previewPayload } from '../../lib/utils';
 import { decodedPreview, useDecodedPreviews } from '../../lib/decodedPreview';
+import { describeRepeat, findRepeats } from '../../lib/repeats';
 import { useDecoders } from '../../lib/decoders';
 import { ColumnGrip, useColumnWidths } from '../ui/columns';
 import { SubjectText } from '../ui/SubjectText';
@@ -39,6 +41,8 @@ export default function MessageList({ messages, subjectPrefix, onOpen, onSelect,
   const { widths, resize } = useColumnWidths('ne.messageListCols', DEFAULT_WIDTHS);
   const previews = useDecodedPreviews();
   const rules = useDecoders(s => s.rules);
+  // The same payload again within half a minute is a retry, not a reading.
+  const repeats = useMemo(() => findRepeats(messages), [messages]);
   const grid = { gridTemplateColumns: `${widths.time}px ${widths.subject}px minmax(0, 1fr) ${widths.size}px` };
 
   const header = (
@@ -92,6 +96,7 @@ export default function MessageList({ messages, subjectPrefix, onOpen, onSelect,
         const line = m.payloadType === 'binary' ? decodedPreview(previews, rules, m.subject, m.payload, 90) : null;
         const p = line ? { text: line, tone: 'obj' as const } : previewPayload(m.payload, m.payloadType, 90);
         const below = subjectPrefix && m.subject.startsWith(`${subjectPrefix}.`) ? m.subject.slice(subjectPrefix.length + 1) : null;
+        const repeat = repeats.get(m);
         return (
           <div
             className={cn(
@@ -113,7 +118,15 @@ export default function MessageList({ messages, subjectPrefix, onOpen, onSelect,
             ) : (
               <SubjectText subject={m.subject} />
             )}
-            <span className={cn('font-mono truncate', toneClass[p.tone])}>{p.text}</span>
+            <span className={cn('font-mono truncate', toneClass[p.tone])}>
+              {/* The same payload again is a retry; a new one it is not. */}
+              {repeat && (
+                <span className="text-warn mr-1.5" title={describeRepeat(repeat)}>
+                  ×{repeat.count}
+                </span>
+              )}
+              {p.text}
+            </span>
             <span className="text-right font-mono tabular-nums text-muted text-xs truncate">{formatBytes(m.size)}</span>
           </div>
         );

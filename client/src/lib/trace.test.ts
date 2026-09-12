@@ -1,6 +1,6 @@
 import type { NatsMessage } from 'shared';
 import { describe, expect, it } from 'vitest';
-import { traceCandidates, traceSteps } from './trace';
+import { traceCandidates, traceIdOf, traceSteps } from './trace';
 
 const msg = (over: Partial<NatsMessage> = {}): NatsMessage => ({
   subject: 'orders.created',
@@ -60,5 +60,29 @@ describe('traceSteps', () => {
     const list = [msg({ timestamp: 2 }), msg({ timestamp: 1 })];
     traceSteps(list);
     expect(list.map(m => m.timestamp)).toEqual([2, 1]);
+  });
+});
+
+describe('traceIdOf', () => {
+  const withHeader = (value: string): NatsMessage => ({
+    subject: 's',
+    payload: '{}',
+    payloadType: 'json',
+    timestamp: 1,
+    size: 2,
+    headers: { traceparent: [value] },
+  });
+
+  it('takes the trace id out of a traceparent, not the whole header', () => {
+    // Every message of one trace carries this id; the span id after it is
+    // this message alone, which is why the raw header finds nothing else.
+    expect(traceIdOf(withHeader('00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'))).toBe('4bf92f3577b34da6a3ce929d0e0e4736');
+    expect(traceIdOf(withHeader('not a traceparent'))).toBeNull();
+    expect(traceIdOf({ subject: 's', payload: '{}', payloadType: 'json', timestamp: 1, size: 2 })).toBeNull();
+  });
+
+  it('offers it first, because it ties a whole trace together', () => {
+    const candidates = traceCandidates(withHeader('00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'));
+    expect(candidates[0]).toEqual({ label: 'traceparent (trace id)', value: '4bf92f3577b34da6a3ce929d0e0e4736' });
   });
 });

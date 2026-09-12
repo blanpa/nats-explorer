@@ -1,8 +1,10 @@
+import { useMemo } from 'react';
 import { Loader2 } from 'lucide-react';
 import type { NatsMessage } from 'shared';
 import { messageKey } from '../../lib/messages';
 import { cn, formatBytes, formatCount, formatTime, previewPayload } from '../../lib/utils';
 import { decodedPreview, useDecodedPreviews } from '../../lib/decodedPreview';
+import { describeRepeat, findRepeats } from '../../lib/repeats';
 import { useDecoders } from '../../lib/decoders';
 import { SchemaMark } from '../ui/misc';
 import { VirtualRows } from '../ui/VirtualRows';
@@ -36,6 +38,7 @@ export default function HistoryRail({ messages, active, onPick, onLoadOlder, loa
   const paging = !!onLoadOlder;
   const previews = useDecodedPreviews();
   const rules = useDecoders(s => s.rules);
+  const repeats = useMemo(() => findRepeats(messages), [messages]);
   return (
     <div className="shrink-0 border-r border-line flex flex-col min-h-0" style={{ width }}>
       <div className="flex items-center h-9 px-3 border-b border-line text-xs text-muted">
@@ -72,6 +75,7 @@ export default function HistoryRail({ messages, active, onPick, onLoadOlder, loa
         rowKey={i => messageKey(messages[messages.length - 1 - i])}
         renderRow={i => {
           const m = messages[messages.length - 1 - i];
+          const repeat = repeats.get(m);
           const line = m.payloadType === 'binary' ? decodedPreview(previews, rules, m.subject, m.payload, 48) : null;
           const p = line ? { text: line, tone: 'obj' as const } : previewPayload(m.payload, m.payloadType, 48);
           return (
@@ -83,7 +87,14 @@ export default function HistoryRail({ messages, active, onPick, onLoadOlder, loa
                   <span className="font-mono text-muted">{formatTime(m.timestamp)}</span>
                   <span className="ml-auto text-faint">{formatBytes(m.size)}</span>
                 </div>
-                <div className="font-mono text-xs truncate text-fg/80">{p.text}</div>
+                <div className="font-mono text-xs truncate text-fg/80">
+                  {repeat && (
+                    <span className="text-warn mr-1" title={describeRepeat(repeat)}>
+                      ×{repeat.count}
+                    </span>
+                  )}
+                  {p.text}
+                </div>
               </div>
             </div>
           );

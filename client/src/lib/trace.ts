@@ -21,6 +21,17 @@ export interface TraceCandidate {
   value: string;
 }
 
+/**
+ * The trace id of a W3C `traceparent` header: `00-<32 hex>-<16 hex>-01`.
+ * The version and the flags are not part of what ties messages together,
+ * and neither is the span id -- that one is per message.
+ */
+export function traceIdOf(message: NatsMessage): string | null {
+  const header = Object.entries(message.headers ?? {}).find(([k]) => k.toLowerCase() === 'traceparent')?.[1]?.[0];
+  const m = header ? /^[0-9a-f]{2}-([0-9a-f]{32})-[0-9a-f]{16}-[0-9a-f]{2}$/i.exec(header.trim()) : null;
+  return m ? m[1] : null;
+}
+
 /** Field names that usually tie messages together. */
 const KEYish = /(^|[._-])(id|uuid|guid|key|ref|reference|correlation|correlationid|traceid|trace|span|order|session|request|txn|transaction)([._-]|id)?$/i;
 
@@ -37,6 +48,11 @@ function usable(v: unknown): v is string | number {
  */
 export function traceCandidates(message: NatsMessage): TraceCandidate[] {
   const out: TraceCandidate[] = [];
+  // W3C trace context, where the producers propagate it: every message of
+  // one trace carries the same trace id and its own span id, so the whole
+  // header finds this message alone and the trace id finds the trace.
+  const trace = traceIdOf(message);
+  if (trace) out.push({ label: 'traceparent (trace id)', value: trace });
   const id = msgId(message.headers);
   if (id) out.push({ label: 'Nats-Msg-Id', value: id });
   for (const [k, vals] of Object.entries(message.headers ?? {})) {

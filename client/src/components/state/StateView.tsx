@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Copy, RefreshCw, Table } from 'lucide-react';
 import { api } from '../../lib/api';
 import { columnsOf, stateCsv, stateRows } from '../../lib/stateTable';
+import { delayOf, timeFieldsOf } from '../../lib/payloadTime';
 import { useAsync } from '../../lib/useAsync';
 import { useStore } from '../../store';
 import { cn, copyToClipboard, formatDurationMs, formatTime, readSetting, writeSetting } from '../../lib/utils';
@@ -54,6 +55,19 @@ export default function StateView() {
 
   const rows = useMemo(() => stateRows(data ?? []), [data]);
   const columns = useMemo(() => columnsOf(rows), [rows]);
+  // Where a payload carries the producer's own clock, the difference to its
+  // arrival is that producer's skew plus the network. A negative one is a
+  // clock running ahead, which is a problem and not a fast network.
+  const skews = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const r of rows) {
+      const field = timeFieldsOf(r.message)[0];
+      const delay = field ? delayOf(r.message, field) : null;
+      if (delay !== null) out.set(r.subject, delay);
+    }
+    return out;
+  }, [rows]);
+  const anySkew = skews.size > 0;
   const now = Date.now();
   const shown = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -119,6 +133,14 @@ export default function StateView() {
                     {c}
                   </th>
                 ))}
+                {anySkew && (
+                  <th
+                    className="num w-24"
+                    title="The gap between the producer's own timestamp and the moment the message arrived. Negative means that producer's clock runs ahead."
+                  >
+                    Clock
+                  </th>
+                )}
                 <th className="num w-28">
                   <button type="button" className="hover:text-fg" onClick={() => setByAge(a => !a)} title="Sort by age, oldest first">
                     Age{byAge ? ' ↓' : ''}
@@ -130,6 +152,7 @@ export default function StateView() {
             <tbody>
               {shown.map(r => {
                 const age = now - r.at;
+                const skew = skews.get(r.subject);
                 return (
                   <tr key={r.subject} className="cursor-pointer" onClick={() => revealSubject(r.subject)} title={`Open ${r.subject}`}>
                     <td className="font-mono truncate max-w-[420px]">{r.subject}</td>
@@ -138,6 +161,11 @@ export default function StateView() {
                         {r.fields[c] ?? <span className="text-faint">–</span>}
                       </td>
                     ))}
+                    {anySkew && (
+                      <td className={cn('num font-mono', skew !== undefined && (skew < 0 || skew > 5000) && 'text-warn')}>
+                        {skew === undefined ? <span className="text-faint">–</span> : `${skew < 0 ? '−' : ''}${formatDurationMs(Math.abs(skew))}`}
+                      </td>
+                    )}
                     {/* The age is why this table exists: a value is only as
                         good as the moment it arrived. */}
                     <td className={cn('num font-mono', age > 60_000 && 'text-warn', age > 600_000 && 'text-danger')}>{formatDurationMs(age)}</td>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { subjectMatches } from './subjectMatch';
+import { covers, overlappingPatterns, subjectMatches } from './subjectMatch';
 
 /**
  * The same cases the server's matcher is held to. Where these two drift, the
@@ -38,5 +38,26 @@ describe('subjectMatches', () => {
   it('says no rather than throwing on nothing', () => {
     expect(subjectMatches('', 'orders')).toBe(false);
     expect(subjectMatches('orders.>', '')).toBe(false);
+  });
+});
+
+describe('covers', () => {
+  it('sees when one subscription makes another one dead weight', () => {
+    expect(covers('uns.>', 'uns.acme.>')).toBe(true);
+    expect(covers('uns.>', 'uns.acme.line1.temp')).toBe(true);
+    expect(covers('>', 'anything.at.all')).toBe(true);
+    expect(covers('uns.*.temp', 'uns.acme.temp')).toBe(true);
+    expect(covers('uns.acme.>', 'uns.>')).toBe(false);
+    expect(covers('uns.acme.temp', 'uns.acme.humidity')).toBe(false);
+    expect(covers('uns.*.temp', 'uns.acme.humidity')).toBe(false);
+    // A wildcard cannot be covered by a concrete token.
+    expect(covers('uns.acme.temp', 'uns.*.temp')).toBe(false);
+  });
+});
+
+describe('overlappingPatterns', () => {
+  it('names the pattern that adds nothing', () => {
+    expect(overlappingPatterns(['uns.>', 'uns.acme.>', 'orders.>'])).toEqual([{ wide: 'uns.>', narrow: 'uns.acme.>' }]);
+    expect(overlappingPatterns(['uns.>', 'orders.>'])).toEqual([]);
   });
 });

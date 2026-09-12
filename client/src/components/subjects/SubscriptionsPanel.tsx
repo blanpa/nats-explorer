@@ -6,6 +6,7 @@ import { useSavedConnections } from '../../store/savedConnections';
 import { api, errorMessage } from '../../lib/api';
 import { loadHistory } from '../../lib/feed';
 import { SYSTEM_TOPICS, type SystemTopicKey } from '../../lib/savedConnections';
+import { overlappingPatterns } from '../../lib/subjectMatch';
 import { cn, formatCount, formatNumber, readSetting, writeSetting } from '../../lib/utils';
 import { IconButton } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -101,6 +102,8 @@ function ConnectionSubscriptions({ conn, showName }: { conn: ConnectionStatus; s
     void change(own, next);
   };
 
+  const overlaps = overlappingPatterns(subs);
+
   return (
     <div className={cn('flex flex-col', busy && 'opacity-60 pointer-events-none')}>
       {showName && (
@@ -120,6 +123,10 @@ function ConnectionSubscriptions({ conn, showName }: { conn: ConnectionStatus; s
         const st = statOf(pattern);
         const topic = SYSTEM_TOPICS.find(t => t.subject === pattern);
         const quiet = st && st.subjects === 0;
+        // Two patterns that overlap deliver every message twice: NATS sends
+        // one copy per subscription, so the rate and the counts double and
+        // nothing says why.
+        const coveredBy = overlaps.find(o => o.narrow === pattern)?.wide;
         return (
           <div
             key={pattern}
@@ -130,6 +137,14 @@ function ConnectionSubscriptions({ conn, showName }: { conn: ConnectionStatus; s
             {st && st.subjects > 0 && (
               <span className="tabular-nums text-muted shrink-0" title="Subjects matching this pattern">
                 {formatNumber(st.subjects)} subj
+              </span>
+            )}
+            {coveredBy && (
+              <span
+                className="text-warn shrink-0"
+                title={`${coveredBy} already covers this pattern, so every message below it arrives twice — once per subscription. Removing this one changes nothing but the duplicates.`}
+              >
+                doubled
               </span>
             )}
             {quiet && (

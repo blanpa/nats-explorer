@@ -18,3 +18,40 @@ export function subjectMatches(pattern: string, subject: string): boolean {
   }
   return pt.length === st.length;
 }
+
+/**
+ * Whether one pattern covers everything another one does.
+ *
+ * Two subscriptions that overlap -- `uns.>` next to `uns.acme.>` -- deliver
+ * every message twice: NATS sends one copy per subscription, so the rate
+ * doubles, the history counts double, and nothing says why. The narrower
+ * pattern adds nothing and is the one to drop.
+ *
+ * Answered by expansion rather than by cleverness: a `*` in the narrow
+ * pattern is covered by a `*` or a `>` in the wide one, and a `>` in the
+ * narrow pattern needs a `>` in the wide one at or before it.
+ */
+export function covers(wide: string, narrow: string): boolean {
+  if (wide === narrow) return true;
+  const w = wide.split('.');
+  const n = narrow.split('.');
+  for (let i = 0; i < w.length; i++) {
+    if (w[i] === '>') return n.length >= i + 1;
+    if (i >= n.length) return false;
+    if (n[i] === '>') return false;
+    if (w[i] === '*') continue;
+    if (w[i] !== n[i]) return false;
+  }
+  return w.length === n.length && !n.includes('>');
+}
+
+/** Pairs of subscriptions where the first covers the second, which is then dead weight. */
+export function overlappingPatterns(patterns: string[]): { wide: string; narrow: string }[] {
+  const out: { wide: string; narrow: string }[] = [];
+  for (const wide of patterns) {
+    for (const narrow of patterns) {
+      if (wide !== narrow && covers(wide, narrow)) out.push({ wide, narrow });
+    }
+  }
+  return out;
+}
