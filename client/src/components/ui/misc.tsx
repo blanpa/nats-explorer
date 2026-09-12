@@ -347,6 +347,9 @@ export function SchemaMark({ verdict, className }: { verdict?: SchemaVerdict; cl
   const why = verdict.violations?.length ? verdict.violations.join('\n') : 'Matches the schema pinned for this subject';
   return (
     <span
+      // A bare span carries no role, and a label without one is read by
+      // nothing; the mark is a picture of a verdict, so it says so.
+      role="img"
       aria-label={verdict.valid ? 'Matches the pinned schema' : 'Breaks the pinned schema'}
       title={`${verdict.pattern}\n${why}`}
       className={cn('w-0.5 self-stretch rounded-full shrink-0', verdict.valid ? 'bg-ok/60' : 'bg-danger', className)}
