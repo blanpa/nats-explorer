@@ -4,6 +4,34 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-12
+
+A release about telling the truth on screen. A chart no longer draws a line
+across a silence, and it keeps moving between two answers of the server
+whichever reduction is chosen. A derived schema reads whether a number is
+whole from how it was written rather than from what it happens to be, names a
+timestamp string as one, and admits when the field list was cut. And a time
+range says which window is on screen without being asked twice.
+
+### Added
+- **A reduced chart keeps up with the traffic.** Avg, sum, count, min, max and rate stood still for up to fifteen seconds between two answers of the server, which on a live view is most of the time; only min/max grew with the messages. A raw message cannot be appended to an average, but the same reduction can be applied again: the server buckets by sample count, so every bucketful of live messages makes one more point, reduced the way the ones before it were. Only whole buckets are added -- a half-filled average climbs while it fills and would read as a movement in the data. A rate continues pairwise and clamps a counter that went backwards, as the server does. The minute rollup is left to the server, whose buckets belong to the clock rather than to the samples.
+- **A timestamp string is named as one.** Where every sample of a string field is an RFC 3339 timestamp, the schema says `date-time` and the exported JSON Schema carries `"format": "date-time"` -- the one string shape worth naming, and the one a code generator can turn into a date.
+- **A cut field list says so.** Payloads with more paths than the budget were reported as far as the budget went and no further, which let a beginning pass for the whole shape. The answer carries `truncated` and the panel says "first 200 fields only".
+- **The range row names the window on screen.** A window dragged out of a chart lit up "Custom" and nothing else; what one was looking at could only be read by opening the form. It is now written next to the button, in digits that do not wobble as the window is stepped sideways.
+
+### Fixed
+- **`21.0` is not an integer.** JSON has one number type, and the schema was calling a number whole whenever its value was, because the decoder hands everything over as a float. A sensor sitting on 21.0 all morning described itself as an integer field -- and, once that description was pinned, rejected the first 21.5 it sent. The literal decides now: `21` is an integer, `21.0` and `1e3` are not, and a field that has carried both is a number rather than a field with two types. A pinned `number` accepts a whole value; a float in a field pinned as an integer stays a violation, because that is a real change of shape. Ids above 2^53 also keep their last digits, which float64 was rounding away in examples and ranges.
+- **A silence in a chart is a hole, not a ramp.** The point before an outage and the point after it were joined, and a straight line between two values is exactly what a steady sensor looks like. The line is cut where the gap is more than about four times the usual distance between points, and a stretch of a single message is drawn as a dot.
+- **The axis reads in round steps.** Lines sat at whatever the data happened to end at -- 22.37 and 22.33 for a sensor between 22.3 and 22.4 -- instead of on a step anyone could count in.
+- **The value the chart is about is bigger than the rest of the line.** It shared the 11px of its own name, its time and the counters beside it; it is 14px now, and the axis labels moved from 10px to the 11px the rest of the interface is read at.
+- **`80 pts · 79 in history`**: the two counters disagreed by exactly the live messages, which are the same messages counted a moment apart.
+- **"Custom" opens on what is on screen** -- the dragged window to the second, the selected preset, or the last hour while live. The last hour was the hour as it stood when the page was loaded, so a tab open since the morning offered a window from the morning.
+- A long example in the schema was cut by bytes, so one with umlauts or an emoji could end mid-character and arrive as a replacement character.
+- The mark that carries a pinned schema's verdict had an `aria-label` on a bare span, which is read by nothing -- and was the one finding that made `bun run lint`, and with it the CI job, exit non-zero.
+
+### Changed
+- **The screenshots on the README and the documentation site are a command.** They were made by hand, which is why they aged: the accent was still teal and the monitoring page a ribbon of loose strips long after neither was true. `bun run --filter e2e screenshots` publishes its own dataset, drives the interface through the seven views and writes the files, with the theme set per page rather than inherited from the machine taking them.
+
 ## [0.4.0] - 2026-09-10
 
 Debugging, mostly. A subject now says what would receive it, a message can be
@@ -188,6 +216,7 @@ The first release that ships as an installable desktop application. Everything b
 
 Initial web UI: subject tree, message detail, JetStream, Key-Value, Object Store, services, monitoring, multi-connection, Docker and cross-compiled server binaries.
 
+[0.5.0]: https://github.com/blanpa/nats-explorer/releases/tag/v0.5.0
 [0.4.0]: https://github.com/blanpa/nats-explorer/releases/tag/v0.4.0
 [0.3.0]: https://github.com/blanpa/nats-explorer/releases/tag/v0.3.0
 [0.2.0]: https://github.com/blanpa/nats-explorer/releases/tag/v0.2.0
