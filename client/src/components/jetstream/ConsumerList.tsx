@@ -244,6 +244,26 @@ export default function ConsumerList({
 
                           {canWrite && !c.push && <ConsumerNext connId={connId} stream={stream} consumer={c.name} onChanged={reload} />}
 
+                          {canWrite && (c.config.replicas ?? 0) !== 1 && (
+                            <div className="mt-3">
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                title="Another peer of the consumer's group becomes its leader: for a consumer stuck behind a slow or failing server"
+                                onClick={async () => {
+                                  try {
+                                    await api.stepDownConsumer(connId, stream, c.name);
+                                    toast.info('Consumer leader stepped down', c.name);
+                                  } catch (err) {
+                                    toast.error('Step-down failed', errorMessage(err));
+                                  }
+                                }}
+                              >
+                                Step down the leader
+                              </Button>
+                            </div>
+                          )}
+
                           {samples.length > 1 && (
                             <div className="mt-3 max-w-[560px]">
                               <RateChart

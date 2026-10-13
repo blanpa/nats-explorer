@@ -249,6 +249,18 @@ export const api = {
   getLastStreamMessage: (connId: string, name: string, subject: string) => request<StreamMessage>(withConn(`/streams/${enc(name)}/last`, connId, { subject })),
   /** The configuration in the server's own JSON, the one `nats stream add --config` reads. */
   getStreamConfig: (connId: string, name: string) => request<Record<string, unknown>>(withConn(`/streams/${enc(name)}/config`, connId)),
+  /** The leadership of a stream's group goes to another peer. */
+  stepDownStream: (connId: string, name: string) => request<{ success: boolean }>(withConn(`/streams/${enc(name)}/stepdown`, connId), { method: 'POST' }),
+  /** A peer leaves a stream's group; the meta leader places a replica elsewhere. */
+  removeStreamPeer: (connId: string, name: string, peer: string) =>
+    request<{ success: boolean }>(withConn(`/streams/${enc(name)}/peer-remove`, connId), { method: 'POST', ...json({ peer }) }),
+  stepDownConsumer: (connId: string, stream: string, consumer: string) =>
+    request<{ success: boolean }>(withConn(`/streams/${enc(stream)}/consumers/${enc(consumer)}/stepdown`, connId), { method: 'POST' }),
+  /** Through the system account: the server re-reads its configuration file. */
+  reloadServer: (connId: string, serverId: string) =>
+    request<{ success: boolean }>(`/cluster/${enc(connId)}/reload`, { method: 'POST', ...json({ serverId }) }),
+  /** Through the system account: another server becomes the JetStream meta leader. */
+  metaStepDown: (connId: string) => request<{ success: boolean }>(`/cluster/${enc(connId)}/meta-stepdown`, { method: 'POST' }),
   /** No more writes, no more deletes; there is no way back. */
   sealStream: (connId: string, name: string) => request<StreamInfo>(withConn(`/streams/${enc(name)}/seal`, connId), { method: 'POST' }),
   /** A zip of the stream's snapshot, laid out the way the nats CLI restores it. */

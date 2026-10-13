@@ -1,6 +1,9 @@
 import { RefreshCw, Settings2 } from 'lucide-react';
 import type { ClusterOverview as Overview } from 'shared';
-import { api } from '../../lib/api';
+import { api, errorMessage } from '../../lib/api';
+import { useCanWrite } from '../../lib/auth';
+import { confirm } from '../ui/Dialog';
+import { toast } from '../ui/Toast';
 import { useAsync } from '../../lib/useAsync';
 import { useStore } from '../../store';
 import { formatNumber } from '../../lib/utils';
@@ -14,6 +17,42 @@ import StreamsTable from './StreamsTable';
 export default function ClusterOverview({ connId }: { connId: string }) {
   const conn = useStore(s => s.connections.find(c => c.id === connId));
   const openConnections = useStore(s => s.openConnectionsDialog);
+  const canWrite = useCanWrite();
+  // The server operations go through the system account, so they are only
+  // offered where the overview itself came from it.
+  const reloadServer = async (id: string, name: string) => {
+    if (
+      !(await confirm({
+        title: `Reload the configuration of ${name}?`,
+        message: 'The server re-reads its configuration file, as `nats server reload` does. A file with an error is refused and the old configuration stays.',
+        confirmLabel: 'Reload',
+      }))
+    )
+      return;
+    try {
+      await api.reloadServer(connId, id);
+      toast.success('Configuration reloaded', name);
+    } catch (err) {
+      toast.error(`${name} did not reload`, errorMessage(err));
+    }
+  };
+  const metaStepDown = async () => {
+    if (
+      !(await confirm({
+        title: 'Move the meta leader?',
+        message: 'Another server becomes the JetStream meta leader. Stream and consumer leaders stay where they are.',
+        confirmLabel: 'Step down',
+      }))
+    )
+      return;
+    try {
+      await api.metaStepDown(connId);
+      toast.info('Meta leader stepped down', 'The new leader shows with the next refresh.');
+      setTimeout(reload, 1500);
+    } catch (err) {
+      toast.error('Meta leader did not step down', errorMessage(err));
+    }
+  };
   const { data, error, loading, initial, reload } = useAsync<Overview>(
     () => (conn?.connected ? api.clusterOverview(connId) : null),
     [connId, conn?.connected],
@@ -103,11 +142,19 @@ export default function ClusterOverview({ connId }: { connId: string }) {
           />
         </StatStrip>
 
-        <ServersTable servers={data.servers} />
+        <ServersTable servers={data.servers} onReload={canWrite && data.source === 'system' ? reloadServer : undefined} />
 
         {data.meta && (
           <div>
-            <SectionTitle>
+            <SectionTitle
+              actions={
+                canWrite && data.source === 'system' && metaSize > 1 ? (
+                  <Button size="xs" variant="outline" onClick={metaStepDown}>
+                    Step down
+                  </Button>
+                ) : undefined
+              }
+            >
               JetStream meta cluster <span className="font-normal text-faint ml-1">{data.meta.name}</span>
             </SectionTitle>
             <PeerChips peers={metaPeers} leader={data.meta.leader} />

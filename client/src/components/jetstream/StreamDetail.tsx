@@ -135,6 +135,35 @@ export default function StreamDetail() {
     a.click();
   };
 
+  // A replica group that is stuck behind its leader, or a peer that is
+  // gone for good: what `nats stream cluster step-down` and `peer-remove` do.
+  const stepDown = async () => {
+    try {
+      await api.stepDownStream(connId, stream.name);
+      toast.info('Leader stepped down', 'The new leader shows with the next refresh.');
+      setTimeout(reload, 1500);
+    } catch (err) {
+      toast.error('Step-down failed', errorMessage(err));
+    }
+  };
+  const removePeer = async (peer: string) => {
+    if (
+      !(await confirm({
+        title: `Remove ${peer} from ${stream.name}?`,
+        message: "The server leaves the stream's group and its copy is dropped; the meta leader places a new replica on another server, which then catches up.",
+        confirmLabel: 'Remove peer',
+        danger: true,
+      }))
+    )
+      return;
+    try {
+      await api.removeStreamPeer(connId, stream.name, peer);
+      setTimeout(reload, 1500);
+    } catch (err) {
+      toast.error('Peer not removed', errorMessage(err));
+    }
+  };
+
   const st = stream.state;
 
   return (
@@ -337,7 +366,17 @@ export default function StreamDetail() {
 
             {stream.cluster && (
               <div>
-                <SectionTitle>Cluster{stream.cluster.name ? ` · ${stream.cluster.name}` : ''}</SectionTitle>
+                <SectionTitle
+                  actions={
+                    canWrite && stream.replicas > 1 ? (
+                      <Button size="xs" variant="outline" onClick={stepDown}>
+                        Step down
+                      </Button>
+                    ) : undefined
+                  }
+                >
+                  Cluster{stream.cluster.name ? ` · ${stream.cluster.name}` : ''}
+                </SectionTitle>
                 <div className="card overflow-hidden">
                   <table className="table">
                     <thead>
@@ -346,6 +385,7 @@ export default function StreamDetail() {
                         <th>Role</th>
                         <th>Status</th>
                         <th className="num">Lag</th>
+                        {canWrite && <th />}
                       </tr>
                     </thead>
                     <tbody>
@@ -358,6 +398,7 @@ export default function StreamDetail() {
                           <Badge tone="ok">current</Badge>
                         </td>
                         <td className="num">0</td>
+                        {canWrite && <td />}
                       </tr>
                       {stream.cluster.replicas.map(r => (
                         <tr key={r.name}>
@@ -373,6 +414,13 @@ export default function StreamDetail() {
                             )}
                           </td>
                           <td className="num">{formatNumber(r.lag)}</td>
+                          {canWrite && (
+                            <td className="text-right">
+                              <Button size="xs" variant="ghost" className="text-danger" onClick={() => removePeer(r.name)}>
+                                Remove
+                              </Button>
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>

@@ -494,6 +494,11 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 		r.Get("/streams/{name}/config", streamsHandler.Config)
 		r.Post("/streams/{name}/seal", streamsHandler.Seal)
 		r.Get("/streams/{name}/backup", streamsHandler.Backup)
+		r.Post("/streams/{name}/stepdown", streamsHandler.StepDown)
+		r.Post("/streams/{name}/peer-remove", streamsHandler.RemovePeer)
+		r.Post("/streams/{stream}/consumers/{consumer}/stepdown", streamsHandler.ConsumerStepDown)
+		r.Post("/cluster/{connId}/reload", streamsHandler.ReloadServer)
+		r.Post("/cluster/{connId}/meta-stepdown", streamsHandler.MetaStepDown)
 		r.Post("/streams-restore", streamsHandler.Restore)
 		r.Delete("/streams/{name}/messages/{seq}", streamsHandler.DeleteMessage)
 

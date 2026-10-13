@@ -5,6 +5,7 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 ## [Unreleased]
 
 ### Added
+- **Cluster operations.** A stream's or a consumer's leader steps down, a peer that is gone is removed from a stream's group, and through the system account a server reloads its configuration and the meta leader moves; each asks first and passes the server's answer on.
 - **Through an SSH bastion.** A server reachable only through a jump host is dialled through one SSH session to it, every connection of the NATS client included; password or private key, and the bastion's host key pinned once it was seen.
 - **Sessions that survive a restart, and personal API tokens.** Where the server has a directory of its own a deploy no longer logs everyone out, and tokens for the scripts and the scrapers are made in the settings, one per script with a name and a role, shown once and revoked on their own.
 - **A decoder of your own.** A decoder rule can carry the body of a JavaScript function instead of a schema, for a house format no library knows; it runs in the browser, for that rule only.

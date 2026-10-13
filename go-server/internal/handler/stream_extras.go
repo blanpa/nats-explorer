@@ -559,3 +559,131 @@ func (h *StreamsHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, streamInfoToMap(info))
 }
+
+// The cluster operations a stuck replica group needs and the CLI has:
+// hand the leadership of a stream or a consumer to another peer, take a
+// peer out of a stream's group so it is placed again, and, through the
+// system account, reload a server's configuration or move the meta
+// leader. Each is one JetStream or system API request; the server's answer
+// is passed on, an error description included.
+
+// apiCall sends a JetStream API request and reads its error, if any.
+func apiCall(nc *nats.Conn, subject string, body []byte) error {
+	resp, err := nc.Request(subject, body, 10*time.Second)
+	if err != nil {
+		return err
+	}
+	return apiError(resp.Data)
+}
+
+// StepDown answers POST /api/streams/{name}/stepdown.
+func (h *StreamsHandler) StepDown(w http.ResponseWriter, r *http.Request) {
+	nc, prefix, err := jsAPIFor(h.Store, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := apiCall(nc, prefix+".STREAM.LEADER.STEPDOWN."+urlParam(r, "name"), nil); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, map[string]bool{"success": true})
+}
+
+// RemovePeer answers POST /api/streams/{name}/peer-remove with {"peer"}:
+// the server is taken out of the stream's group, and the meta leader
+// places a replica somewhere else.
+func (h *StreamsHandler) RemovePeer(w http.ResponseWriter, r *http.Request) {
+	nc, prefix, err := jsAPIFor(h.Store, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var body struct {
+		Peer string `json:"peer"`
+	}
+	if err := decodeBody(r, &body); err != nil || strings.TrimSpace(body.Peer) == "" {
+		writeError(w, http.StatusBadRequest, "peer required")
+		return
+	}
+	req, _ := json.Marshal(map[string]string{"peer": strings.TrimSpace(body.Peer)})
+	if err := apiCall(nc, prefix+".STREAM.PEER.REMOVE."+urlParam(r, "name"), req); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, map[string]bool{"success": true})
+}
+
+// ConsumerStepDown answers POST /api/streams/{stream}/consumers/{consumer}/stepdown.
+func (h *StreamsHandler) ConsumerStepDown(w http.ResponseWriter, r *http.Request) {
+	nc, prefix, err := jsAPIFor(h.Store, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := apiCall(nc, prefix+".CONSUMER.LEADER.STEPDOWN."+urlParam(r, "stream")+"."+urlParam(r, "consumer"), nil); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, map[string]bool{"success": true})
+}
+
+// sysConnFor is the system-account connection of the request's connection.
+func sysConnFor(store *connection.Store, connID string) (*nats.Conn, error) {
+	m, ok := store.Get(connID)
+	if !ok {
+		return nil, fmt.Errorf("connection not found")
+	}
+	if m.SysNC == nil || !m.SysNC.IsConnected() {
+		return nil, fmt.Errorf("this needs the system account: add its credentials to the connection")
+	}
+	return m.SysNC, nil
+}
+
+// ReloadServer answers POST /api/cluster/{connId}/reload with {"serverId"}:
+// the server re-reads its configuration file, as `nats server reload` does.
+func (h *StreamsHandler) ReloadServer(w http.ResponseWriter, r *http.Request) {
+	nc, err := sysConnFor(h.Store, urlParam(r, "connId"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var body struct {
+		ServerID string `json:"serverId"`
+	}
+	if err := decodeBody(r, &body); err != nil || strings.TrimSpace(body.ServerID) == "" {
+		writeError(w, http.StatusBadRequest, "serverId required")
+		return
+	}
+	resp, err := nc.Request("$SYS.REQ.SERVER."+strings.TrimSpace(body.ServerID)+".RELOAD", nil, 10*time.Second)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	var answer struct {
+		Error *struct {
+			Code        int    `json:"code"`
+			Description string `json:"description"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(resp.Data, &answer) == nil && answer.Error != nil {
+		writeError(w, http.StatusBadGateway, answer.Error.Description)
+		return
+	}
+	writeJSON(w, map[string]bool{"success": true})
+}
+
+// MetaStepDown answers POST /api/cluster/{connId}/meta-stepdown: another
+// server becomes the JetStream meta leader.
+func (h *StreamsHandler) MetaStepDown(w http.ResponseWriter, r *http.Request) {
+	nc, err := sysConnFor(h.Store, urlParam(r, "connId"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := apiCall(nc, "$JS.API.META.LEADER.STEPDOWN", []byte("{}")); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, map[string]bool{"success": true})
+}

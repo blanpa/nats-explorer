@@ -1,5 +1,7 @@
+import { RotateCw } from 'lucide-react';
 import type { ClusterOverview } from 'shared';
 import { cn, formatBytes, formatDateTime, formatNumber } from '../../lib/utils';
+import { IconButton } from '../ui/Button';
 import { Badge, SectionTitle } from '../ui/misc';
 import { ServerName } from '../ui/ServerName';
 
@@ -13,7 +15,7 @@ function uptime(start?: string): string {
 }
 
 /** One row per server of the cluster, with its load and JetStream footprint. */
-export default function ServersTable({ servers }: { servers: ClusterOverview['servers'] }) {
+export default function ServersTable({ servers, onReload }: { servers: ClusterOverview['servers']; onReload?: (id: string, name: string) => void }) {
   return (
     <div>
       <SectionTitle>Servers · {servers.length}</SectionTitle>
@@ -34,6 +36,7 @@ export default function ServersTable({ servers }: { servers: ClusterOverview['se
               <th className="num">Msgs out</th>
               <th className="num">Routes</th>
               <th>JetStream</th>
+              {onReload && <th />}
             </tr>
           </thead>
           <tbody>
@@ -69,6 +72,15 @@ export default function ServersTable({ servers }: { servers: ClusterOverview['se
                     <span className="text-faint">off</span>
                   )}
                 </td>
+                {onReload && (
+                  <td>
+                    {s.id && (
+                      <IconButton label={`Reload the configuration of ${s.name}`} size="xs" onClick={() => onReload(s.id, s.name)}>
+                        <RotateCw size={12} />
+                      </IconButton>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

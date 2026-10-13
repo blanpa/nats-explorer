@@ -300,6 +300,7 @@ The monitoring URL defaults to port 8222 of the first server and can be set per 
 - JetStream meta cluster: leader and peers with current/lagging/offline state
 - Every stream with account, storage, replicas, leader and placement per peer
 - Needs system-account (`$SYS`) credentials on the connection; without them the module shows the connected node only and says so
+- **Operations**: through the system account a server reloads its configuration file and the JetStream meta leader moves to another server; a stream's or a consumer's leader steps down, and a peer that is gone for good is removed from a stream's group so the meta leader places a new replica. Each asks first and passes the server's answer on
 - A second tab lists the per-connection server details
 
 ## Connections
