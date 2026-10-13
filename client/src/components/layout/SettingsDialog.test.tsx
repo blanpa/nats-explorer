@@ -176,7 +176,7 @@ describe('SettingsDialog', () => {
     getHistoryPersistence.mockResolvedValue(status({ supported: false, path: undefined, reason: 'start the server with STORAGE_DIR' }));
     render(<SettingsDialog />);
     expect(await screen.findByText(/STORAGE_DIR/)).toBeInTheDocument();
-    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Keep the history on disk')).not.toBeInTheDocument();
   });
 });
 

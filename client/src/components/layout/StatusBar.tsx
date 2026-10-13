@@ -1,7 +1,45 @@
 import { useEffect, useState } from 'react';
+import { ArrowUpCircle } from 'lucide-react';
 import { useStore, useActiveConnection } from '../../store';
+import { appInfo } from '../../lib/storage';
+import { checkForUpdate, type Release } from '../../lib/updateCheck';
 import { formatBytes, formatNumber, formatUptime, cn } from '../../lib/utils';
 import { SourceLink } from '../ui/SourceLink';
+
+/**
+ * A newer release, when there is one: a quiet link beside the version,
+ * because the desktop app has no store to tell it and a server left
+ * running for months has nobody looking.
+ */
+function UpdateHint() {
+  const [release, setRelease] = useState<Release | null>(null);
+  useEffect(() => {
+    let live = true;
+    checkForUpdate(appInfo.version).then(r => live && setRelease(r));
+    return () => {
+      live = false;
+    };
+  }, []);
+  if (!release) return null;
+  return (
+    <a
+      href={release.url}
+      target="_blank"
+      rel="noreferrer"
+      onClick={e => {
+        const browserOpen = window.runtime?.BrowserOpenURL;
+        if (appInfo.mode === 'desktop' && browserOpen) {
+          e.preventDefault();
+          browserOpen(release.url);
+        }
+      }}
+      className="flex items-center gap-1 text-accent hover:underline shrink-0"
+      title={`NATS Explorer ${release.version} is out; this is ${appInfo.version}. Opens the release.`}
+    >
+      <ArrowUpCircle size={12} /> v{release.version} available
+    </a>
+  );
+}
 
 export default function StatusBar() {
   const wsOnline = useStore(s => s.wsOnline);
@@ -101,6 +139,7 @@ export default function StatusBar() {
           )}
         </span>
       )}
+      <UpdateHint />
       <SourceLink className="shrink-0" />
     </footer>
   );

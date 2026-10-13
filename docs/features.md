@@ -307,6 +307,7 @@ The monitoring URL defaults to port 8222 of the first server and can be set per 
 
 - Several servers at once, colour-coded; switch between them
 - Authentication: none, token, username/password, NKey seed, credentials file (JWT)
+- **From a `nats` CLI context**: the desktop app offers the contexts of the machine it runs on as a starting point for a connection, with the credentials and certificate files a context names read in, and what could not be read named. A server does the same only when `NATS_CONTEXTS_DIR` points it at a directory, because an admin of a shared explorer must not be able to read files off the server by naming them in a context
 - TLS with CA certificate, client certificate and key (pasted or loaded from files), plus an insecure mode for test setups
 - Optional system-account credentials for the Cluster module
 - Monitoring URL, JetStream domain / API prefix per connection
@@ -315,6 +316,10 @@ The monitoring URL defaults to port 8222 of the first server and can be set per 
 - The subject filter completes as you type: the rest of the term stands faintly behind the cursor and Tab (or the right arrow) takes it, one segment at a time for a dotted path. There is no dropdown -- the tree is the list of matches, and it stays visible
 - Changing the subscriptions keeps everything already collected, including the subjects of the pattern that went. The tree is what the connection has received, not what it is listening to at this instant: a subject that arrived is a fact, and unsubscribing only stops the next message -- its rate falls to zero and its messages stay readable. Emptying the tree is its own action, and asks first
 - Subscriptions are managed live in the Subjects pane: one row per pattern with the subjects it matches and its message rate, a field to add patterns (comma or space separated; adding a concrete pattern replaces the catch-all `>`), an X to unsubscribe, and toggles for the system subjects ($SYS, $JS, $KV, $SRV). Every change applies at once without reconnecting and is remembered in the saved connection
+
+## Updates
+
+Once a day the explorer asks GitHub's release listing whether a newer release exists -- one request, nothing sent but the request -- and shows it as a link in the status bar. The desktop app has no store to tell it, and a server left running for months has nobody looking. The build is never changed by itself, and the setting switches the question off.
 
 ## Security
 

@@ -1,6 +1,7 @@
 import type {
   Aggregation,
   ClusterOverview,
+  CliContextList,
   ConnectionConfig,
   ConnectionStatus,
   ConnectResponse,
@@ -221,6 +222,9 @@ export const api = {
   publish: (connId: string, data: PublishInput) => request<{ success: boolean }>('/publish', { method: 'POST', ...json({ ...data, connId }) }),
   requestReply: (connId: string, data: RequestInput) => request<RequestReply>('/request', { method: 'POST', ...json({ ...data, connId }) }),
   run: (connId: string, data: RunInput) => request<RunResult>('/run', { method: 'POST', ...json({ ...data, connId }) }),
+
+  /** The nats CLI's contexts on the machine the backend runs on, as connections. */
+  listContexts: () => request<CliContextList>('/contexts'),
 
   // Streams
   listStreams: (connId: string) => request<StreamInfo[]>(withConn('/streams', connId)),

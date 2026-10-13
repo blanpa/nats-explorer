@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Plug, Trash2, Unplug } from 'lucide-react';
+import type { CliContext } from 'shared';
+import { api } from '../../lib/api';
 import { newSavedConnection, serverLabel, type SavedConnection } from '../../lib/savedConnections';
 import { appInfo } from '../../lib/storage';
+import { toast } from '../ui/Toast';
 import { useStore } from '../../store';
 import { useSavedConnections } from '../../store/savedConnections';
 import { Button } from '../ui/Button';
@@ -24,6 +27,16 @@ export default function ConnectionDialog() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<SavedConnection | null>(null);
   const [dirty, setDirty] = useState(false);
+  // The nats CLI's contexts, where the backend may read them: the desktop
+  // app's own machine, or a server told to with NATS_CONTEXTS_DIR.
+  const [contexts, setContexts] = useState<CliContext[]>([]);
+  useEffect(() => {
+    if (!open) return;
+    api
+      .listContexts()
+      .then(res => setContexts(res.available ? res.contexts : []))
+      .catch(() => setContexts([]));
+  }, [open]);
 
   // Pick the initial selection whenever the dialog opens.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the dialog picks its selection when it opens, not when the saved list changes
@@ -66,6 +79,22 @@ export default function ConnectionDialog() {
     setSelectedId(fresh.id);
     setDraft(fresh);
     setDirty(true);
+  };
+
+  // A context becomes an unsaved connection with everything it had: the
+  // files it named were read on the backend, so the credentials travel with it.
+  const importContext = async (ctx: CliContext) => {
+    if (
+      dirty &&
+      !(await confirm({ title: 'Discard changes?', message: 'You have unsaved changes to the current connection.', confirmLabel: 'Discard', danger: true }))
+    )
+      return;
+    const { name, description, problems, ...fields } = ctx;
+    const fresh = newSavedConnection({ ...fields, name: name || description || '' });
+    setSelectedId(fresh.id);
+    setDraft(fresh);
+    setDirty(true);
+    if (problems?.length) toast.warning(`Context ${name}: not everything could be read`, problems.join('\n'));
   };
 
   const patch = (p: Partial<SavedConnection>) => {
@@ -167,7 +196,16 @@ export default function ConnectionDialog() {
       }
     >
       <div className="flex h-full min-h-0">
-        <SavedConnectionList items={saved} live={liveById} selectedId={selectedId} draft={isNew ? draft : null} onSelect={select} onNew={addNew} />
+        <SavedConnectionList
+          items={saved}
+          live={liveById}
+          selectedId={selectedId}
+          draft={isNew ? draft : null}
+          onSelect={select}
+          onNew={addNew}
+          contexts={contexts}
+          onImport={importContext}
+        />
         {draft && <ConnectionForm draft={draft} isNew={isNew} live={live} patch={patch} onSubmit={saveAndConnect} />}
       </div>
     </Dialog>

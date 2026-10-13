@@ -105,3 +105,32 @@ export interface ServerInfo {
     reconnects: number;
   };
 }
+
+/** A nats CLI context, mapped onto a connection; GET /api/contexts. */
+export interface CliContext {
+  name: string;
+  description?: string;
+  servers: string[];
+  authMethod: AuthMethod;
+  token?: string;
+  user?: string;
+  pass?: string;
+  nkeySeed?: string;
+  creds?: string;
+  tls?: boolean;
+  tlsCa?: string;
+  tlsCert?: string;
+  tlsKey?: string;
+  tlsFirst?: boolean;
+  jsDomain?: string;
+  jsApiPrefix?: string;
+  /** what could not be read, e.g. a credentials file that is not there */
+  problems?: string[];
+}
+
+export interface CliContextList {
+  /** false on a server without NATS_CONTEXTS_DIR; the desktop app always reads them */
+  available: boolean;
+  dir?: string;
+  contexts: CliContext[];
+}

@@ -6,6 +6,7 @@ import { useCanWrite } from '../../lib/auth';
 import { useAsync } from '../../lib/useAsync';
 import { formatBytes, formatDateTime, formatNumber, parseGoDuration } from '../../lib/utils';
 import { useStore } from '../../store';
+import { setUpdateCheckEnabled, updateCheckEnabled } from '../../lib/updateCheck';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
 import { Checkbox, Field, Input, Select } from '../ui/Input';
@@ -311,13 +312,37 @@ function DroppedHint({ dropped, fullText, hasFilter, buffered }: { dropped: numb
   );
 }
 
+/** Whether a newer release is looked for once a day; the one request this app makes on its own. */
+function UpdatesSection() {
+  const [enabled, setEnabled] = useState(updateCheckEnabled());
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionTitle>Updates</SectionTitle>
+      <Checkbox
+        label="Look for a newer release once a day"
+        description="One request to GitHub's release listing, nothing sent but the request. A newer release shows as a link in the status bar; this build is never changed by itself."
+        checked={enabled}
+        onChange={e => {
+          setUpdateCheckEnabled(e.target.checked);
+          setEnabled(e.target.checked);
+        }}
+      />
+    </section>
+  );
+}
+
 /** Settings of this installation that live on the backend, not in the browser. */
 export default function SettingsDialog() {
   const open = useStore(s => s.settingsOpen);
   const setOpen = useStore(s => s.setSettingsOpen);
   return (
     <Dialog open={open} onOpenChange={setOpen} title="Settings" width="md">
-      {open && <HistorySection />}
+      {open && (
+        <div className="flex flex-col gap-6">
+          <HistorySection />
+          <UpdatesSection />
+        </div>
+      )}
     </Dialog>
   );
 }
