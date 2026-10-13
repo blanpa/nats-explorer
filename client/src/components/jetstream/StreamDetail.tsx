@@ -1,13 +1,28 @@
 import { useState } from 'react';
-import { Eraser, Layers, Pencil, RefreshCw, Trash2 } from 'lucide-react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { Check, Copy, Download, Eraser, Layers, Lock, MoreHorizontal, Pencil, RefreshCw, Trash2 } from 'lucide-react';
 import type { StreamInfo } from 'shared';
 import { api, errorMessage } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
 import { useStore } from '../../store';
+import { duplicateOf } from '../../lib/streamForm';
 import { formatBytes, formatDateTime, formatDurationNs, formatNumber } from '../../lib/utils';
 import { Button, IconButton } from '../ui/Button';
 import { confirm } from '../ui/Dialog';
-import { Badge, EmptyState, ErrorState, KeyValueGrid, LoadingState, PaneHeader, SectionTitle, StatStrip, StatTile, Tabs } from '../ui/misc';
+import {
+  Badge,
+  EmptyState,
+  ErrorState,
+  KeyValueGrid,
+  LoadingState,
+  menuClass,
+  menuItemClass,
+  PaneHeader,
+  SectionTitle,
+  StatStrip,
+  StatTile,
+  Tabs,
+} from '../ui/misc';
 import { toast } from '../ui/Toast';
 import StreamDialog from './StreamDialog';
 import StreamMessages from './StreamMessages';
@@ -26,6 +41,8 @@ export default function StreamDetail() {
   const bump = useStore(s => s.bumpRefresh);
   const [tab, setTab] = useState<Tab>('overview');
   const [editing, setEditing] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const {
     data: stream,
@@ -78,6 +95,46 @@ export default function StreamDetail() {
     }
   };
 
+  // The configuration in the server's own JSON, the one `nats stream add
+  // --config` reads, so a stream can be carried to another cluster.
+  const copyConfig = async () => {
+    try {
+      const cfg = await api.getStreamConfig(connId, stream.name);
+      await navigator.clipboard?.writeText(JSON.stringify(cfg, null, 2));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (err) {
+      toast.error('Could not copy the configuration', errorMessage(err));
+    }
+  };
+
+  const seal = async () => {
+    if (
+      !(await confirm({
+        title: `Seal ${stream.name}?`,
+        message: 'A sealed stream takes no more messages and loses none: no publish, no delete, no purge. There is no way back.',
+        confirmLabel: 'Seal',
+        danger: true,
+      }))
+    )
+      return;
+    try {
+      setData(await api.sealStream(connId, stream.name));
+      bump();
+    } catch (err) {
+      toast.error('Seal failed', errorMessage(err));
+    }
+  };
+
+  // A backup is a zip laid out the way the nats CLI lays one out, so either
+  // tool restores it. The link carries the session cookie like any download.
+  const backup = (consumers: boolean) => {
+    const a = document.createElement('a');
+    a.href = api.getStreamBackupUrl(connId, stream.name, consumers);
+    a.download = `${stream.name}-backup.zip`;
+    a.click();
+  };
+
   const st = stream.state;
 
   return (
@@ -102,6 +159,40 @@ export default function StreamDetail() {
                 </Button>
               </>
             )}
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <IconButton label="More" size="sm">
+                  <MoreHorizontal size={14} />
+                </IconButton>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content className={menuClass} align="end" sideOffset={4}>
+                  <DropdownMenu.Item className={menuItemClass} onSelect={copyConfig}>
+                    {copied ? <Check size={13} className="text-ok" /> : <Copy size={13} />} Copy configuration as JSON
+                  </DropdownMenu.Item>
+                  {canWrite && (
+                    <DropdownMenu.Item className={menuItemClass} onSelect={() => setDuplicating(true)}>
+                      <Layers size={13} /> New stream like this one
+                    </DropdownMenu.Item>
+                  )}
+                  {stream.storage !== 'Memory' && (
+                    <>
+                      <DropdownMenu.Item className={menuItemClass} onSelect={() => backup(false)}>
+                        <Download size={13} /> Backup
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item className={menuItemClass} onSelect={() => backup(true)}>
+                        <Download size={13} /> Backup with consumers
+                      </DropdownMenu.Item>
+                    </>
+                  )}
+                  {canWrite && !stream.sealed && (
+                    <DropdownMenu.Item className={menuItemClass} onSelect={seal}>
+                      <Lock size={13} className="text-danger" /> Seal
+                    </DropdownMenu.Item>
+                  )}
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
           </>
         }
       >
@@ -190,14 +281,57 @@ export default function StreamDetail() {
                     { label: 'Retention', value: stream.retention },
                     { label: 'Storage', value: stream.storage },
                     { label: 'Replicas', value: stream.replicas },
+                    { label: 'Compression', value: stream.compression === 's2' ? 'S2' : 'none' },
+                    ...(stream.persistMode === 'async' ? [{ label: 'Persist mode', value: 'async' }] : []),
+                    ...(stream.placement
+                      ? [{ label: 'Placement', value: [stream.placement.cluster, ...(stream.placement.tags ?? [])].filter(Boolean).join(' · '), mono: true }]
+                      : []),
                     { label: 'Allow direct', value: stream.allowDirect ? 'yes' : 'no' },
                     { label: 'Allow roll-up', value: stream.allowRollup ? 'yes' : 'no' },
                     { label: 'Deny delete / purge', value: `${stream.denyDelete ? 'yes' : 'no'} / ${stream.denyPurge ? 'yes' : 'no'}` },
                     { label: 'No ack', value: stream.noAck ? 'yes' : 'no' },
+                    ...(stream.allowMsgCounter || stream.allowAtomicPublish || stream.allowMsgSchedules
+                      ? [
+                          {
+                            label: 'NATS 2.12',
+                            value: [
+                              stream.allowMsgCounter && 'counters',
+                              stream.allowAtomicPublish && 'atomic batches',
+                              stream.allowMsgSchedules && 'schedules',
+                            ]
+                              .filter(Boolean)
+                              .join(', '),
+                          },
+                        ]
+                      : []),
                   ]}
                 />
               </div>
             </div>
+
+            {(stream.republish || stream.subjectTransform || (stream.metadata && Object.keys(stream.metadata).length > 0)) && (
+              <div>
+                <SectionTitle>Routing and metadata</SectionTitle>
+                <KeyValueGrid
+                  columns={1}
+                  items={[
+                    ...(stream.republish
+                      ? [
+                          {
+                            label: 'Republish',
+                            value: `${stream.republish.src || '>'} → ${stream.republish.dest}${stream.republish.headersOnly ? ' (headers only)' : ''}`,
+                            mono: true,
+                          },
+                        ]
+                      : []),
+                    ...(stream.subjectTransform
+                      ? [{ label: 'Subject transform', value: `${stream.subjectTransform.src || '>'} → ${stream.subjectTransform.dest}`, mono: true }]
+                      : []),
+                    ...Object.entries(stream.metadata ?? {}).map(([k, v]) => ({ label: k, value: v, mono: true })),
+                  ]}
+                />
+              </div>
+            )}
 
             <Replication stream={stream} />
 
@@ -261,6 +395,19 @@ export default function StreamDetail() {
             setEditing(false);
             setData(info);
             bump();
+          }}
+        />
+      )}
+      {duplicating && (
+        <StreamDialog
+          connId={connId}
+          existing={duplicateOf(stream)}
+          duplicate
+          onClose={() => setDuplicating(false)}
+          onSaved={info => {
+            setDuplicating(false);
+            bump();
+            setSelected(info.name);
           }}
         />
       )}

@@ -14,6 +14,7 @@ import { useCanWrite } from '../../lib/auth';
 import StreamChart, { type ChartSpec } from './StreamChart';
 import StreamMessageRow from './StreamMessageRow';
 import { msgId, repeatedIds } from '../../lib/natsHeaders';
+import { subjectMatches } from '../../lib/subjectMatch';
 import StreamMessagesToolbar from './StreamMessagesToolbar';
 
 /** Widths the table opens with; the reader's own are remembered per browser. */
@@ -24,6 +25,12 @@ export default function StreamMessages({ connId, stream, onChanged }: { connId: 
   const domainOverride = useJsDomainOverride(connId);
   const [startSeq, setStartSeq] = useState<number | undefined>(undefined); // undefined = newest page
   const [limit, setLimit] = useState(50);
+  // Narrowed to one subject, wildcards and all: the server skips to the matches.
+  const [subject, setSubjectState] = useState('');
+  const setSubject = (s: string) => {
+    setSubjectState(s);
+    setStartSeq(undefined);
+  };
   const [open, setOpen] = useState<number | null>(null);
   // Seq, time, subject and size are dragged to width; the payload column
   // takes the rest. The two icon columns have nothing to widen.
@@ -41,9 +48,22 @@ export default function StreamMessages({ connId, stream, onChanged }: { connId: 
     loading,
     initial,
     reload,
-  } = useAsync<StreamMessagesPage>(() => api.getStreamMessages(connId, stream.name, { startSeq, limit }), [connId, stream.name, startSeq, limit], {
-    key: `msgs:${connId}:${stream.name}:${startSeq ?? 'newest'}:${limit}`,
-  });
+  } = useAsync<StreamMessagesPage>(
+    () => api.getStreamMessages(connId, stream.name, { startSeq, limit, subject: subject || undefined }),
+    [connId, stream.name, startSeq, limit, subject],
+    { key: `msgs:${connId}:${stream.name}:${startSeq ?? 'newest'}:${limit}:${subject}` },
+  );
+
+  // The newest message on the filter's subject, as a page of its own.
+  const showLast = async () => {
+    try {
+      const m = await api.getLastStreamMessage(connId, stream.name, subject);
+      setStartSeq(m.seq);
+      setOpen(m.seq);
+    } catch (err) {
+      toast.error('No message on that subject', errorMessage(err));
+    }
+  };
 
   const onNewestPage = startSeq === undefined;
   useLiveWatch(
@@ -88,7 +108,8 @@ export default function StreamMessages({ connId, stream, onChanged }: { connId: 
   // The server answers a page in sequence order; the tail collects newest
   // first. Whichever way the table is sorted, the two have to meet.
   const pageMessages = page ? (desc ? [...page.messages].reverse() : page.messages) : [];
-  const tail = onNewestPage ? liveMsgs.filter(m => !page || m.seq > page.pageEnd) : [];
+  // A live tail under a filter shows only what matches it.
+  const tail = onNewestPage ? liveMsgs.filter(m => (!page || m.seq > page.pageEnd) && (!subject || subjectMatches(subject, m.subject))) : [];
   const messages = desc ? [...tail, ...pageMessages] : [...pageMessages, ...[...tail].reverse()];
   const liveSeqs = new Set(tail.map(m => m.seq));
   // Two messages with one deduplication id, on a page: the window between
@@ -114,6 +135,9 @@ export default function StreamMessages({ connId, stream, onChanged }: { connId: 
         onToggleLive={toggleLive}
         loading={loading && !initial}
         onReload={reload}
+        subject={subject}
+        onSubject={setSubject}
+        onLast={showLast}
       />
 
       <div className="flex-1 min-h-0 overflow-auto">
@@ -125,8 +149,14 @@ export default function StreamMessages({ connId, stream, onChanged }: { connId: 
         ) : messages.length === 0 && !live ? (
           <EmptyState
             compact
-            title="No messages in this range"
-            description={stream.state.messages === 0 ? 'The stream is empty.' : 'Messages in this range were deleted.'}
+            title={subject ? `No messages on ${subject} in this range` : 'No messages in this range'}
+            description={
+              stream.state.messages === 0
+                ? 'The stream is empty.'
+                : subject
+                  ? 'Nothing stored matches the filter here.'
+                  : 'Messages in this range were deleted.'
+            }
           />
         ) : (
           <table className="table table-fixed">

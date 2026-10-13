@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -51,6 +52,99 @@ type streamConfigBody struct {
 	// SubjectDeleteMarkerTTL keeps a marker after the last message of a
 	// subject is removed, for this long. Nanoseconds; 0 is off.
 	SubjectDeleteMarkerTTL *int64 `json:"subjectDeleteMarkerTtl,omitempty"`
+
+	// The optional parts of a configuration. Kept with whether they were
+	// sent, so that absent and null can be told apart: absent leaves the
+	// stream's own, null or an empty list takes it away, an object sets it.
+	Mirror           optionalRaw `json:"mirror"`
+	Sources          optionalRaw `json:"sources"`
+	RePublish        optionalRaw `json:"republish"`
+	SubjectTransform optionalRaw `json:"subjectTransform"`
+	Placement        optionalRaw `json:"placement"`
+	Metadata         optionalRaw `json:"metadata"`
+	// Compression is "none" or "s2"; PersistMode "default" or "async".
+	Compression string `json:"compression,omitempty"`
+	PersistMode string `json:"persistMode,omitempty"`
+	// The NATS 2.12 switches, and MirrorDirect for a mirror that answers
+	// direct gets itself.
+	AllowMsgCounter    *bool `json:"allowMsgCounter,omitempty"`
+	AllowAtomicPublish *bool `json:"allowAtomicPublish,omitempty"`
+	AllowMsgSchedules  *bool `json:"allowMsgSchedules,omitempty"`
+	MirrorDirect       *bool `json:"mirrorDirect,omitempty"`
+	// FirstSeq is where a new stream starts counting; create only.
+	FirstSeq *uint64 `json:"firstSeq,omitempty"`
+	// ConsumerLimits bounds what a consumer of the stream may ask for.
+	ConsumerInactiveThreshold *int64 `json:"consumerInactiveThreshold,omitempty"`
+	ConsumerMaxAckPending     *int   `json:"consumerMaxAckPending,omitempty"`
+	// Sealed closes the stream for good: no more writes, no deletes. Only
+	// true is meaningful; a sealed stream cannot be unsealed.
+	Sealed *bool `json:"sealed,omitempty"`
+}
+
+// sourceBody is a mirror or a source as the UI writes it.
+type sourceBody struct {
+	Name          string `json:"name"`
+	FilterSubject string `json:"filterSubject,omitempty"`
+	OptStartSeq   uint64 `json:"optStartSeq,omitempty"`
+	// OptStartTime is unix milliseconds.
+	OptStartTime      int64               `json:"optStartTime,omitempty"`
+	SubjectTransforms []subjectTransformB `json:"subjectTransforms,omitempty"`
+	// External names a stream in another account or domain by its API
+	// prefix, and the deliver prefix for its replies.
+	ExternalAPI     string `json:"externalApi,omitempty"`
+	ExternalDeliver string `json:"externalDeliver,omitempty"`
+	Domain          string `json:"domain,omitempty"`
+}
+
+type subjectTransformB struct {
+	Src  string `json:"src,omitempty"`
+	Dest string `json:"dest"`
+}
+
+type rePublishB struct {
+	Src         string `json:"src,omitempty"`
+	Dest        string `json:"dest"`
+	HeadersOnly bool   `json:"headersOnly,omitempty"`
+}
+
+type placementB struct {
+	Cluster string   `json:"cluster,omitempty"`
+	Tags    []string `json:"tags,omitempty"`
+}
+
+// optionalRaw is a JSON field that remembers whether it was there. A
+// RawMessage cannot: null unmarshals into a nil slice, the same as absent,
+// and "take the mirror away" would read as "leave it".
+type optionalRaw struct {
+	set bool
+	raw json.RawMessage
+}
+
+func (o *optionalRaw) UnmarshalJSON(b []byte) error {
+	o.set = true
+	o.raw = append(json.RawMessage(nil), b...)
+	return nil
+}
+
+// isNull says whether the field was sent as null or empty.
+func (o optionalRaw) isNull() bool {
+	t := strings.TrimSpace(string(o.raw))
+	return t == "" || t == "null" || t == "[]" || t == "{}"
+}
+
+func toStreamSource(b sourceBody) *jetstream.StreamSource {
+	src := &jetstream.StreamSource{Name: strings.TrimSpace(b.Name), FilterSubject: strings.TrimSpace(b.FilterSubject), OptStartSeq: b.OptStartSeq, Domain: b.Domain}
+	if b.OptStartTime > 0 {
+		t := time.UnixMilli(b.OptStartTime)
+		src.OptStartTime = &t
+	}
+	for _, st := range b.SubjectTransforms {
+		src.SubjectTransforms = append(src.SubjectTransforms, jetstream.SubjectTransformConfig{Source: st.Src, Destination: st.Dest})
+	}
+	if b.ExternalAPI != "" {
+		src.External = &jetstream.ExternalStream{APIPrefix: b.ExternalAPI, DeliverPrefix: b.ExternalDeliver}
+	}
+	return src
 }
 
 // applyStreamBody copies the provided (non-nil) fields onto a stream config.
@@ -111,6 +205,115 @@ func applyStreamBody(cfg *jetstream.StreamConfig, b streamConfigBody) {
 	}
 	if b.SubjectDeleteMarkerTTL != nil {
 		cfg.SubjectDeleteMarkerTTL = time.Duration(*b.SubjectDeleteMarkerTTL)
+	}
+	if b.Mirror.set {
+		cfg.Mirror = nil
+		if !b.Mirror.isNull() {
+			var m sourceBody
+			if json.Unmarshal(b.Mirror.raw, &m) == nil && strings.TrimSpace(m.Name) != "" {
+				cfg.Mirror = toStreamSource(m)
+			}
+		}
+	}
+	if b.Sources.set {
+		cfg.Sources = nil
+		if !b.Sources.isNull() {
+			var list []sourceBody
+			if json.Unmarshal(b.Sources.raw, &list) == nil {
+				for _, sb := range list {
+					if strings.TrimSpace(sb.Name) != "" {
+						cfg.Sources = append(cfg.Sources, toStreamSource(sb))
+					}
+				}
+			}
+		}
+	}
+	if b.RePublish.set {
+		cfg.RePublish = nil
+		if !b.RePublish.isNull() {
+			var rp rePublishB
+			if json.Unmarshal(b.RePublish.raw, &rp) == nil && strings.TrimSpace(rp.Dest) != "" {
+				cfg.RePublish = &jetstream.RePublish{Source: strings.TrimSpace(rp.Src), Destination: strings.TrimSpace(rp.Dest), HeadersOnly: rp.HeadersOnly}
+			}
+		}
+	}
+	if b.SubjectTransform.set {
+		cfg.SubjectTransform = nil
+		if !b.SubjectTransform.isNull() {
+			var st subjectTransformB
+			if json.Unmarshal(b.SubjectTransform.raw, &st) == nil && strings.TrimSpace(st.Dest) != "" {
+				cfg.SubjectTransform = &jetstream.SubjectTransformConfig{Source: strings.TrimSpace(st.Src), Destination: strings.TrimSpace(st.Dest)}
+			}
+		}
+	}
+	if b.Placement.set {
+		cfg.Placement = nil
+		if !b.Placement.isNull() {
+			var pl placementB
+			if json.Unmarshal(b.Placement.raw, &pl) == nil && (strings.TrimSpace(pl.Cluster) != "" || len(pl.Tags) > 0) {
+				cfg.Placement = &jetstream.Placement{Cluster: strings.TrimSpace(pl.Cluster), Tags: pl.Tags}
+			}
+		}
+	}
+	if b.Metadata.set {
+		// The server keeps entries of its own under _nats.*; those stay,
+		// the reader's own are replaced.
+		kept := map[string]string{}
+		for k, v := range cfg.Metadata {
+			if strings.HasPrefix(k, "_nats.") {
+				kept[k] = v
+			}
+		}
+		if !b.Metadata.isNull() {
+			var md map[string]string
+			if json.Unmarshal(b.Metadata.raw, &md) == nil {
+				for k, v := range md {
+					if !strings.HasPrefix(k, "_nats.") {
+						kept[k] = v
+					}
+				}
+			}
+		}
+		cfg.Metadata = kept
+		if len(kept) == 0 {
+			cfg.Metadata = nil
+		}
+	}
+	switch b.Compression {
+	case "s2":
+		cfg.Compression = jetstream.S2Compression
+	case "none":
+		cfg.Compression = jetstream.NoCompression
+	}
+	switch b.PersistMode {
+	case "async":
+		cfg.PersistMode = jetstream.AsyncPersistMode
+	case "default":
+		cfg.PersistMode = jetstream.DefaultPersistMode
+	}
+	if b.AllowMsgCounter != nil {
+		cfg.AllowMsgCounter = *b.AllowMsgCounter
+	}
+	if b.AllowAtomicPublish != nil {
+		cfg.AllowAtomicPublish = *b.AllowAtomicPublish
+	}
+	if b.AllowMsgSchedules != nil {
+		cfg.AllowMsgSchedules = *b.AllowMsgSchedules
+	}
+	if b.MirrorDirect != nil {
+		cfg.MirrorDirect = *b.MirrorDirect
+	}
+	if b.FirstSeq != nil {
+		cfg.FirstSeq = *b.FirstSeq
+	}
+	if b.ConsumerInactiveThreshold != nil {
+		cfg.ConsumerLimits.InactiveThreshold = time.Duration(*b.ConsumerInactiveThreshold)
+	}
+	if b.ConsumerMaxAckPending != nil {
+		cfg.ConsumerLimits.MaxAckPending = *b.ConsumerMaxAckPending
+	}
+	if b.Sealed != nil && *b.Sealed {
+		cfg.Sealed = true
 	}
 
 	switch b.Retention {
@@ -365,6 +568,11 @@ func (h *StreamsHandler) GetMessages(w http.ResponseWriter, r *http.Request) {
 			"messages": messages, "total": 0, "firstSeq": first, "lastSeq": last,
 			"pageStart": 0, "pageEnd": 0,
 		})
+		return
+	}
+
+	if subject := strings.TrimSpace(r.URL.Query().Get("subject")); subject != "" {
+		h.filteredMessages(w, ctx, js, name, info, subject, startSeq, limit)
 		return
 	}
 
@@ -762,6 +970,13 @@ func streamInfoToMap(si *jetstream.StreamInfo) map[string]interface{} {
 		"allowMsgTtl":            c.AllowMsgTTL,
 		"subjectDeleteMarkerTtl": int64(c.SubjectDeleteMarkerTTL),
 		"sealed":                 c.Sealed,
+		"compression":            compressionName(c.Compression),
+		"persistMode":            persistModeName(c.PersistMode),
+		"allowMsgCounter":        c.AllowMsgCounter,
+		"allowAtomicPublish":     c.AllowAtomicPublish,
+		"allowMsgSchedules":      c.AllowMsgSchedules,
+		"mirrorDirect":           c.MirrorDirect,
+		"firstSeq":               c.FirstSeq,
 		"created":                si.Created.Format(time.RFC3339),
 		"state": map[string]interface{}{
 			"messages":      si.State.Msgs,
@@ -774,6 +989,21 @@ func streamInfoToMap(si *jetstream.StreamInfo) map[string]interface{} {
 			"numDeleted":    si.State.NumDeleted,
 			"consumerCount": si.State.Consumers,
 		},
+	}
+	if c.RePublish != nil {
+		out["republish"] = map[string]interface{}{"src": c.RePublish.Source, "dest": c.RePublish.Destination, "headersOnly": c.RePublish.HeadersOnly}
+	}
+	if c.SubjectTransform != nil {
+		out["subjectTransform"] = map[string]interface{}{"src": c.SubjectTransform.Source, "dest": c.SubjectTransform.Destination}
+	}
+	if c.Placement != nil {
+		out["placement"] = map[string]interface{}{"cluster": c.Placement.Cluster, "tags": c.Placement.Tags}
+	}
+	if len(c.Metadata) > 0 {
+		out["metadata"] = c.Metadata
+	}
+	if c.ConsumerLimits.InactiveThreshold > 0 || c.ConsumerLimits.MaxAckPending > 0 {
+		out["consumerLimits"] = map[string]interface{}{"inactiveThreshold": int64(c.ConsumerLimits.InactiveThreshold), "maxAckPending": c.ConsumerLimits.MaxAckPending}
 	}
 	if si.Cluster != nil {
 		replicas := make([]map[string]interface{}, 0, len(si.Cluster.Replicas))
@@ -789,7 +1019,7 @@ func streamInfoToMap(si *jetstream.StreamInfo) map[string]interface{} {
 	// Replication: the config names the relation even before data flows, the
 	// info adds lag and activity once it does.
 	if c.Mirror != nil {
-		out["mirror"] = sourceMap(c.Mirror.Name, si.Mirror)
+		out["mirror"] = sourceMap(c.Mirror, si.Mirror)
 	}
 	if len(c.Sources) > 0 || len(si.Sources) > 0 {
 		byName := make(map[string]*jetstream.StreamSourceInfo, len(si.Sources))
@@ -799,12 +1029,12 @@ func streamInfoToMap(si *jetstream.StreamInfo) map[string]interface{} {
 		sources := make([]map[string]interface{}, 0, len(c.Sources))
 		seen := map[string]bool{}
 		for _, src := range c.Sources {
-			sources = append(sources, sourceMap(src.Name, byName[src.Name]))
+			sources = append(sources, sourceMap(src, byName[src.Name]))
 			seen[src.Name] = true
 		}
 		for _, src := range si.Sources {
 			if !seen[src.Name] {
-				sources = append(sources, sourceMap(src.Name, src))
+				sources = append(sources, sourceMap(&jetstream.StreamSource{Name: src.Name}, src))
 			}
 		}
 		out["sources"] = sources
@@ -812,10 +1042,34 @@ func streamInfoToMap(si *jetstream.StreamInfo) map[string]interface{} {
 	return out
 }
 
-// sourceMap describes one replication relation. `active` is milliseconds
-// since the last activity, so the UI can say "3 s ago" without a clock.
-func sourceMap(name string, info *jetstream.StreamSourceInfo) map[string]interface{} {
-	out := map[string]interface{}{"name": name}
+// sourceMap describes one replication relation: how it is configured, and
+// `active` as milliseconds since the last activity, so the UI can say
+// "3 s ago" without a clock.
+func sourceMap(cfg *jetstream.StreamSource, info *jetstream.StreamSourceInfo) map[string]interface{} {
+	out := map[string]interface{}{"name": cfg.Name}
+	if cfg.FilterSubject != "" {
+		out["filterSubject"] = cfg.FilterSubject
+	}
+	if cfg.OptStartSeq > 0 {
+		out["optStartSeq"] = cfg.OptStartSeq
+	}
+	if cfg.OptStartTime != nil {
+		out["optStartTime"] = cfg.OptStartTime.UnixMilli()
+	}
+	if len(cfg.SubjectTransforms) > 0 {
+		list := make([]map[string]string, 0, len(cfg.SubjectTransforms))
+		for _, st := range cfg.SubjectTransforms {
+			list = append(list, map[string]string{"src": st.Source, "dest": st.Destination})
+		}
+		out["subjectTransforms"] = list
+	}
+	if cfg.External != nil {
+		out["externalApi"] = cfg.External.APIPrefix
+		out["externalDeliver"] = cfg.External.DeliverPrefix
+	}
+	if cfg.Domain != "" {
+		out["domain"] = cfg.Domain
+	}
 	if info == nil {
 		return out
 	}
@@ -825,10 +1079,24 @@ func sourceMap(name string, info *jetstream.StreamSourceInfo) map[string]interfa
 	out["lag"] = info.Lag
 	// Active is -1 while nothing has happened yet.
 	out["active"] = info.Active.Milliseconds()
-	if info.FilterSubject != "" {
+	if info.FilterSubject != "" && cfg.FilterSubject == "" {
 		out["filterSubject"] = info.FilterSubject
 	}
 	return out
+}
+
+func compressionName(c jetstream.StoreCompression) string {
+	if c == jetstream.S2Compression {
+		return "s2"
+	}
+	return "none"
+}
+
+func persistModeName(m jetstream.PersistModeType) string {
+	if m == jetstream.AsyncPersistMode {
+		return "async"
+	}
+	return "default"
 }
 
 // applySourcedBy fills the reverse relation: which of the listed streams

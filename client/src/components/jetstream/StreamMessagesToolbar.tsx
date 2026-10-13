@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Radio, RefreshCw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Filter, Radio, RefreshCw, SkipForward } from 'lucide-react';
 import type { StreamMessage } from 'shared';
 import { api, errorMessage } from '../../lib/api';
 import { Button, IconButton } from '../ui/Button';
@@ -27,6 +27,11 @@ interface Props {
   onToggleLive: () => void;
   loading: boolean;
   onReload: () => void;
+  /** the subject the page is narrowed to, and how to change it */
+  subject: string;
+  onSubject: (s: string) => void;
+  /** opens the newest message on the subject, straight from the stream */
+  onLast: () => void;
 }
 
 /** Paging, jump to sequence or time, page size, export, live tail and reload. */
@@ -47,10 +52,17 @@ export default function StreamMessagesToolbar({
   onToggleLive,
   loading,
   onReload,
+  subject,
+  onSubject,
+  onLast,
 }: Props) {
   const [jump, setJump] = useState('');
   const [jumpTime, setJumpTime] = useState('');
-  const canPrev = pageStart > first;
+  const [subjectDraft, setSubjectDraft] = useState(subject);
+  const filtered = subject.trim() !== '';
+  // A page narrowed to a subject reads forward from where it starts: the
+  // server skips to the matches, and a consumer cannot run backwards.
+  const canPrev = pageStart > first && !filtered;
   const canNext = pageEnd < last && pageEnd > 0;
 
   const jumpTo = () => {
@@ -79,7 +91,7 @@ export default function StreamMessagesToolbar({
         <ChevronLeft size={13} />
       </IconButton>
       <span className="font-mono tabular-nums">
-        {pageEmpty ? 'no messages' : `${pageStart}–${pageEnd}`}{' '}
+        {pageEmpty ? (filtered ? 'no matches' : 'no messages') : `${pageStart}–${pageEnd}`}{' '}
         <span className="text-faint">
           of seq {first}–{last}
         </span>
@@ -117,6 +129,42 @@ export default function StreamMessagesToolbar({
           aria-label="Go to time"
           title="Jump to the first message stored at or after this time"
         />
+      </form>
+      <form
+        className="flex items-center gap-1"
+        onSubmit={e => {
+          e.preventDefault();
+          onSubject(subjectDraft.trim());
+        }}
+      >
+        <Input
+          inputSize="sm"
+          mono
+          className="w-44"
+          placeholder="Subject filter"
+          value={subjectDraft}
+          onChange={e => setSubjectDraft(e.target.value)}
+          aria-label="Subject filter"
+          title="Only messages on this subject; wildcards allowed. Enter applies it."
+        />
+        {filtered && (
+          <>
+            <IconButton
+              label="Clear the subject filter"
+              size="xs"
+              active
+              onClick={() => {
+                setSubjectDraft('');
+                onSubject('');
+              }}
+            >
+              <Filter size={13} />
+            </IconButton>
+            <IconButton label="Last message on this subject" size="xs" onClick={onLast}>
+              <SkipForward size={13} />
+            </IconButton>
+          </>
+        )}
       </form>
       <Select inputSize="sm" className="w-28" value={limit} onChange={e => onLimit(Number(e.target.value))} aria-label="Page size">
         {[25, 50, 100, 200].map(n => (

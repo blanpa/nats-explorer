@@ -484,6 +484,11 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 		r.Get("/streams/{name}/gaps", streamsHandler.Gaps)
 		r.Get("/streams/{name}/series", streamsHandler.Series)
 		r.Get("/streams/{name}/seq", streamsHandler.SeqAtTime)
+		r.Get("/streams/{name}/last", streamsHandler.LastMessage)
+		r.Get("/streams/{name}/config", streamsHandler.Config)
+		r.Post("/streams/{name}/seal", streamsHandler.Seal)
+		r.Get("/streams/{name}/backup", streamsHandler.Backup)
+		r.Post("/streams-restore", streamsHandler.Restore)
 		r.Delete("/streams/{name}/messages/{seq}", streamsHandler.DeleteMessage)
 
 		r.Get("/streams/{stream}/consumers", consumersHandler.List)

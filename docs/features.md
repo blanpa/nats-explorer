@@ -218,6 +218,10 @@ Once a schema is pinned, every message in the history rail and in a branch list 
 <img src="{{ '/screenshots/jetstream-light.png' | relative_url }}" alt="A stream with its limits, configuration and placement, in the light theme" loading="lazy">
 
 - Streams: list, create, edit, purge, delete; page through messages from the newest sequence; live tail; delete single messages
+- The form covers the whole configuration: limits and switches, compression, persist mode and placement, a mirror or sources with filters and starts, republishing and a subject transform, metadata and consumer limits, the NATS 2.11 and 2.12 options. What cannot change after creation is disabled, not hidden
+- A page of messages narrowed to a subject, wildcards included: the server skips to the matches, so a rare subject in a busy stream costs no scan. "Last message on this subject" opens the newest one straight from the stream
+- The configuration as the server's own JSON on the clipboard, which `nats stream add --config` reads; a new stream started from an existing one; sealing, behind a confirmation, because there is no way back
+- **Backup and restore**: a zip of the stream's snapshot, laid out the way the `nats` CLI lays a backup out (`backup.json` beside the archive), so either tool restores it. Restored, the stream is back with every message; it must not exist yet, and its name cannot change on the way
 - Consumers: list, create, delete, state, and pause/resume -- a paused consumer delivers nothing until its deadline and resumes by itself (NATS 2.11)
 - KV/Object backing streams (`KV_*`, `OBJ_*`) hidden by default behind a toggle
 - Jump to a point in time in a stream, export the page, replay it

@@ -1,13 +1,14 @@
-import { useMemo, useState } from 'react';
-import { Eye, EyeOff, Layers, Plus, RefreshCw } from 'lucide-react';
+import { useMemo, useRef, useState } from 'react';
+import { Eye, EyeOff, Layers, Plus, RefreshCw, Upload } from 'lucide-react';
 import type { StreamInfo } from 'shared';
-import { api, describeJsError } from '../../lib/api';
+import { api, describeJsError, errorMessage } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
 import { useJsDomainOverride, useStore } from '../../store';
 import { cn, formatBytes, formatNumber, readSetting, writeSetting } from '../../lib/utils';
 import { IconButton } from '../ui/Button';
 import { SearchInput } from '../ui/Input';
 import { Badge, EmptyState, ErrorState, LoadingState, PaneHeader } from '../ui/misc';
+import { toast } from '../ui/Toast';
 import StreamDialog from './StreamDialog';
 import DomainSwitch from './DomainSwitch';
 import { useCanWrite } from '../../lib/auth';
@@ -25,6 +26,8 @@ export default function StreamList() {
   const tick = useStore(s => s.refreshTick);
   const [filter, setFilter] = useState('');
   const [creating, setCreating] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   // KV buckets and object stores are backed by KV_*/OBJ_* streams that have their own modules.
   const [hideInternal, setHideInternalState] = useState(() => readSetting('ne.hideInternalStreams', true));
   const setHideInternal = (b: boolean) => {
@@ -36,6 +39,23 @@ export default function StreamList() {
     key: `streams:${connId}`,
     interval: 10_000,
   });
+
+  // A backup zip, as this explorer or the nats CLI wrote it: the stream it
+  // names comes back with every message, and must not exist yet.
+  const restore = async (file: File | undefined) => {
+    if (!file || !connId) return;
+    setRestoring(true);
+    try {
+      const info = await api.restoreStream(connId, file);
+      reload();
+      setSelected(info.name);
+    } catch (err) {
+      toast.error('Restore failed', errorMessage(err));
+    } finally {
+      setRestoring(false);
+      if (fileInput.current) fileInput.current.value = '';
+    }
+  };
 
   const internalCount = useMemo(() => (data ?? []).filter(s => isInternal(s.name)).length, [data]);
   const streams = useMemo(() => {
@@ -64,9 +84,22 @@ export default function StreamList() {
               <RefreshCw size={13} />
             </IconButton>
             {canWrite && (
-              <IconButton label="Create stream" size="xs" onClick={() => setCreating(true)}>
-                <Plus size={14} />
-              </IconButton>
+              <>
+                <IconButton label="Restore a stream from a backup" size="xs" loading={restoring} onClick={() => fileInput.current?.click()}>
+                  <Upload size={13} />
+                </IconButton>
+                <input
+                  ref={fileInput}
+                  type="file"
+                  accept=".zip,application/zip"
+                  className="hidden"
+                  aria-label="Backup file"
+                  onChange={e => restore(e.target.files?.[0])}
+                />
+                <IconButton label="Create stream" size="xs" onClick={() => setCreating(true)}>
+                  <Plus size={14} />
+                </IconButton>
+              </>
             )}
           </>
         }

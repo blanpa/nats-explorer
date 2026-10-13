@@ -51,6 +51,23 @@ export interface StreamInfo {
   allowRollup: boolean;
   allowDirect: boolean;
   sealed: boolean;
+  /** "none" or "s2" */
+  compression?: StreamCompression;
+  /** "default" or "async" (NATS 2.12) */
+  persistMode?: StreamPersistMode;
+  /** the NATS 2.12 switches */
+  allowMsgCounter?: boolean;
+  allowAtomicPublish?: boolean;
+  allowMsgSchedules?: boolean;
+  /** a mirror that answers direct gets itself */
+  mirrorDirect?: boolean;
+  /** where the stream started counting */
+  firstSeq?: number;
+  republish?: RePublishConfig;
+  subjectTransform?: SubjectTransformConfig;
+  placement?: PlacementConfig;
+  metadata?: Record<string, string>;
+  consumerLimits?: { inactiveThreshold: number; maxAckPending: number };
   created: string;
   state: StreamState;
   cluster?: { name: string; leader: string; replicas: StreamReplica[] };
@@ -62,9 +79,41 @@ export interface StreamInfo {
   sourcedBy?: { name: string; kind: 'mirror' | 'source' }[];
 }
 
-/** One replication relation of a stream. */
+export type StreamCompression = 'none' | 's2';
+export type StreamPersistMode = 'default' | 'async';
+
+/** Messages are published again on another subject as they are stored. */
+export interface RePublishConfig {
+  /** the subjects it applies to; empty is every subject of the stream */
+  src?: string;
+  dest: string;
+  headersOnly?: boolean;
+}
+
+/** A subject mapping applied on the way in. */
+export interface SubjectTransformConfig {
+  src?: string;
+  dest: string;
+}
+
+/** Which cluster, or which tagged servers, hold the stream. */
+export interface PlacementConfig {
+  cluster?: string;
+  tags?: string[];
+}
+
+/** A mirror or a source as it is configured, with the state once data flows. */
 export interface StreamSource {
   name: string;
+  /** where the copy started, when it was told to */
+  optStartSeq?: number;
+  /** unix ms */
+  optStartTime?: number;
+  subjectTransforms?: SubjectTransformConfig[];
+  /** a stream in another account or domain, by its API prefix */
+  externalApi?: string;
+  externalDeliver?: string;
+  domain?: string;
   /** messages this side is behind; only meaningful while there is traffic */
   lag?: number;
   /** milliseconds since the last activity; -1 before anything happened */
@@ -96,6 +145,23 @@ export interface StreamConfigInput {
   subjectDeleteMarkerTtl?: number;
   allowRollup?: boolean;
   allowDirect?: boolean;
+  /** null or absent clears; an object sets */
+  mirror?: StreamSource | null;
+  sources?: StreamSource[];
+  republish?: RePublishConfig | null;
+  subjectTransform?: SubjectTransformConfig | null;
+  placement?: PlacementConfig | null;
+  metadata?: Record<string, string> | null;
+  compression?: StreamCompression;
+  persistMode?: StreamPersistMode;
+  allowMsgCounter?: boolean;
+  allowAtomicPublish?: boolean;
+  allowMsgSchedules?: boolean;
+  mirrorDirect?: boolean;
+  /** create only */
+  firstSeq?: number;
+  consumerInactiveThreshold?: number;
+  consumerMaxAckPending?: number;
 }
 
 export interface StreamMessage {
@@ -113,6 +179,8 @@ export interface StreamMessagesPage {
   total: number;
   firstSeq: number;
   lastSeq: number;
+  /** set when the page was narrowed to this subject */
+  subject?: string;
   pageStart: number;
   pageEnd: number;
 }

@@ -29,6 +29,7 @@ import type {
   ServiceStats,
   StreamConfigInput,
   StreamInfo,
+  StreamMessage,
   StreamMessagesPage,
   StreamSeries,
   MatchResponse,
@@ -229,8 +230,20 @@ export const api = {
   deleteStream: (connId: string, name: string) => request<{ success: boolean }>(withConn(`/streams/${enc(name)}`, connId), { method: 'DELETE' }),
   purgeStream: (connId: string, name: string, subject?: string) =>
     request<{ success: boolean }>(withConn(`/streams/${enc(name)}/purge`, connId, { subject }), { method: 'POST' }),
-  getStreamMessages: (connId: string, name: string, opts: { startSeq?: number; limit?: number } = {}) =>
+  getStreamMessages: (connId: string, name: string, opts: { startSeq?: number; limit?: number; subject?: string } = {}) =>
     request<StreamMessagesPage>(withConn(`/streams/${enc(name)}/messages`, connId, opts)),
+  /** The newest message on a subject of the stream, wildcards included. */
+  getLastStreamMessage: (connId: string, name: string, subject: string) => request<StreamMessage>(withConn(`/streams/${enc(name)}/last`, connId, { subject })),
+  /** The configuration in the server's own JSON, the one `nats stream add --config` reads. */
+  getStreamConfig: (connId: string, name: string) => request<Record<string, unknown>>(withConn(`/streams/${enc(name)}/config`, connId)),
+  /** No more writes, no more deletes; there is no way back. */
+  sealStream: (connId: string, name: string) => request<StreamInfo>(withConn(`/streams/${enc(name)}/seal`, connId), { method: 'POST' }),
+  /** A zip of the stream's snapshot, laid out the way the nats CLI restores it. */
+  getStreamBackupUrl: (connId: string, name: string, consumers = false) =>
+    `${BASE_URL}${withConn(`/streams/${enc(name)}/backup`, connId, consumers ? { consumers: 1 } : {})}`,
+  /** Recreates the stream named in the backup; it must not exist yet. */
+  restoreStream: (connId: string, file: Blob) =>
+    request<StreamInfo>(withConn('/streams-restore', connId), { method: 'POST', body: file, headers: { 'Content-Type': 'application/zip' } }),
   /** Which sequences between first and last the stream does not have. */
   getStreamGaps: (connId: string, name: string) => request<StreamGaps>(withConn(`/streams/${enc(name)}/gaps`, connId)),
   /** The first stream sequence stored at or after a point in time. */
