@@ -498,9 +498,13 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 		r.Delete("/streams/{stream}/consumers/{consumer}", consumersHandler.Delete)
 		r.Post("/streams/{stream}/consumers/{consumer}/pause", consumersHandler.Pause)
 		r.Post("/streams/{stream}/consumers/{consumer}/resume", consumersHandler.Resume)
+		r.Post("/streams/{stream}/consumers/{consumer}/next", consumersHandler.Next)
+		r.Post("/streams/{stream}/consumers/{consumer}/ack", consumersHandler.Ack)
 
 		r.Get("/kv", kvHandler.ListBuckets)
 		r.Post("/kv", kvHandler.CreateBucket)
+		r.Put("/kv/{bucket}", kvHandler.UpdateBucket)
+		r.Post("/kv/{bucket}/delete", kvHandler.DeleteKeys)
 		r.Get("/kv/{bucket}", kvHandler.ListKeys)
 		r.Delete("/kv/{bucket}", kvHandler.DeleteBucket)
 		r.Get("/kv/{bucket}/status", kvHandler.BucketStatus)

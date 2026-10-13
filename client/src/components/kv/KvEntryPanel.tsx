@@ -10,7 +10,8 @@ import { useCanWrite } from '../../lib/auth';
 
 interface Props {
   entry: KvEntry;
-  onSave: (value: string) => Promise<void>;
+  /** the revision is the one the editor opened on: the save goes through only if nobody wrote in between */
+  onSave: (value: string, revision: number) => Promise<void>;
   onPurge: () => void;
   onDelete: () => void;
   /** tells the owner whether an edit is open, so live updates do not replace the draft */
@@ -28,10 +29,11 @@ export default function KvEntryPanel({ entry: e, onSave, onPurge, onDelete, onEd
     onEditing(v);
   };
 
+  const [editRevision, setEditRevision] = useState(0);
   const save = async () => {
     setSaving(true);
     try {
-      await onSave(editValue);
+      await onSave(editValue, editRevision);
       setEditing(false);
     } finally {
       setSaving(false);
@@ -65,6 +67,7 @@ export default function KvEntryPanel({ entry: e, onSave, onPurge, onDelete, onEd
                 disabled={e.payloadType === 'binary'}
                 onClick={() => {
                   setEditValue(e.payloadType === 'json' ? prettyJson(e.value) : e.value);
+                  setEditRevision(e.revision);
                   setEditing(true);
                 }}
               >

@@ -14,6 +14,9 @@ import type {
   NatsMessage,
   KvBucketConfig,
   KvBucketInfo,
+  KvBulkDeleteResult,
+  PulledMessage,
+  AckAction,
   KvEntry,
   ObjInfo,
   ObjStoreConfig,
@@ -261,6 +264,18 @@ export const api = {
   createConsumer: (connId: string, stream: string, config: ConsumerCreateInput) =>
     request<ConsumerInfo>(withConn(`/streams/${enc(stream)}/consumers`, connId), { method: 'POST', ...json(config) }),
   /** Stops deliveries for a while; the consumer resumes by itself at the deadline. */
+  /** The next messages of a pull consumer, not acknowledged: each carries its ack subject. */
+  nextMessages: (connId: string, stream: string, consumer: string, batch: number, waitMs = 1000) =>
+    request<{ messages: PulledMessage[] }>(withConn(`/streams/${enc(stream)}/consumers/${enc(consumer)}/next`, connId), {
+      method: 'POST',
+      ...json({ batch, waitMs }),
+    }),
+  /** What a client would say about a message it was handed. */
+  ackMessage: (connId: string, stream: string, consumer: string, reply: string, action: AckAction, delayMs?: number) =>
+    request<{ success: boolean }>(withConn(`/streams/${enc(stream)}/consumers/${enc(consumer)}/ack`, connId), {
+      method: 'POST',
+      ...json({ reply, action, delayMs }),
+    }),
   pauseConsumer: (connId: string, stream: string, consumer: string, seconds: number) =>
     request<{ paused: boolean; pauseUntil: string }>(withConn(`/streams/${enc(stream)}/consumers/${enc(consumer)}/pause`, connId), {
       method: 'POST',
@@ -276,11 +291,21 @@ export const api = {
   // KV
   listKvBuckets: (connId: string) => request<KvBucketInfo[]>(withConn('/kv', connId)),
   createKvBucket: (connId: string, config: KvBucketConfig) => request<{ success: boolean }>(withConn('/kv', connId), { method: 'POST', ...json(config) }),
+  /** The bucket's limits, TTL, replicas, sources and metadata; storage and history stay. */
+  updateKvBucket: (connId: string, bucket: string, config: Partial<KvBucketConfig>) =>
+    request<KvBucketInfo>(withConn(`/kv/${enc(bucket)}`, connId), { method: 'PUT', ...json(config) }),
+  /** Many keys at once; what failed is named back. */
+  deleteKvKeys: (connId: string, bucket: string, keys: string[], purge = false) =>
+    request<KvBulkDeleteResult>(withConn(`/kv/${enc(bucket)}/delete`, connId), { method: 'POST', ...json({ keys, purge }) }),
   deleteKvBucket: (connId: string, bucket: string) => request<{ success: boolean }>(withConn(`/kv/${enc(bucket)}`, connId), { method: 'DELETE' }),
   listKvKeys: (connId: string, bucket: string) => request<string[]>(withConn(`/kv/${enc(bucket)}`, connId)),
   getKvEntry: (connId: string, bucket: string, key: string) => request<KvEntry>(withConn(`/kv/${enc(bucket)}/${enc(key)}`, connId)),
-  putKvEntry: (connId: string, bucket: string, key: string, value: string) =>
-    request<{ success: boolean; revision: number }>(withConn(`/kv/${enc(bucket)}/${enc(key)}`, connId), { method: 'PUT', ...json({ value }) }),
+  /** With a revision the put only goes through if nobody wrote in between; 0 says the key must be new. */
+  putKvEntry: (connId: string, bucket: string, key: string, value: string, revision?: number) =>
+    request<{ success: boolean; revision: number }>(withConn(`/kv/${enc(bucket)}/${enc(key)}`, connId), {
+      method: 'PUT',
+      ...json(revision === undefined ? { value } : { value, revision }),
+    }),
   deleteKvEntry: (connId: string, bucket: string, key: string) =>
     request<{ success: boolean }>(withConn(`/kv/${enc(bucket)}/${enc(key)}`, connId), { method: 'DELETE' }),
   purgeKvKey: (connId: string, bucket: string, key: string) =>

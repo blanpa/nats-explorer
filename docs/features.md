@@ -239,12 +239,17 @@ It also names what the consumer is waiting for. An ack floor cannot move past a 
 
 A stream that mirrors or sources from another says so, with the lag and the time since the last activity, and every stream lists which other streams copy from it. Each name is a link to that stream.
 
+**What a consumer would get.** An open pull consumer offers its next messages, handed over as a client would get them and not acknowledged: each carries its ack subject, and what is said to it here -- ack, nak, nak in a minute, term -- is what a client would say. It is `nats consumer next --no-ack` with the verdict in the hand of whoever is looking: the way to see what a stuck worker is being fed, and to term away the one message it chokes on. Until something is said the message is in flight like any other, and comes back after the ack wait. The consumer form carries the rest of what a consumer can be told as well: several filter subjects, a backoff per attempt, the inactive threshold, headers only, a deliver subject and group for a push consumer, a start time, metadata.
+
 ## Key-Value
 
 <img src="{{ '/screenshots/kv-dark.png' | relative_url }}" alt="A Key-Value bucket with a key, its value and its revisions" loading="lazy">
 
 - Buckets with history size; keys with current value, revision and full history
-- Create, edit, delete and purge keys; create and delete buckets
+- Create, edit, delete and purge keys; create, edit and delete buckets -- the limits, the TTL, the replicas, the sources and the metadata change after creation, the name, the storage and the history do not. A bucket can mirror another, in this or another domain, or source from several; the backing stream can be compressed
+- **A save checks the revision it read.** The editor opens on a revision, and the put goes through only if nobody wrote in between; otherwise the server names the current revision, the entry is read again, and nothing is overwritten unseen. "Only if the key is new" does the same for a first write
+- **Many keys at once**: tick keys in the list, or every key shown, and delete or purge them in one go; what failed is named, the rest is gone
+- **Changes as they happen**: the watch that keeps the list current also fills a log of every put, delete and purge while the bucket is open, narrowed by a key pattern, each row opening its key
 - Live updates through a server-side watch
 
 ## Object Store

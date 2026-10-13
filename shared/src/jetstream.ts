@@ -199,7 +199,7 @@ export interface StreamSeries {
   toSeq: number;
 }
 
-export type DeliverPolicy = 'all' | 'last' | 'new' | 'by_start_sequence' | 'last_per_subject';
+export type DeliverPolicy = 'all' | 'last' | 'new' | 'by_start_sequence' | 'by_start_time' | 'last_per_subject';
 export type AckPolicy = 'none' | 'all' | 'explicit';
 export type ReplayPolicy = 'instant' | 'original';
 
@@ -216,8 +216,34 @@ export interface ConsumerConfig {
   replayPolicy: string;
   maxAckPending: number;
   deliverSubject?: string;
+  deliverGroup?: string;
   optStartSeq?: number;
+  /** unix ms */
+  optStartTime?: number;
+  /** redelivery waits, nanoseconds, one per attempt */
+  backoff?: number[];
+  /** nanoseconds without a pull before the consumer is removed */
+  inactiveThreshold?: number;
+  maxWaiting?: number;
+  headersOnly?: boolean;
+  maxRequestBatch?: number;
+  rateLimit?: number;
+  replicas?: number;
+  memoryStorage?: boolean;
+  metadata?: Record<string, string>;
 }
+
+/** One message a pull consumer handed over on request, not acknowledged yet. */
+export interface PulledMessage extends StreamMessage {
+  /** the ack subject; what is said to it decides the message's fate */
+  reply: string;
+  deliveries?: number;
+  consumerSeq?: number;
+  /** messages behind this one */
+  pending?: number;
+}
+
+export type AckAction = 'ack' | 'nak' | 'term' | 'progress';
 
 export interface SequenceInfo {
   consumerSeq: number;
@@ -251,6 +277,16 @@ export interface ConsumerUpdateInput {
   maxDeliver?: number;
   maxAckPending?: number;
   filterSubject?: string;
+  filterSubjects?: string[];
+  backoff?: number[];
+  inactiveThreshold?: number;
+  maxWaiting?: number;
+  headersOnly?: boolean;
+  maxRequestBatch?: number;
+  rateLimit?: number;
+  metadata?: Record<string, string>;
+  deliverSubject?: string;
+  deliverGroup?: string;
 }
 
 export interface ConsumerCreateInput {
@@ -259,12 +295,27 @@ export interface ConsumerCreateInput {
   description?: string;
   deliverPolicy?: DeliverPolicy;
   optStartSeq?: number;
+  /** unix ms, for by_start_time */
+  optStartTime?: number;
   ackPolicy?: AckPolicy;
   ackWait?: number;
   maxDeliver?: number;
   filterSubject?: string;
+  filterSubjects?: string[];
   replayPolicy?: ReplayPolicy;
   maxAckPending?: number;
+  backoff?: number[];
+  inactiveThreshold?: number;
+  maxWaiting?: number;
+  headersOnly?: boolean;
+  maxRequestBatch?: number;
+  rateLimit?: number;
+  replicas?: number;
+  memoryStorage?: boolean;
+  metadata?: Record<string, string>;
+  /** a deliver subject makes it a push consumer */
+  deliverSubject?: string;
+  deliverGroup?: string;
 }
 
 /** A stream that would store a subject, and the consumers that would see it. */

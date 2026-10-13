@@ -5,7 +5,10 @@ import { api, errorMessage } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
 import { cn, formatDateTime, formatDurationMs, formatDurationNs, formatNumber } from '../../lib/utils';
 import { Button, IconButton } from '../ui/Button';
-import { Field, Input, Select } from '../ui/Input';
+import { Checkbox, Field, Input, Select, Textarea } from '../ui/Input';
+import { formatBackoff, parseBackoff, splitFilters } from '../../lib/consumerForm';
+import { formatMetadata, parseMetadata } from '../../lib/streamForm';
+import ConsumerNext from './ConsumerNext';
 import { confirm, Dialog } from '../ui/Dialog';
 import { Badge, EmptyState, ErrorState, KeyValueGrid, LoadingState } from '../ui/misc';
 import { toast } from '../ui/Toast';
@@ -221,11 +224,25 @@ export default function ConsumerList({
                               { label: 'Max ack pending', value: formatNumber(c.config.maxAckPending) },
                               { label: 'Replay', value: c.config.replayPolicy },
                               ...(c.config.deliverSubject ? [{ label: 'Deliver subject', value: c.config.deliverSubject, mono: true }] : []),
+                              ...(c.config.deliverGroup ? [{ label: 'Deliver group', value: c.config.deliverGroup, mono: true }] : []),
                               ...(c.config.optStartSeq ? [{ label: 'Start sequence', value: c.config.optStartSeq }] : []),
+                              ...(c.config.optStartTime ? [{ label: 'Start time', value: formatDateTime(c.config.optStartTime) }] : []),
+                              ...(c.config.backoff?.length ? [{ label: 'Backoff (s)', value: formatBackoff(c.config.backoff), mono: true }] : []),
+                              ...(c.config.inactiveThreshold ? [{ label: 'Inactive threshold', value: formatDurationNs(c.config.inactiveThreshold) }] : []),
+                              ...(c.config.maxWaiting ? [{ label: 'Max waiting pulls', value: c.config.maxWaiting }] : []),
+                              ...(c.config.headersOnly ? [{ label: 'Headers only', value: 'yes' }] : []),
+                              ...(c.config.maxRequestBatch ? [{ label: 'Max request batch', value: c.config.maxRequestBatch }] : []),
+                              ...(c.config.rateLimit ? [{ label: 'Rate limit (bps)', value: formatNumber(c.config.rateLimit) }] : []),
+                              ...(c.config.replicas ? [{ label: 'Replicas', value: `${c.config.replicas}${c.config.memoryStorage ? ' (memory)' : ''}` }] : []),
+                              ...Object.entries(c.config.metadata ?? {})
+                                .filter(([k]) => !k.startsWith('_nats.'))
+                                .map(([k, v]) => ({ label: k, value: v, mono: true })),
                             ]}
                           />
 
                           <AckPending connId={connId} stream={stream} consumer={c} />
+
+                          {canWrite && !c.push && <ConsumerNext connId={connId} stream={stream} consumer={c.name} onChanged={reload} />}
 
                           {samples.length > 1 && (
                             <div className="mt-3 max-w-[560px]">
@@ -311,10 +328,29 @@ function ConsumerDialog({
   const [maxDeliver, setMaxDeliver] = useState(cfg && cfg.maxDeliver > 0 ? String(cfg.maxDeliver) : '');
   const [maxAckPending, setMaxAckPending] = useState(cfg?.maxAckPending ? String(cfg.maxAckPending) : '');
   const [replay, setReplay] = useState<ReplayPolicy>((cfg?.replayPolicy as ReplayPolicy) ?? 'instant');
+  const [startTime, setStartTime] = useState(cfg?.optStartTime ? toLocalInput(cfg.optStartTime) : '');
+  const [backoff, setBackoff] = useState(formatBackoff(cfg?.backoff));
+  const [inactive, setInactive] = useState(cfg?.inactiveThreshold ? String(cfg.inactiveThreshold / 1e9) : '');
+  const [maxWaiting, setMaxWaiting] = useState(cfg?.maxWaiting ? String(cfg.maxWaiting) : '');
+  const [headersOnly, setHeadersOnly] = useState(cfg?.headersOnly ?? false);
+  const [deliverSubject, setDeliverSubject] = useState(cfg?.deliverSubject ?? '');
+  const [deliverGroup, setDeliverGroup] = useState(cfg?.deliverGroup ?? '');
+  const [metadata, setMetadata] = useState(formatMetadata(cfg?.metadata));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const valid = name.trim().length > 0;
+  const common = {
+    description,
+    ...splitFilters(filter),
+    ackWait: Number(ackWait) > 0 ? Number(ackWait) * 1e9 : undefined,
+    backoff: parseBackoff(backoff),
+    inactiveThreshold: Number(inactive) > 0 ? Number(inactive) * 1e9 : 0,
+    headersOnly,
+    metadata: parseMetadata(metadata),
+    deliverSubject: deliverSubject.trim(),
+    deliverGroup: deliverGroup.trim(),
+  };
 
   const submit = async () => {
     if (!valid) return;
@@ -322,26 +358,29 @@ function ConsumerDialog({
     setError(null);
     try {
       if (existing) {
+        // Both filter fields go, so one that was a list can become a single and the other way round.
         await api.updateConsumer(connId, stream, existing.name, {
-          description,
-          filterSubject: filter.trim(),
-          ackWait: Number(ackWait) > 0 ? Number(ackWait) * 1e9 : undefined,
+          ...common,
+          filterSubject: common.filterSubject ?? '',
+          filterSubjects: common.filterSubjects ?? [],
           maxDeliver: Number(maxDeliver) > 0 ? Number(maxDeliver) : -1,
           maxAckPending: Number(maxAckPending) > 0 ? Number(maxAckPending) : 0,
         });
         onCreated();
         return;
       }
+      const startMs = startTime ? new Date(startTime).getTime() : Number.NaN;
       await api.createConsumer(connId, stream, {
+        ...common,
         durableName: name.trim(),
         description: description || undefined,
-        filterSubject: filter.trim() || undefined,
         deliverPolicy: deliver,
         optStartSeq: deliver === 'by_start_sequence' ? Number(startSeq) || undefined : undefined,
+        optStartTime: deliver === 'by_start_time' && Number.isFinite(startMs) ? startMs : undefined,
         ackPolicy: ack,
-        ackWait: Number(ackWait) > 0 ? Number(ackWait) * 1e9 : undefined,
         maxDeliver: Number(maxDeliver) > 0 ? Number(maxDeliver) : undefined,
         maxAckPending: Number(maxAckPending) > 0 ? Number(maxAckPending) : undefined,
+        maxWaiting: Number(maxWaiting) > 0 ? Number(maxWaiting) : undefined,
         replayPolicy: replay,
       });
       onCreated();
@@ -357,7 +396,12 @@ function ConsumerDialog({
       open
       onOpenChange={o => !o && onClose()}
       title={existing ? `Edit consumer ${existing.name}` : `New consumer on ${stream}`}
-      description={existing ? 'Name, deliver policy, ack policy and replay are fixed once a consumer exists.' : 'Creates a durable pull consumer.'}
+      description={
+        existing
+          ? 'Name, deliver policy, ack policy, replay and the waiting-pull limit are fixed once a consumer exists.'
+          : 'Creates a durable consumer: a pull consumer, or a push consumer when a deliver subject is given.'
+      }
+      width="lg"
       footer={
         <>
           {error && <span className="mr-auto text-sm text-danger font-mono truncate">{error}</span>}
@@ -383,8 +427,8 @@ function ConsumerDialog({
         <Field label="Description">
           <Input value={description} onChange={e => setDescription(e.target.value)} />
         </Field>
-        <Field label="Filter subject" hint="Only messages matching this subject are delivered." className="md:col-span-2">
-          <Input mono value={filter} onChange={e => setFilter(e.target.value)} placeholder="orders.eu.>" />
+        <Field label="Filter subjects" hint="Only messages matching one of these are delivered; comma separated." className="md:col-span-2">
+          <Input mono value={filter} onChange={e => setFilter(e.target.value)} placeholder="orders.eu.>, orders.us.>" />
         </Field>
         <Field label="Deliver policy">
           <Select value={deliver} onChange={e => setDeliver(e.target.value as DeliverPolicy)} disabled={fixed}>
@@ -393,11 +437,16 @@ function ConsumerDialog({
             <option value="new">New</option>
             <option value="last_per_subject">Last per subject</option>
             <option value="by_start_sequence">By start sequence</option>
+            <option value="by_start_time">By start time</option>
           </Select>
         </Field>
         {deliver === 'by_start_sequence' ? (
           <Field label="Start sequence">
             <Input type="number" min={1} value={startSeq} onChange={e => setStartSeq(e.target.value)} disabled={fixed} />
+          </Field>
+        ) : deliver === 'by_start_time' ? (
+          <Field label="Start time">
+            <Input type="datetime-local" step={1} value={startTime} onChange={e => setStartTime(e.target.value)} disabled={fixed} />
           </Field>
         ) : (
           <Field label="Replay policy">
@@ -423,7 +472,39 @@ function ConsumerDialog({
         <Field label="Max ack pending" hint="Empty = server default">
           <Input type="number" min={1} value={maxAckPending} onChange={e => setMaxAckPending(e.target.value)} placeholder="default" />
         </Field>
+        <Field
+          label="Backoff (seconds per attempt)"
+          hint="Waits before each redelivery, e.g. 1, 5, 30; the last one repeats. Needs a max deliver of at least that many."
+        >
+          <Input mono value={backoff} onChange={e => setBackoff(e.target.value)} placeholder="1, 5, 30" />
+        </Field>
+        <Field label="Inactive threshold (seconds)" hint="Without a pull for this long the consumer is removed. Empty = the server's default.">
+          <Input type="number" min={0} value={inactive} onChange={e => setInactive(e.target.value)} placeholder="default" />
+        </Field>
+        <Field label="Max waiting pulls" hint="How many pull requests may queue; fixed at creation.">
+          <Input type="number" min={1} value={maxWaiting} onChange={e => setMaxWaiting(e.target.value)} placeholder="512" disabled={fixed} />
+        </Field>
+        <div className="md:col-span-1 flex items-end">
+          <Checkbox
+            label="Headers only"
+            description="Deliver the headers and the size, not the payload."
+            checked={headersOnly}
+            onChange={e => setHeadersOnly(e.target.checked)}
+          />
+        </div>
+        <Field label="Deliver subject (push)" hint="Given, the consumer pushes to this subject instead of being pulled.">
+          <Input mono value={deliverSubject} onChange={e => setDeliverSubject(e.target.value)} placeholder="deliver.orders" />
+        </Field>
+        <Field label="Deliver group" hint="A queue group sharing the deliver subject.">
+          <Input mono value={deliverGroup} onChange={e => setDeliverGroup(e.target.value)} placeholder="workers" />
+        </Field>
+        <Field label="Metadata" hint="One key=value per line." className="md:col-span-2">
+          <Textarea rows={2} value={metadata} onChange={e => setMetadata(e.target.value)} placeholder={'team=ops'} />
+        </Field>
       </form>
     </Dialog>
   );
 }
+
+// In local time, with seconds: a start typed by hand is a wall clock time.
+const toLocalInput = (ms: number) => new Date(ms - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 19);
