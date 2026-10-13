@@ -8,7 +8,7 @@ import { parseGoDuration } from '../../lib/utils';
 import SettingsDialog from './SettingsDialog';
 
 const getHistoryPersistence = vi.fn<() => Promise<HistoryPersistence>>();
-type SetInput = { enabled: boolean; retention?: string; fullText?: boolean; filter?: string; queueBytes?: number; purge?: boolean };
+type SetInput = { enabled: boolean; retention?: string; fullText?: boolean; filter?: string; queueBytes?: number; maxBytes?: number; purge?: boolean };
 const setHistoryPersistence = vi.fn<(input: SetInput) => Promise<HistoryPersistence>>();
 vi.mock('../../lib/api', () => ({
   api: {
@@ -37,6 +37,8 @@ const dbStats = (over: Partial<HistoryPersistence['db']> = {}) => ({
   queued: 0,
   queueBytes: 64 << 20,
   retention: '72h0m0s',
+  maxBytes: 0,
+  trimmed: 0,
   ...over,
 });
 
@@ -47,6 +49,7 @@ const saved = (over: Partial<SetInput>): SetInput => ({
   fullText: true,
   filter: '',
   queueBytes: 64 << 20,
+  maxBytes: 0,
   purge: false,
   ...over,
 });
@@ -174,5 +177,21 @@ describe('SettingsDialog', () => {
     render(<SettingsDialog />);
     expect(await screen.findByText(/STORAGE_DIR/)).toBeInTheDocument();
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  });
+});
+
+describe('disk limit', () => {
+  it('sends the chosen limit and shows what it has cost', async () => {
+    getHistoryPersistence.mockResolvedValue(status({ enabled: true, retention: '0s', db: dbStats({ trimmed: 321 }) }));
+    render(<SettingsDialog />);
+    const limit = await screen.findByLabelText('Disk limit');
+    expect(screen.getByText('Deleted for the disk limit')).toBeInTheDocument();
+    expect(screen.getByText(/321 \(before their retention was up\)/)).toBeInTheDocument();
+    // With no limit the forever hint warns about the disk; with one it points at the limit.
+    expect(screen.getByText(/set a disk limit below/)).toBeInTheDocument();
+    fireEvent.change(limit, { target: { value: String(1024 << 20) } });
+    expect(screen.getByText(/the disk limit below is what bounds the file/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(setHistoryPersistence).toHaveBeenCalledWith(saved({ retention: '0s', maxBytes: 1024 << 20 })));
   });
 });

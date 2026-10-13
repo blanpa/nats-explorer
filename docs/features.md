@@ -56,6 +56,12 @@ The overflow menu of a subject asks the question a wildcard makes hard: what wou
 
 `*` covers one token and `>` the rest; stream subjects overlap; a consumer filter one level too deep is invisible until nothing arrives. `GET /api/match?subject=` answers the JetStream half for scripts.
 
+## Links
+
+The address bar says what is on screen: the module, the connection, the subject with its time range, the stream, the bucket and its key, the store, the service or the request template -- `#/subjects?conn=…&subject=plant.oven.temp&from=…&to=…`. Copy it, or click the link icon in the header, and whoever opens it sees the same view: the connection is switched to, a saved one that is closed is opened, the branches above the subject unfold and the window is set. A link to a connection this explorer does not know says so and applies the rest.
+
+The hash is the browser's own history too, so the back button walks back through the subjects that were opened; a zoom or a connection switch refines the entry it is on rather than adding one. Nothing of it reaches the server, which is why it works under a `BASE_PATH` and in the desktop app alike.
+
 ## Bookmarks
 
 The star in the subject header keeps a subject, with an optional name, group and note. Bookmarks appear as their own panel above the tree and select their subject even when it is filtered out or has not sent anything yet; the note shows under the subject header. Selecting a subject that way, or from an alert or a message list, opens the branches above it in the tree. They travel with the other settings, so with file storage they follow the user to another browser.
@@ -109,6 +115,8 @@ Connecting restores the recorded subjects into the tree with their message count
 Writing to disk is the slower path. With the full-text index it sustains roughly 25 000 msg/s, without it four times that (`go test -bench BenchmarkTuning ./internal/history/`). A burst above that rate is buffered in memory -- 64 MB by default, a few hundred thousand small messages -- and only what does not fit is dropped, counted, and named in the status bar. Sustained overload cannot be buffered away: a queue that keeps growing postpones the loss and pays for it in memory. When something did not reach the disk the status bar says so instead of only turning a size amber, and the setting behind it lists what to change, cheapest first: narrow what is written, switch the full-text index off, raise the buffer. Remedies already in place are left out of the list.
 
 **Retention** can be turned off entirely ("Forever (never delete)", or `HISTORY_RETENTION=0`): nothing is deleted by age and the database grows until the disk is full. It is the right answer for a recording made on purpose, and the one setting here that waiting cannot undo, so the hint under it says so instead of the usual "older messages are deleted once a minute". The range picker then offers "All" alongside the reaching-back presets, because with no retention there is no sensible upper one to stop at.
+
+**A disk limit** bounds the database by size where the retention bounds it by age, and the smaller of the two wins: once the stored messages take more than the limit, the oldest go before their retention is up, checked once a minute, and the status counts them apart from the ones that aged out. The file stops growing there; it does not shrink again, because SQLite reuses the freed space for the next messages. It is the one answer to "Forever" that does not end with a full disk, and the hint under the retention says so.
 
 **What is written** can be narrowed by a CEL expression ("Only write messages matching", or `HISTORY_FILTER`) over the same variables as a payload filter. It is the only one of the three remedies that lowers the write rate itself rather than making the writer faster: on a firehose where a handful of subjects matter, the disk copy stops being the bottleneck instead of merely coping with it. It never narrows the live view -- the feed and the tree show everything that arrives -- and what it leaves out is counted apart from what was lost. A filter over the subject costs about 250 ns per message, one that reaches into the payload about 3 µs.
 

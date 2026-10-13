@@ -33,6 +33,19 @@ const BUFFERS = [
   { value: 1024 << 20, label: '1 GB' },
 ];
 
+/**
+ * Disk limits offered, in bytes. Zero is none, which is what an installation
+ * that never set one has; the retention then decides alone.
+ */
+const LIMITS = [
+  { value: 0, label: 'None (the retention decides)' },
+  { value: 256 << 20, label: '256 MB' },
+  { value: 1024 << 20, label: '1 GB' },
+  { value: 4096 << 20, label: '4 GB' },
+  { value: 16384 << 20, label: '16 GB' },
+  { value: 65536 << 20, label: '64 GB' },
+];
+
 /** The option matching a duration from the backend, or the raw value when it is not one of ours. */
 function retentionValue(d: string): string {
   const hours = parseGoDuration(d) / 3600;
@@ -46,6 +59,7 @@ interface Form {
   fullText: boolean;
   filter: string;
   queueBytes: number;
+  maxBytes: number;
 }
 
 /** What the backend reports, as the form sees it. */
@@ -56,6 +70,7 @@ function formOf(data: HistoryPersistence): Form {
     fullText: data.fullText !== false,
     filter: data.filter ?? '',
     queueBytes: data.queueBytes || 64 << 20,
+    maxBytes: data.maxBytes ?? 0,
   };
 }
 
@@ -76,18 +91,23 @@ function HistorySection() {
   if (!data) return <ErrorState message={error ?? 'The history setting could not be read.'} />;
 
   const current = formOf(data);
-  const { enabled, retention, fullText, filter, queueBytes } = edit ?? current;
+  const { enabled, retention, fullText, filter, queueBytes, maxBytes } = edit ?? current;
   const set = (patch: Partial<Form>) => setEdit({ ...(edit ?? current), ...patch });
 
   const editable = data.supported && !data.managed && canWrite;
   const changedWhileOn =
-    enabled && (retention !== current.retention || fullText !== current.fullText || filter !== current.filter || queueBytes !== current.queueBytes);
+    enabled &&
+    (retention !== current.retention ||
+      fullText !== current.fullText ||
+      filter !== current.filter ||
+      queueBytes !== current.queueBytes ||
+      maxBytes !== current.maxBytes);
   const changed = enabled !== data.enabled || changedWhileOn || (!enabled && purge);
 
   const save = async () => {
     setSaving(true);
     try {
-      const next = await api.setHistoryPersistence({ enabled, retention, fullText, filter, queueBytes, purge: !enabled && purge });
+      const next = await api.setHistoryPersistence({ enabled, retention, fullText, filter, queueBytes, maxBytes, purge: !enabled && purge });
       setData(next);
       setHistoryDb(next.enabled, next.retention);
       setPurge(false);
@@ -137,7 +157,9 @@ function HistorySection() {
               label="Keep messages for"
               hint={
                 retention === '0s'
-                  ? 'Nothing is deleted by age. The file grows until the disk is full -- watch the size below, and narrow what is written if it grows faster than you want.'
+                  ? maxBytes > 0
+                    ? 'Nothing is deleted by age; the disk limit below is what bounds the file.'
+                    : 'Nothing is deleted by age. The file grows until the disk is full -- set a disk limit below, or narrow what is written if it grows faster than you want.'
                   : 'Older messages are deleted once a minute.'
               }
             >
@@ -172,6 +194,21 @@ function HistorySection() {
                 disabled={!editable || saving}
                 onChange={e => set({ filter: e.target.value })}
               />
+            </Field>
+          )}
+          {enabled && (
+            <Field
+              label="Disk limit"
+              hint="Once the stored messages take more than this, the oldest are deleted before their retention is up, checked once a minute. The file stops growing there; it does not shrink again, because SQLite reuses the freed space for the next messages."
+            >
+              <Select value={String(maxBytes)} disabled={!editable || saving} onChange={e => set({ maxBytes: Number(e.target.value) })}>
+                {LIMITS.every(l => l.value !== maxBytes) && <option value={maxBytes}>{formatBytes(maxBytes)}</option>}
+                {LIMITS.map(l => (
+                  <option key={l.value} value={l.value}>
+                    {l.label}
+                  </option>
+                ))}
+              </Select>
             </Field>
           )}
           {enabled && (
@@ -213,6 +250,9 @@ function HistorySection() {
                   { label: 'Oldest message', value: data.db.oldest ? formatDateTime(data.db.oldest) : '–' },
                   { label: 'Waiting to be written', value: `${formatBytes(data.db.queued)} of ${formatBytes(data.db.queueBytes)}` },
                   ...(data.db.filtered > 0 ? [{ label: 'Left out by the filter', value: formatNumber(data.db.filtered) }] : []),
+                  ...(data.db.trimmed > 0
+                    ? [{ label: 'Deleted for the disk limit', value: `${formatNumber(data.db.trimmed)} (before their retention was up)` }]
+                    : []),
                   ...(data.db.dropped > 0 ? [{ label: 'Not persisted', value: `${formatNumber(data.db.dropped)} (the writer fell behind)` }] : []),
                 ]}
               />

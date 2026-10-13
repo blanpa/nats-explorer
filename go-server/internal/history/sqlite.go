@@ -27,6 +27,12 @@ type DB struct {
 	path string
 	// retention is atomic: the UI can change it while the writer runs.
 	retention atomic.Int64
+	// maxBytes caps what the database may hold; 0 is no cap. The age
+	// retention says how long a message is worth keeping, this says how
+	// much disk the answer may cost, and the smaller of the two wins.
+	maxBytes atomic.Int64
+	// trimmed counts the messages deleted for size rather than age.
+	trimmed atomic.Int64
 	// fullText says whether the index behind the word search is being filled.
 	// Off, the writer is several times faster and a search falls back to a
 	// scan; the flag is read on the search path, so it is atomic.
@@ -74,6 +80,11 @@ type DBStats struct {
 	Queued     int64  `json:"queued"`
 	QueueBytes int64  `json:"queueBytes"`
 	Retention  string `json:"retention"`
+	// MaxBytes is the cap on the database; 0 is none. Trimmed is how many
+	// messages it has cost so far: deleted before their retention was up,
+	// which is the one thing a cap does that a retention does not.
+	MaxBytes int64 `json:"maxBytes"`
+	Trimmed  int64 `json:"trimmed"`
 }
 
 const (
@@ -233,9 +244,10 @@ func (d *DB) writer() {
 	}
 }
 
-// cleanup deletes what has aged out. A zero retention is Forever: nothing
-// is deleted by age, and the database grows until the disk does not allow
-// it -- which is the point of asking for it.
+// cleanup deletes what has aged out, then what does not fit. A zero
+// retention is Forever: nothing is deleted by age, and without a cap the
+// database grows until the disk does not allow it -- which is the point of
+// asking for it.
 func (d *DB) cleanup() {
 	if keep := d.Retention(); keep > 0 {
 		if res, err := d.db.Exec(`DELETE FROM messages WHERE ts < ?`, time.Now().Add(-keep).UnixMilli()); err == nil {
@@ -246,6 +258,73 @@ func (d *DB) cleanup() {
 	}
 	if d.rollupKeep > 0 {
 		d.db.Exec(`DELETE FROM rollups WHERE minute < ?`, time.Now().Add(-d.rollupKeep).UnixMilli())
+	}
+	d.trimToSize()
+}
+
+const (
+	// trimChunk is how many of the oldest messages one round of trimming
+	// deletes. Small enough that the writer, which runs the cleanup, is not
+	// away from its queue for long; trimRounds bounds a tick so a cap set
+	// far below the current size is reached over a few minutes rather than
+	// in one stall.
+	trimChunk  = 5000
+	trimRounds = 20
+	// trimTarget is what a trim brings the database down to, as a share of
+	// the cap: stopping exactly at the cap would trim again every minute.
+	trimTarget = 0.9
+)
+
+// usedBytes is what the rows occupy: the pages in use, not the file. A
+// deleted row frees its pages for the next insert without shrinking the
+// file, so the file is the wrong thing to measure -- it would say the cap
+// is exceeded forever after it was exceeded once.
+func (d *DB) usedBytes() int64 {
+	var pages, free, size int64
+	d.db.QueryRow(`PRAGMA page_count`).Scan(&pages)
+	d.db.QueryRow(`PRAGMA freelist_count`).Scan(&free)
+	d.db.QueryRow(`PRAGMA page_size`).Scan(&size)
+	return (pages - free) * size
+}
+
+// trimToSize deletes the oldest messages until the database fits its cap.
+// The file does not shrink -- SQLite reuses the freed pages -- so what the
+// cap promises is that the file stops growing there, not that it gets
+// smaller again.
+func (d *DB) trimToSize() {
+	limit := d.MaxBytes()
+	if limit <= 0 {
+		return
+	}
+	used := d.usedBytes()
+	if used <= limit {
+		return
+	}
+	target := int64(float64(limit) * trimTarget)
+	for round := 0; round < trimRounds && used > target; round++ {
+		// How many rows the excess is worth, if every row cost the same:
+		// an estimate the next measurement corrects, bounded so one round
+		// never holds the writer for long.
+		count := d.count.Load()
+		if count <= 0 {
+			return
+		}
+		rows := int64(float64(count)*float64(used-target)/float64(used)) + 1
+		if rows > trimChunk {
+			rows = trimChunk
+		}
+		res, err := d.db.Exec(`DELETE FROM messages WHERE id IN (SELECT id FROM messages ORDER BY ts, id LIMIT ?)`, rows)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "history db: trim: %v\n", err)
+			return
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return
+		}
+		d.count.Add(-n)
+		d.trimmed.Add(n)
+		used = d.usedBytes()
 	}
 }
 
@@ -570,6 +649,8 @@ func (d *DB) Stats() DBStats {
 		QueueBytes: d.queueBudget.Load(),
 		Retention:  d.Retention().String(),
 		Messages:   d.count.Load(),
+		MaxBytes:   d.MaxBytes(),
+		Trimmed:    d.trimmed.Load(),
 	}
 	d.db.QueryRow(`SELECT COALESCE(MIN(ts), 0) FROM messages`).Scan(&st.Oldest)
 	if fi, err := os.Stat(d.path); err == nil {
@@ -593,6 +674,12 @@ func (d *DB) Retention() time.Duration { return time.Duration(d.retention.Load()
 // SetRetention changes it; the writer applies it on its next cleanup tick,
 // so nothing has to be reopened.
 func (d *DB) SetRetention(keep time.Duration) { d.retention.Store(int64(keep)) }
+
+// MaxBytes is the cap on the database, 0 for none.
+func (d *DB) MaxBytes() int64 { return d.maxBytes.Load() }
+
+// SetMaxBytes changes the cap; the writer applies it on its next cleanup tick.
+func (d *DB) SetMaxBytes(n int64) { d.maxBytes.Store(n) }
 
 // FullText reports whether the word index is being filled.
 func (d *DB) FullText() bool { return d.fullText.Load() }

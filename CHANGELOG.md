@@ -4,6 +4,10 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+### Added
+- **A disk limit for the persistent history.** The retention bounded the database by age alone, so "Forever" and a firehose both ended with a full disk. `HISTORY_MAX_MB`, and the same setting in the UI, caps it by size: once the stored messages take more, the oldest are deleted before their retention is up, checked once a minute and counted apart from what aged out. The file stops growing there rather than shrinking, because SQLite reuses the freed pages.
+- **The address is the view.** The hash carries the module, the connection, the subject with its time range, the stream, the bucket and its key, the store, the service or the template, so a link can be sent and opens the same thing: the connection switched to or, if it is only saved, opened; the branches above the subject unfolded; the window set. A link icon in the header copies it, which the desktop app needs because it has no address bar. The back button walks back through the subjects opened.
+
 ## [0.5.0] - 2026-09-12
 
 A release about telling the truth on screen. A chart no longer draws a line

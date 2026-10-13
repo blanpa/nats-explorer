@@ -37,6 +37,8 @@ type Persistence struct {
 	// that decides whether a burst reaches the database at all, so it
 	// belongs next to the setting that switches the database on.
 	queueBytes int64
+	// maxBytes caps the database; 0 is no cap.
+	maxBytes int64
 	// save stores the choice for the next start; nil keeps it for this run only.
 	save func(PersistenceConfig) error
 }
@@ -64,6 +66,11 @@ const (
 	// problem the database was there to solve.
 	MinQueueBytes = 1 << 20
 	MaxQueueBytes = 2 << 30
+
+	// MinMaxBytes is the smallest cap worth having: below it the trim would
+	// run every minute and the history would hold a few seconds. Zero is no
+	// cap, which is what an installation that never set one has.
+	MinMaxBytes = 16 << 20
 )
 
 // PersistenceConfig is the stored choice.
@@ -77,6 +84,8 @@ type PersistenceConfig struct {
 	Filter string `json:"filter,omitempty"`
 	// QueueBytes is the writer's buffer; 0 means the default.
 	QueueBytes int64 `json:"queueBytes,omitempty"`
+	// MaxBytes caps the database; 0 is no cap.
+	MaxBytes int64 `json:"maxBytes,omitempty"`
 }
 
 // PersistenceStatus is what the UI shows and edits.
@@ -101,6 +110,10 @@ type PersistenceStatus struct {
 	// dropping, and MaxQueueBytes what it may be raised to.
 	QueueBytes    int64 `json:"queueBytes"`
 	MaxQueueBytes int64 `json:"maxQueueBytes"`
+	// MaxBytes caps the database, 0 for none: the oldest messages are
+	// deleted before their retention is up once the rows take more. It is
+	// the one answer to "Forever" that does not end with a full disk.
+	MaxBytes int64 `json:"maxBytes"`
 	// DB is the size of the database, when one is open.
 	DB *DBStats `json:"db,omitempty"`
 }
@@ -115,6 +128,7 @@ type PersistenceOptions struct {
 	FullText   bool
 	Filter     string
 	QueueBytes int64
+	MaxBytes   int64
 	Save       func(PersistenceConfig) error
 }
 
@@ -143,6 +157,9 @@ func (o *PersistenceOptions) ParseConfig(raw json.RawMessage) {
 	if c.QueueBytes >= MinQueueBytes && c.QueueBytes <= MaxQueueBytes {
 		o.QueueBytes = c.QueueBytes
 	}
+	if validMaxBytes(c.MaxBytes) {
+		o.MaxBytes = c.MaxBytes
+	}
 }
 
 // NewPersistence builds the controller and opens the database when the
@@ -157,8 +174,11 @@ func NewPersistence(tee *Tee, o PersistenceOptions) (*Persistence, error) {
 	if o.QueueBytes < MinQueueBytes || o.QueueBytes > MaxQueueBytes {
 		o.QueueBytes = DefaultQueueBytes
 	}
+	if !validMaxBytes(o.MaxBytes) {
+		o.MaxBytes = 0
+	}
 	p := &Persistence{tee: tee, path: o.Path, managed: o.Managed, retention: o.Retention,
-		fullText: o.FullText, filterExpr: o.Filter, queueBytes: o.QueueBytes, save: o.Save}
+		fullText: o.FullText, filterExpr: o.Filter, queueBytes: o.QueueBytes, maxBytes: o.MaxBytes, save: o.Save}
 	if err := p.applyFilter(o.Filter); err != nil {
 		p.filterExpr = ""
 		return p, err
@@ -175,6 +195,7 @@ func NewPersistence(tee *Tee, o PersistenceOptions) (*Persistence, error) {
 		return p, fmt.Errorf("history db %s: %w", o.Path, err)
 	}
 	db.SetQueueBytes(o.QueueBytes)
+	db.SetMaxBytes(o.MaxBytes)
 	tee.SetDB(db)
 	return p, nil
 }
@@ -207,6 +228,7 @@ func (p *Persistence) Status() PersistenceStatus {
 		Filter:        p.filterExpr,
 		QueueBytes:    p.queueBytes,
 		MaxQueueBytes: MaxQueueBytes,
+		MaxBytes:      p.maxBytes,
 	}
 	if !st.Supported {
 		st.Reason = "this installation keeps its state in the browser; start the server with STORAGE_DIR or HISTORY_DB to persist the history"
@@ -216,6 +238,7 @@ func (p *Persistence) Status() PersistenceStatus {
 		st.Retention = db.Retention().String()
 		st.FullText = db.FullText()
 		st.QueueBytes = db.QueueBytesLimit()
+		st.MaxBytes = db.MaxBytes()
 		s := db.Stats()
 		st.DB = &s
 	}
@@ -240,6 +263,8 @@ type PersistenceRequest struct {
 	Filter string
 	// QueueBytes is the writer's buffer; 0 keeps the current one.
 	QueueBytes int64
+	// MaxBytes caps the database; nil keeps the current one, 0 removes the cap.
+	MaxBytes *int64
 	// Purge deletes the file when switching off, so the payloads really go.
 	Purge bool
 }
@@ -254,6 +279,10 @@ func (p *Persistence) Set(req PersistenceRequest) error {
 	if req.QueueBytes == 0 {
 		req.QueueBytes = p.queueBytes
 	}
+	maxBytes := p.maxBytes
+	if req.MaxBytes != nil {
+		maxBytes = *req.MaxBytes
+	}
 	switch {
 	case p.managed:
 		return ErrManaged
@@ -263,6 +292,8 @@ func (p *Persistence) Set(req PersistenceRequest) error {
 		return fmt.Errorf("retention must be between %s and %s, or zero to keep everything", MinRetention, MaxRetention)
 	case req.QueueBytes < MinQueueBytes || req.QueueBytes > MaxQueueBytes:
 		return fmt.Errorf("the write buffer must be between %s and %s", formatBytes(MinQueueBytes), formatBytes(MaxQueueBytes))
+	case !validMaxBytes(maxBytes):
+		return fmt.Errorf("the disk limit must be at least %s, or zero for none", formatBytes(MinMaxBytes))
 	}
 	// The filter is compiled before anything is opened or closed: a typo
 	// should leave the setting as it was, not switch the database off.
@@ -273,6 +304,7 @@ func (p *Persistence) Set(req PersistenceRequest) error {
 	p.fullText = req.FullText
 	p.filterExpr = strings.TrimSpace(req.Filter)
 	p.queueBytes = req.QueueBytes
+	p.maxBytes = maxBytes
 	switch db := p.tee.DB(); {
 	case req.Enabled && db == nil:
 		opened, err := OpenDB(p.path, req.Retention)
@@ -284,10 +316,12 @@ func (p *Persistence) Set(req PersistenceRequest) error {
 			return err
 		}
 		opened.SetQueueBytes(req.QueueBytes)
+		opened.SetMaxBytes(maxBytes)
 		p.tee.SetDB(opened)
 	case req.Enabled:
 		db.SetRetention(req.Retention)
 		db.SetQueueBytes(req.QueueBytes)
+		db.SetMaxBytes(maxBytes)
 		// Rebuilding or emptying the index can take a moment on a large
 		// database; it happens while messages keep being recorded.
 		if err := db.SetFullText(req.FullText); err != nil {
@@ -312,6 +346,7 @@ func (p *Persistence) Set(req PersistenceRequest) error {
 			FullText:   &fullText,
 			Filter:     p.filterExpr,
 			QueueBytes: req.QueueBytes,
+			MaxBytes:   maxBytes,
 		})
 	}
 	return nil
@@ -320,6 +355,11 @@ func (p *Persistence) Set(req PersistenceRequest) error {
 // validRetention accepts a duration in range, or Forever.
 func validRetention(d time.Duration) bool {
 	return d == Forever || (d >= MinRetention && d <= MaxRetention)
+}
+
+// validMaxBytes accepts no cap, or one worth having.
+func validMaxBytes(n int64) bool {
+	return n == 0 || n >= MinMaxBytes
 }
 
 // formatBytes renders a budget the way the message about it reads best.

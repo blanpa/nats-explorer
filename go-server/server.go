@@ -88,6 +88,8 @@ type serverConfig struct {
 	// historyQueueBytes is how much of a burst the writer buffers; 0 is the
 	// default.
 	historyQueueBytes int64
+	// historyMaxBytes caps the database; 0 is no cap.
+	historyMaxBytes int64
 	// open the saved connections flagged for it when the server starts
 	autoConnect bool
 	// basePath mounts everything under a prefix ("/nats"), for a reverse

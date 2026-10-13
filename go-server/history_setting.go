@@ -25,6 +25,7 @@ func openHistoryDB(tee *history.Tee, cfg serverConfig) *history.Persistence {
 		FullText:   !cfg.historyNoFullText,
 		Filter:     cfg.historyFilter,
 		QueueBytes: cfg.historyQueueBytes,
+		MaxBytes:   cfg.historyMaxBytes,
 	}
 	if cfg.settings != nil && !cfg.historyManaged {
 		if raw, ok := cfg.settings.Get(history.SettingsKey); ok {
@@ -54,6 +55,9 @@ func openHistoryDB(tee *history.Tee, cfg serverConfig) *history.Persistence {
 		}
 		if expr := tee.PersistFilter(); expr != "" {
 			log.Printf("Persisting only messages matching %s", expr)
+		}
+		if limit := tee.DB().MaxBytes(); limit > 0 {
+			log.Printf("Persistent history capped at %d MB", limit>>20)
 		}
 	}
 	return p

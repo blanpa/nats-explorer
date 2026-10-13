@@ -333,3 +333,65 @@ func TestWriterQueueIsBoundedByBytes(t *testing.T) {
 		t.Fatalf("written = %d of 200; the budget is not being released", got)
 	}
 }
+
+// The cap is part of the setting: stored, reported, validated, and left
+// alone by a request that does not mention it.
+func TestPersistenceMaxBytes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history.db")
+	tee := NewTee(NewMemStore(0, 0))
+	var saved PersistenceConfig
+	p, err := NewPersistence(tee, PersistenceOptions{Path: path, Retention: time.Hour, Save: func(c PersistenceConfig) error { saved = c; return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	if st := p.Status(); st.MaxBytes != 0 {
+		t.Fatalf("a fresh setting has a cap: %+v", st)
+	}
+
+	limit := int64(MinMaxBytes)
+	if err := p.Set(PersistenceRequest{Enabled: true, Retention: time.Hour, FullText: true, MaxBytes: &limit}); err != nil {
+		t.Fatal(err)
+	}
+	if saved.MaxBytes != limit || p.Status().MaxBytes != limit || tee.DB().MaxBytes() != limit {
+		t.Fatalf("cap not applied: saved %d, status %d, db %d", saved.MaxBytes, p.Status().MaxBytes, tee.DB().MaxBytes())
+	}
+
+	// Not mentioned: kept.
+	if err := p.Set(PersistenceRequest{Enabled: true, Retention: 2 * time.Hour, FullText: true}); err != nil {
+		t.Fatal(err)
+	}
+	if saved.MaxBytes != limit || tee.DB().MaxBytes() != limit {
+		t.Fatalf("cap lost by a request without one: saved %d, db %d", saved.MaxBytes, tee.DB().MaxBytes())
+	}
+
+	// Too small to be worth having: refused, and nothing else changes either.
+	small := int64(MinMaxBytes - 1)
+	if err := p.Set(PersistenceRequest{Enabled: true, Retention: 3 * time.Hour, FullText: true, MaxBytes: &small}); err == nil {
+		t.Fatal("a cap under the minimum was accepted")
+	}
+	if tee.DB().Retention() != 2*time.Hour {
+		t.Fatalf("a refused request changed the retention to %s", tee.DB().Retention())
+	}
+
+	// Zero lifts it.
+	var none int64
+	if err := p.Set(PersistenceRequest{Enabled: true, Retention: 2 * time.Hour, FullText: true, MaxBytes: &none}); err != nil {
+		t.Fatal(err)
+	}
+	if saved.MaxBytes != 0 || tee.DB().MaxBytes() != 0 {
+		t.Fatalf("cap not lifted: saved %d, db %d", saved.MaxBytes, tee.DB().MaxBytes())
+	}
+
+	// A stored choice comes back on the next start, a nonsense one does not.
+	var o PersistenceOptions
+	o.ParseConfig(json.RawMessage(`{"enabled":true,"retention":"1h","maxBytes":33554432}`))
+	if o.MaxBytes != 32<<20 {
+		t.Fatalf("stored cap not read: %d", o.MaxBytes)
+	}
+	o = PersistenceOptions{}
+	o.ParseConfig(json.RawMessage(`{"enabled":true,"retention":"1h","maxBytes":12}`))
+	if o.MaxBytes != 0 {
+		t.Fatalf("a stored cap under the minimum was read: %d", o.MaxBytes)
+	}
+}

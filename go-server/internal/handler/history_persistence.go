@@ -40,6 +40,8 @@ func (h *HistoryHandler) SetPersistence(w http.ResponseWriter, r *http.Request) 
 		Filter *string `json:"filter"`
 		// QueueBytes is the writer's buffer; absent or 0 keeps the current one.
 		QueueBytes int64 `json:"queueBytes"`
+		// MaxBytes caps the database; absent keeps the current one, 0 lifts it.
+		MaxBytes *int64 `json:"maxBytes"`
 		// Purge deletes the database file when switching off, so the stored
 		// payloads really are gone.
 		Purge bool `json:"purge"`
@@ -64,6 +66,7 @@ func (h *HistoryHandler) SetPersistence(w http.ResponseWriter, r *http.Request) 
 		FullText:   fullText,
 		Filter:     h.Persist.Status().Filter,
 		QueueBytes: body.QueueBytes,
+		MaxBytes:   body.MaxBytes,
 		Purge:      body.Purge,
 	}
 	if body.Filter != nil {

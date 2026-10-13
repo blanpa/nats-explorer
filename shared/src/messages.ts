@@ -149,6 +149,10 @@ export interface HistoryDbStats {
   /** how much of a burst the writer buffers before it drops */
   queueBytes: number;
   retention: string;
+  /** cap on the database, 0 for none */
+  maxBytes: number;
+  /** messages deleted for size before their retention was up */
+  trimmed: number;
 }
 
 /** GET/PUT /api/history/persistence: the SQLite copy of the history as a setting. */
@@ -169,6 +173,8 @@ export interface HistoryPersistence {
   /** how much of a burst the writer buffers, and what it may be raised to */
   queueBytes?: number;
   maxQueueBytes?: number;
+  /** cap on the database in bytes; 0 or absent is none */
+  maxBytes?: number;
   db?: HistoryDbStats;
 }
 

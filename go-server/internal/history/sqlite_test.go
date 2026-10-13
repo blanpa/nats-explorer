@@ -86,3 +86,62 @@ func TestTeeKeepsMemoryLive(t *testing.T) {
 		t.Fatalf("db side wrote %d", db.Written())
 	}
 }
+
+// A cap deletes the oldest messages once the rows take more than it, and
+// counts them apart from the ones that aged out: a message deleted for
+// size went before its time, and the status should be able to say so.
+func TestDBTrimsToCap(t *testing.T) {
+	db, err := OpenDB(filepath.Join(t.TempDir(), "h.db"), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UnixMilli()
+	payload := make([]byte, 1024)
+	for i := range payload {
+		payload[i] = byte('a' + i%26)
+	}
+	const n = 3000
+	for i := int64(1); i <= n; i++ {
+		db.Enqueue("c", &message.Record{Subject: "plant.line1.raw", Data: payload, Timestamp: now - (n-i)*10, Sequence: uint64(i)})
+	}
+	db.Flush()
+	before := db.Stats()
+	if before.Messages != n || before.Trimmed != 0 {
+		t.Fatalf("before = %+v", before)
+	}
+	used := db.usedBytes()
+	if used < n*1024 {
+		t.Fatalf("used %d bytes for %d KB of payload", used, n)
+	}
+
+	// Without a cap the cleanup leaves everything: the retention is an hour.
+	db.cleanup()
+	if st := db.Stats(); st.Messages != n {
+		t.Fatalf("no cap, but %d of %d left", st.Messages, n)
+	}
+
+	limit := used / 2
+	db.SetMaxBytes(limit)
+	db.cleanup()
+	after := db.Stats()
+	if after.MaxBytes != limit {
+		t.Fatalf("stats cap = %d, want %d", after.MaxBytes, limit)
+	}
+	if got := db.usedBytes(); got > limit {
+		t.Fatalf("still %d bytes in use over a cap of %d", got, limit)
+	}
+	if after.Trimmed == 0 || after.Messages != n-after.Trimmed {
+		t.Fatalf("after = %+v", after)
+	}
+	// The oldest went first: what is left begins later than it did.
+	if after.Oldest <= before.Oldest {
+		t.Fatalf("oldest %d, was %d: the newest were trimmed", after.Oldest, before.Oldest)
+	}
+	// A second tick with the same cap trims nothing: the first one left
+	// room under it on purpose.
+	db.cleanup()
+	if st := db.Stats(); st.Trimmed != after.Trimmed {
+		t.Fatalf("trimmed again: %d after %d", st.Trimmed, after.Trimmed)
+	}
+}

@@ -121,6 +121,16 @@ func main() {
 		}
 		cfg.historyQueueBytes = n
 	}
+	// HISTORY_MAX_MB caps the database: once the rows take more, the oldest
+	// messages go before their retention is up. The one answer to a
+	// retention of forever that does not end with a full disk.
+	if v := os.Getenv("HISTORY_MAX_MB"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n < 0 || (n > 0 && n<<20 < history.MinMaxBytes) {
+			log.Fatalf("HISTORY_MAX_MB: %q is not a size of at least %d MB, or 0 for none", v, history.MinMaxBytes>>20)
+		}
+		cfg.historyMaxBytes = n << 20
+	}
 	if path := os.Getenv("HISTORY_DB"); path != "" {
 		cfg.historyDB = path
 		cfg.historyManaged = true
