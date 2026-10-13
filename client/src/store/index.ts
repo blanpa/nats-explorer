@@ -6,6 +6,7 @@ import { appInfo } from '../lib/storage';
 import { byArrival, messageKey } from '../lib/messages';
 import { clearAsyncCache } from '../lib/useAsync';
 import { ancestorsOf, type FlatNode } from '../components/subjects/tree';
+import type { TimeRange } from '../lib/timeRange';
 
 export type Module = 'subjects' | 'state' | 'jetstream' | 'kv' | 'objects' | 'services' | 'requests' | 'events' | 'monitor' | 'cluster' | 'alerts' | 'audit';
 
@@ -209,6 +210,13 @@ export interface AppState {
   resetLive: () => void;
   selectedMessage: NatsMessage | null;
   setSelectedMessage: (m: NatsMessage | null) => void;
+  /**
+   * The time range of the persistent history the subject detail shows, or
+   * the live view. It belongs to the selected subject and goes with it: a
+   * window chosen for the oven is not a window on the conveyor.
+   */
+  range: TimeRange | null;
+  setRange: (r: TimeRange | null) => void;
   subscriptionStats: Map<string, SubscriptionStats>;
   setSubscriptionStats: (connId: string, stats: SubscriptionStats) => void;
   totalSubjects: number;
@@ -222,6 +230,9 @@ export interface AppState {
   setSelectedStream: (s: string | null) => void;
   selectedKvBucket: string | null;
   setSelectedKvBucket: (s: string | null) => void;
+  /** the key open in that bucket */
+  selectedKvKey: string | null;
+  setSelectedKvKey: (k: string | null) => void;
   selectedObjStore: string | null;
   setSelectedObjStore: (s: string | null) => void;
   selectedService: string | null;
@@ -272,13 +283,18 @@ export const useStore = create<AppState>((set, get) => ({
     if (activeConnId !== prev.activeConnId) {
       patch.selectedStream = null;
       patch.selectedKvBucket = null;
+      patch.selectedKvKey = null;
       patch.selectedObjStore = null;
       patch.selectedService = null;
     }
     set(patch);
   },
   setActiveConnId: id =>
-    set(s => (s.activeConnId === id ? {} : { activeConnId: id, selectedStream: null, selectedKvBucket: null, selectedObjStore: null, selectedService: null })),
+    set(s =>
+      s.activeConnId === id
+        ? {}
+        : { activeConnId: id, selectedStream: null, selectedKvBucket: null, selectedKvKey: null, selectedObjStore: null, selectedService: null },
+    ),
 
   // Shell ------------------------------------------------------------------
   module: 'subjects',
@@ -350,7 +366,7 @@ export const useStore = create<AppState>((set, get) => ({
       if (s.selectedSubject === subject && s.selectedSubjects.length <= 1) return {};
       const live = new Map<string, LiveView>();
       if (subject) live.set(subject, s.live.get(subject) ?? emptyView(subject));
-      return { selectedSubjects: subject ? [subject] : [], selectedSubject: subject, selectedMessage: null, live };
+      return { selectedSubjects: subject ? [subject] : [], selectedSubject: subject, selectedMessage: null, range: null, live };
     }),
   revealSubject: subject => {
     const s = get();
@@ -375,7 +391,7 @@ export const useStore = create<AppState>((set, get) => ({
         selectedSubjects = [...s.selectedSubjects, subject];
         live.set(subject, emptyView(subject));
       }
-      return { selectedSubjects, selectedSubject: selectedSubjects[selectedSubjects.length - 1] ?? null, selectedMessage: null, live };
+      return { selectedSubjects, selectedSubject: selectedSubjects[selectedSubjects.length - 1] ?? null, selectedMessage: null, range: null, live };
     }),
   expandAll: false,
   expanded: new Set(),
@@ -539,6 +555,8 @@ export const useStore = create<AppState>((set, get) => ({
     set({ live, selectedMessage: null });
   },
   selectedMessage: null,
+  range: null,
+  setRange: r => set({ range: r }),
   setSelectedMessage: m => set({ selectedMessage: m }),
   subscriptionStats: new Map(),
   setSubscriptionStats: (connId, stats) => {
@@ -556,7 +574,9 @@ export const useStore = create<AppState>((set, get) => ({
   selectedStream: null,
   setSelectedStream: s => set({ selectedStream: s }),
   selectedKvBucket: null,
-  setSelectedKvBucket: s => set({ selectedKvBucket: s }),
+  setSelectedKvBucket: s => set(st => (st.selectedKvBucket === s ? {} : { selectedKvBucket: s, selectedKvKey: null })),
+  selectedKvKey: null,
+  setSelectedKvKey: k => set({ selectedKvKey: k }),
   selectedObjStore: null,
   setSelectedObjStore: s => set({ selectedObjStore: s }),
   selectedService: null,
@@ -571,7 +591,14 @@ export const useStore = create<AppState>((set, get) => ({
     if (domain.trim()) next.set(connId, domain.trim());
     else next.delete(connId);
     clearAsyncCache();
-    set(s => ({ jsDomainOverride: next, refreshTick: s.refreshTick + 1, selectedStream: null, selectedKvBucket: null, selectedObjStore: null }));
+    set(s => ({
+      jsDomainOverride: next,
+      refreshTick: s.refreshTick + 1,
+      selectedStream: null,
+      selectedKvBucket: null,
+      selectedKvKey: null,
+      selectedObjStore: null,
+    }));
   },
 }));
 

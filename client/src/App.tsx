@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { MODULES, useStore } from './store';
 import { startFeed } from './lib/feed';
 import { installShortcuts } from './lib/shortcuts';
+import { installUrlSync } from './lib/urlSync';
 import Header from './components/layout/Header';
 import Rail from './components/layout/Rail';
 import Explorer from './components/layout/Explorer';
@@ -24,9 +25,11 @@ export default function App() {
     useAuth.getState().refresh();
     const stopFeed = startFeed();
     const stopShortcuts = installShortcuts();
+    const stopUrlSync = installUrlSync();
     return () => {
       stopFeed();
       stopShortcuts();
+      stopUrlSync();
     };
   }, []);
 

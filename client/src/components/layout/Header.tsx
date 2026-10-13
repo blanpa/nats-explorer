@@ -1,10 +1,12 @@
-import { LogOut, ShieldCheck, WifiOff } from 'lucide-react';
+import { Check, Link2, LogOut, ShieldCheck, WifiOff } from 'lucide-react';
+import { useState } from 'react';
 import { useAuth } from '../../lib/auth';
 import { wsClient } from '../../lib/ws';
 import { IconButton } from '../ui/Button';
 import { useStore } from '../../store';
 import { Badge } from '../ui/misc';
 import ConnectionSwitcher from '../connection/ConnectionSwitcher';
+import { currentLink } from '../../lib/urlSync';
 
 /**
  * A subject tree: a root and the branches under it. The letter it used to
@@ -51,6 +53,29 @@ function UserBadge() {
   );
 }
 
+/**
+ * The address of what is on screen, to the clipboard. The address bar says
+ * the same, but the desktop shell has none, and a button is quicker than
+ * selecting the bar in either.
+ */
+function CopyLink() {
+  const [copied, setCopied] = useState(false);
+  return (
+    <IconButton
+      label={copied ? 'Link copied' : 'Copy a link to this view'}
+      size="sm"
+      onClick={() => {
+        navigator.clipboard?.writeText(currentLink()).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+    >
+      {copied ? <Check size={14} className="text-ok" /> : <Link2 size={14} />}
+    </IconButton>
+  );
+}
+
 export default function Header() {
   const wsOnline = useStore(s => s.wsOnline);
 
@@ -71,6 +96,7 @@ export default function Header() {
 
       {/* The switcher is the one place for connections: switch, connect, disconnect, manage. */}
       <ConnectionSwitcher />
+      <CopyLink />
       <UserBadge />
     </header>
   );

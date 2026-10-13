@@ -24,7 +24,9 @@ export default function KvBucketView() {
   const setBucket = useStore(s => s.setSelectedKvBucket);
   const bump = useStore(s => s.bumpRefresh);
   const [filter, setFilter] = useState('');
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // In the store, so a link can open a key and a bucket change forgets it.
+  const selectedKey = useStore(s => s.selectedKvKey);
+  const setSelectedKey = useStore(s => s.setSelectedKvKey);
   const [putOpen, setPutOpen] = useState(false);
   const editing = useRef(false);
 
@@ -35,7 +37,6 @@ export default function KvBucketView() {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: the reset belongs to a bucket change, which the body itself does not read
   useEffect(() => {
-    setSelectedKey(null);
     setFilter('');
   }, [bucket]);
 

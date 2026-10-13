@@ -1,22 +1,13 @@
 import { CalendarClock, ChevronLeft, ChevronRight, X, ZoomOut } from 'lucide-react';
 import { useState } from 'react';
-import { cn, formatDateTime, formatDurationMs, formatTime, parseGoDuration } from '../../lib/utils';
+import { cn, formatDurationMs, parseGoDuration } from '../../lib/utils';
 import { useStore } from '../../store';
+import { type TimeRange, windowRange } from '../../lib/timeRange';
 import { Button, IconButton } from '../ui/Button';
 import { Input } from '../ui/Input';
 
-export interface TimeRange {
-  from: number;
-  to: number;
-  /** Short, for the button and the badge: "1 h", "All". */
-  label: string;
-  /**
-   * How the range reads in a sentence. "the last 1 h" works for a preset
-   * reaching back from now; "the last All" does not, and neither does "the
-   * last 10.9.2026 - 11.9.2026".
-   */
-  prose: string;
-}
+export type { TimeRange } from '../../lib/timeRange';
+export { windowRange };
 
 const PRESETS: { label: string; minutes: number; prose?: string }[] = [
   { label: '15 min', minutes: 15 },
@@ -30,21 +21,6 @@ const PRESETS: { label: string; minutes: number; prose?: string }[] = [
   // without typing a start date.
   { label: 'All', minutes: 0, prose: 'the recorded history' },
 ];
-
-/**
- * A window with a start and an end, named the way it reads back: two clock
- * times while it stays inside one day, dates as well once it crosses one.
- * This is what a drag across a chart and the custom form both produce, so
- * both are shown, and re-shown, in the same words.
- */
-export function windowRange(from: number, to: number): TimeRange {
-  const start = Math.max(0, Math.round(from));
-  const end = Math.round(to);
-  const oneDay = new Date(start).toDateString() === new Date(end).toDateString();
-  const at = (ms: number) => (oneDay ? formatTime(ms, false) : formatDateTime(ms));
-  const label = `${at(start)} – ${at(end)}`;
-  return { from: start, to: end, label, prose: label };
-}
 
 /** A zero retention means nothing is deleted; "retention 0s" would not say that. */
 function retentionLabel(retention: string): string {

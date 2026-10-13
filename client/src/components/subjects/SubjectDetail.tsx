@@ -34,7 +34,8 @@ import DiffView from './DiffView';
 import ExportMenu from './ExportMenu';
 import { EXPORT_MAX_MESSAGES, fetchWholeRange } from '../../lib/exportRange';
 import { HistorySearchInput, SearchSummary, useHistorySearch } from './HistorySearch';
-import RangePicker, { type TimeRange, windowRange } from './RangePicker';
+import RangePicker from './RangePicker';
+import { windowRange } from '../../lib/timeRange';
 import HistoryRail from './HistoryRail';
 import { ResizeHandle } from '../layout/ResizeHandle';
 import MessageList from './MessageList';
@@ -115,9 +116,12 @@ function SingleSubjectView() {
     });
   const toggleChartField = (f: string) => setChartFields(fs => (fs.includes(f) ? fs.filter(x => x !== f) : [...fs, f].slice(-MAX_CHART_FIELDS)));
   const [copied, setCopied] = useState(false);
-  const [rangeState, setRange] = useState<TimeRange | null>(null);
-  // Switching the persistent history off takes the range with it: without a
-  // database there is nothing behind it and the view would stay empty.
+  // The range lives in the store, so a link can name it and the subject
+  // selection clears it. Switching the persistent history off takes the
+  // range with it: without a database there is nothing behind it and the
+  // view would stay empty.
+  const rangeState = useStore(s => s.range);
+  const setRange = useStore(s => s.setRange);
   const range = historyDb ? rangeState : null;
   // A row of the search results or the branch list, shown under it.
   const [listMessage, setListMessage] = useState<NatsMessage | null>(null);
@@ -199,7 +203,6 @@ function SingleSubjectView() {
   useEffect(() => {
     setChartFields([]);
     setShowDiff(false);
-    setRange(null);
     setListMessage(null);
   }, [subject]);
 
