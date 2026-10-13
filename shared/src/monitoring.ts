@@ -186,3 +186,70 @@ export interface ClusterOverview {
   streams: ClusterStreamRow[];
   errors: string[];
 }
+
+/** A server in the topology: one that answered, a peer known only from the other side, or a leaf node. */
+export interface TopologyNode {
+  id: string;
+  name: string;
+  cluster?: string;
+  kind: 'server' | 'peer' | 'leaf';
+  version?: string;
+  jetstream?: boolean;
+  account?: string;
+}
+
+export interface TopologyTraffic {
+  inMsgs: number;
+  outMsgs: number;
+  inBytes: number;
+  outBytes: number;
+}
+
+/** One server's side of the route to another, its connection pool summed up. */
+export interface TopologyRoute extends TopologyTraffic {
+  server: string;
+  remote: string;
+  connections: number;
+  rtt: string;
+  pending: number;
+  subscriptions: number;
+  configured: boolean;
+  compression?: string;
+}
+
+/** One server's gateway connection to another cluster, in one direction. */
+export interface TopologyGateway extends TopologyTraffic {
+  server: string;
+  cluster: string;
+  remote: string;
+  direction: 'outbound' | 'inbound';
+  configured: boolean;
+  connected: boolean;
+  remoteServer?: string;
+  address?: string;
+  rtt?: string;
+  uptime?: string;
+  idle?: string;
+  pending: number;
+  subscriptions: number;
+}
+
+export interface TopologyLeaf extends TopologyTraffic {
+  server: string;
+  name: string;
+  account: string;
+  address: string;
+  rtt: string;
+  spoke: boolean;
+  subscriptions: number;
+  compression?: string;
+}
+
+export interface Topology {
+  source: 'system' | 'monitoring';
+  nodes: TopologyNode[];
+  routes: TopologyRoute[];
+  gateways: TopologyGateway[];
+  leafs: TopologyLeaf[];
+  errors: string[];
+}

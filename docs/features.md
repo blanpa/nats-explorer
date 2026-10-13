@@ -18,7 +18,7 @@ nav_order: 3
 
 - Numeric fields of the latest message as sparklines with the current value; the history rail is open by default
 - The subject header says when the last message arrived and how long ago, which is what says a subject has gone quiet; the status bar says how long the connection has been up
-- Keyboard: `/` focuses the filter of the current module, Escape clears it, `j`/`k` walk the subject tree, arrow keys expand and collapse; Ctrl-K opens the **command palette**, where the modules, the saved and open connections, the theme, the settings and a link to the view are a few letters away
+- Keyboard: `/` focuses the filter of the current module, Escape clears it, `j`/`k` walk the subject tree, arrow keys expand and collapse; Ctrl-K opens the **command palette**, where the modules, the saved and open connections, the theme, the settings and a link to the view are a few letters away -- and, from the second letter on, the subjects, streams, Key-Value buckets and the keys in all of them, object stores and the objects in all of them of the active connection, each opening where it lives (`GET /api/search`). The system's own subjects (`$JS.API…`, `_INBOX…`) are left out unless the search starts with `$` or `_`
 - The explorer and the history rail are dragged to width by the handle on their edge; a double-click resets, and both widths are remembered
 - Watch several subjects at once: Ctrl/Cmd-click adds subjects to the selection; the detail pane then shows the latest value and rate of each and one list of everything arriving on any of them, newest first
 - Subjects split by `.` into a virtualized tree with the message count and rate of each subject and each branch. A collapsed branch also says how many subjects with messages are under it
@@ -229,6 +229,8 @@ Once a schema is pinned, every message in the history rail and in a branch list 
 - **Backup and restore**: a zip of the stream's snapshot, laid out the way the `nats` CLI lays a backup out (`backup.json` beside the archive), so either tool restores it. Restored, the stream is back with every message; it must not exist yet, and its name cannot change on the way
 - Consumers: list, create, delete, state, and pause/resume -- a paused consumer delivers nothing until its deadline and resumes by itself (NATS 2.11)
 - KV/Object backing streams (`KV_*`, `OBJ_*`) hidden by default behind a toggle
+- **Relations**: with no stream open, the module shows how the streams hang together -- the subjects each one stores, which stream mirrors or sources which (with the lag), a stream of another domain or account copied from, the consumers of each with what they have not delivered and not had acknowledged, and where a stream republishes. Streams stand in columns by how far they are from the publishers. A click opens a stream; the icon in the list header comes back here
+- **Side by side**: Ctrl-click (⌘ on a Mac) a stream, a bucket or a store, or use the icon on its row, and it opens beside the one already open, each with its own tabs, keys and selection; the panes swap or close from the bar above the second one. A narrow window shows one
 - Jump to a point in time in a stream, export the page, replay it
 - Sequence gaps: the overview names the sequences between first and last that the stream does not have, as runs. A delete, a purge up to a sequence or a per-subject limit leaves a hole, and a consumer walking past it has not missed anything -- which is the thing that is hard to tell from outside
 - The message table's seq, time, subject and size columns are dragged to width by the line between the headers, which runs the length of the table while it is being aimed at; a double-click restores the default and the widths are remembered
@@ -261,6 +263,7 @@ A stream that mirrors or sources from another says so, with the lag and the time
 
 - Stores with size and chunk count; objects with description, digest and modification time
 - Drag & drop or file upload (streamed), direct download, delete objects and stores
+- The upload shows its progress per file -- the bytes sent, the share, which file of how many -- and can be cancelled; once a file is sent the server still writes its chunks, which the bar says. Every file goes up as raw bytes whatever its type, so a `.json` file is stored as itself
 - Objects ticked and deleted many at once, with what failed named; a store sealed, after a confirmation, takes no more uploads
 
 ## Services
@@ -307,6 +310,7 @@ The monitoring URL defaults to port 8222 of the first server and can be set per 
 - Needs system-account (`$SYS`) credentials on the connection; without them the module shows the connected node only and says so
 - **Operations**: through the system account a server reloads its configuration file and the JetStream meta leader moves to another server; a stream's or a consumer's leader steps down, and a peer that is gone for good is removed from a stream's group so the meta leader places a new replica. Each asks first and passes the server's answer on
 - A second tab lists the per-connection server details
+- **Topology**: the third tab draws who is connected to whom -- each cluster a box with its servers, the routes between them, the gateways arcing from cluster to cluster, the leaf nodes below their hub -- from every server's own `routez`, `gatewayz` and `leafz` (`GET /api/cluster/{id}/topology`). A server that did not answer but is known from the other side of a route or a gateway is drawn dashed, a gateway that is configured but not connected in red, and a route only one side reports dashed. Below the picture the gateways (direction, state, the server on the other side, RTT, uptime, idle, pending bytes, traffic), the routes (their connection pool summed up) and the leaf nodes (account, address, RTT, compression) as tables; a click on a server or a cluster narrows them to it. An RTT over 50 ms and pending bytes are counted under Attention. Without system-account credentials only the connected server's side is shown, and the page says so
 
 ## Connections
 

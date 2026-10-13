@@ -17,6 +17,7 @@ import KvEntryPanel from './KvEntryPanel';
 import KvKeyList from './KvKeyList';
 import PutKeyDialog from './PutKeyDialog';
 import { useCanWrite } from '../../lib/auth';
+import { useSelectedKvBucket, useSelectedKvKey } from '../../lib/pane';
 
 /** How many changes the panel keeps; a watch runs as long as the bucket is open. */
 const MAX_CHANGES = 500;
@@ -31,14 +32,13 @@ interface Change {
 export default function KvBucketView() {
   const canWrite = useCanWrite();
   const connId = useStore(s => s.activeConnId);
-  const bucket = useStore(s => s.selectedKvBucket);
+  const [bucket, setBucket] = useSelectedKvBucket();
   const domainOverride = useJsDomainOverride(connId);
-  const setBucket = useStore(s => s.setSelectedKvBucket);
   const bump = useStore(s => s.bumpRefresh);
   const [filter, setFilter] = useState('');
-  // In the store, so a link can open a key and a bucket change forgets it.
-  const selectedKey = useStore(s => s.selectedKvKey);
-  const setSelectedKey = useStore(s => s.setSelectedKvKey);
+  // In the store, so a link can open a key and a bucket change forgets it;
+  // in a pane beside the main one, the pane's own.
+  const [selectedKey, setSelectedKey] = useSelectedKvKey();
   const [putOpen, setPutOpen] = useState(false);
   const [editingBucket, setEditingBucket] = useState<KvBucketInfo | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());

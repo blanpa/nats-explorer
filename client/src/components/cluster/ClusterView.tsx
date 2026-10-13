@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { RefreshCw, Server } from 'lucide-react';
 import ClusterOverview from './ClusterOverview';
+import TopologyView from './TopologyView';
 import type { ConnectionStatus, ServerInfo } from 'shared';
 import { api } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
 import { useStore } from '../../store';
-import { formatBytes, formatDurationMs, formatDateTime, formatNumber } from '../../lib/utils';
+import { formatBytes, formatDurationMs, formatDateTime, formatNumber, readSetting, writeSetting } from '../../lib/utils';
 import { IconButton } from '../ui/Button';
 import { Badge, EmptyState, ErrorState, KeyValueGrid, LoadingState, PaneHeader, SectionTitle, StatStrip, StatTile, Tabs } from '../ui/misc';
 
@@ -129,7 +130,13 @@ function ServerCard({ conn }: { conn: ConnectionStatus }) {
 export default function ClusterView() {
   const connections = useStore(s => s.connections);
   const activeConnId = useStore(s => s.activeConnId);
-  const [tab, setTab] = useState<'cluster' | 'servers'>('cluster');
+  type Tab = 'cluster' | 'topology' | 'servers';
+  // The tab is kept, so the view comes back the way it was left.
+  const [tab, setTabState] = useState<Tab>(() => readSetting<Tab>('ne.cluster.tab', 'cluster'));
+  const setTab = (t: Tab) => {
+    setTabState(t);
+    writeSetting('ne.cluster.tab', t);
+  };
 
   if (connections.length === 0) {
     return (
@@ -147,12 +154,17 @@ export default function ClusterView() {
         onChange={setTab}
         tabs={[
           { id: 'cluster', label: 'Cluster' },
+          { id: 'topology', label: 'Topology' },
           { id: 'servers', label: 'Connections', count: connections.length },
         ]}
       />
-      {tab === 'cluster' ? (
+      {tab === 'cluster' || tab === 'topology' ? (
         activeConnId ? (
-          <ClusterOverview connId={activeConnId} />
+          tab === 'cluster' ? (
+            <ClusterOverview connId={activeConnId} />
+          ) : (
+            <TopologyView connId={activeConnId} />
+          )
         ) : (
           <EmptyState title="Select a connection" />
         )

@@ -276,6 +276,12 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 	consumersHandler := &handler.ConsumersHandler{Store: store}
 	kvHandler := &handler.KVHandler{Store: store}
 	objHandler := &handler.ObjectStoreHandler{Store: store}
+	searchHandler := &handler.SearchHandler{Store: store, Subjects: func(connID, q string, limit int) []string {
+		if mgr := d.manager(connID); mgr != nil {
+			return mgr.FindSubjects(q, limit)
+		}
+		return nil
+	}}
 	monHandler := &handler.MonitoringHandler{Store: store}
 	clusterHandler := &handler.ClusterHandler{Store: store}
 	svcHandler := &handler.ServicesHandler{Store: store}
@@ -485,6 +491,7 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 		r.Get("/status", connHandler.Status)
 		r.Get("/cluster/{connId}", connHandler.ServerInfo)
 		r.Get("/cluster/{connId}/overview", clusterHandler.Overview)
+		r.Get("/cluster/{connId}/topology", clusterHandler.Topology)
 		r.Get("/server/{connId}", connHandler.ServerInfo)
 
 		r.Get("/history", histHandler.Get)
@@ -542,6 +549,7 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 		r.Post("/streams/{stream}/consumers/{consumer}/next", consumersHandler.Next)
 		r.Post("/streams/{stream}/consumers/{consumer}/ack", consumersHandler.Ack)
 
+		r.Get("/search", searchHandler.Search)
 		r.Get("/kv", kvHandler.ListBuckets)
 		r.Post("/kv", kvHandler.CreateBucket)
 		r.Put("/kv/{bucket}", kvHandler.UpdateBucket)

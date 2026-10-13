@@ -5,6 +5,11 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 ## [Unreleased]
 
 ### Added
+- **The topology.** A third tab of the Cluster module draws the clusters as boxes with their servers, the routes between them, the gateways from cluster to cluster and the leaf nodes under their hub, from what every server reports of its own side through the system account. Beneath it the gateways, routes and leaf nodes as tables with direction, state, the server on the other side, RTT, pending bytes and traffic; a gateway that is configured and not connected is red, a server known only from the other side dashed, a slow RTT counted. In a super-cluster the overview says how many clusters it saw and gives the server table a cluster column.
+- **How the streams hang together.** With no stream open, the JetStream module shows the subjects each stream stores, which stream mirrors or sources which with the lag, a stream of another domain copied from, and the consumers of each with what they have not delivered and not had acknowledged.
+- **Side by side.** A second stream, bucket or store opens beside the first with Ctrl-click or the icon on its row, with its own tabs, keys and selection; the two swap or the second closes from its bar.
+- **The palette finds things.** From the second letter, Ctrl-K also searches the active connection: the subjects it received, streams by name or subject, buckets and the keys in every bucket, stores and the objects in every store, each opening where it lives.
+- **An upload you can watch.** The object store upload shows the bytes sent per file and which file of how many, and can be cancelled.
 - **Single sign-on.** `OIDC_ISSUER` and a client id let an OpenID Connect provider decide who gets in, with the authorization code flow, PKCE and a nonce; a group claim makes an admin or a viewer or keeps someone out.
 - **Rights per connection.** An account in the users file (a fourth field), a personal token or a single sign-on user (a claim) can be narrowed to some connections by name. It sees those and no others, in the API, on the websocket and in the alerts, and may not open a connection under another name or act on all of them at once.
 - **Narrow windows.** Below 768 pixels the list and the detail take turns, with a way back, and headers wrap their buttons instead of losing the name.

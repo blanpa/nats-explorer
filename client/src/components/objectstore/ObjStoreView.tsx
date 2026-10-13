@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
-import { Archive, Download, FileIcon, Lock, RefreshCw, Trash2, Upload } from 'lucide-react';
+import { Archive, Download, FileIcon, Lock, RefreshCw, Trash2, Upload, X } from 'lucide-react';
 import type { ObjInfo } from 'shared';
-import { api, errorMessage } from '../../lib/api';
+import { ApiError, api, errorMessage } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
 import { useStore } from '../../store';
 import { cn, formatBytes, formatCount, formatDateTime, formatNumber } from '../../lib/utils';
@@ -10,15 +10,17 @@ import { confirm } from '../ui/Dialog';
 import { Badge, EmptyState, ErrorState, LoadingState, PaneHeader } from '../ui/misc';
 import { toast } from '../ui/Toast';
 import { useCanWrite } from '../../lib/auth';
+import { useSelectedObjStore } from '../../lib/pane';
 
 export default function ObjStoreView() {
   const canWrite = useCanWrite();
   const connId = useStore(s => s.activeConnId);
-  const store = useStore(s => s.selectedObjStore);
-  const setStore = useStore(s => s.setSelectedObjStore);
+  const [store, setStore] = useSelectedObjStore();
   const bump = useStore(s => s.bumpRefresh);
   const fileInput = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState<string | null>(null);
+  // The file going up, how far it got, and its place in the batch.
+  const [uploading, setUploading] = useState<{ name: string; sent: number; total: number; index: number; count: number } | null>(null);
+  const cancelUpload = useRef<AbortController | null>(null);
   const [dragging, setDragging] = useState(false);
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const stores = useAsync(() => (connId ? api.listObjectStores(connId) : null), [connId, store], { key: `objstores:${connId}` });
@@ -32,14 +34,26 @@ export default function ObjStoreView() {
   if (!connId) return null;
 
   const upload = async (files: FileList | File[]) => {
-    for (const file of Array.from(files)) {
-      setUploading(file.name);
+    const list = Array.from(files);
+    const ctrl = new AbortController();
+    cancelUpload.current = ctrl;
+    let done = 0;
+    for (const [index, file] of list.entries()) {
+      if (ctrl.signal.aborted) break;
+      setUploading({ name: file.name, sent: 0, total: file.size, index, count: list.length });
       try {
-        await api.putObject(connId, store, file);
+        await api.putObject(connId, store, file, {
+          signal: ctrl.signal,
+          onProgress: (sent, total) => setUploading(u => (u && u.name === file.name ? { ...u, sent, total } : u)),
+        });
+        done++;
       } catch (err) {
+        if (ctrl.signal.aborted && err instanceof ApiError && err.status === 0) break;
         toast.error(`Upload of ${file.name} failed`, errorMessage(err));
       }
     }
+    if (ctrl.signal.aborted) toast.info('Upload cancelled', `${done} of ${list.length} ${list.length === 1 ? 'file' : 'files'} went up before.`);
+    cancelUpload.current = null;
     setUploading(null);
     reload();
     bump();
@@ -165,9 +179,20 @@ export default function ObjStoreView() {
                     <Lock size={14} />
                   </IconButton>
                 )}
-                <Button variant="primary" icon={<Upload size={13} />} loading={!!uploading} disabled={sealed} onClick={() => fileInput.current?.click()}>
-                  {uploading ? `Uploading ${uploading}` : 'Upload'}
-                </Button>
+                {uploading ? (
+                  <Button
+                    variant="outline"
+                    icon={<X size={13} />}
+                    onClick={() => cancelUpload.current?.abort()}
+                    title={`Cancel the upload of ${uploading.name}`}
+                  >
+                    Cancel upload
+                  </Button>
+                ) : (
+                  <Button variant="primary" icon={<Upload size={13} />} disabled={sealed} onClick={() => fileInput.current?.click()}>
+                    Upload
+                  </Button>
+                )}
                 <Button variant="danger" icon={<Trash2 size={13} />} onClick={deleteStore}>
                   Delete store
                 </Button>
@@ -187,6 +212,32 @@ export default function ObjStoreView() {
           </div>
         </div>
       </PaneHeader>
+
+      {uploading && (
+        <div className="shrink-0 border-b border-line px-3 py-2 flex flex-col gap-1" role="status" aria-live="polite">
+          <div className="flex items-center gap-2 text-xs">
+            <Upload size={12} className="text-accent shrink-0" />
+            <span className="font-mono truncate">{uploading.name}</span>
+            {uploading.count > 1 && (
+              <span className="text-faint shrink-0">
+                {uploading.index + 1} of {uploading.count}
+              </span>
+            )}
+            <span className="ml-auto text-muted tabular-nums shrink-0">
+              {uploading.total > 0 && uploading.sent >= uploading.total
+                ? // Sent; the server is still writing the chunks into the stream.
+                  `${formatBytes(uploading.total)} sent · storing…`
+                : `${formatBytes(uploading.sent)} / ${formatBytes(uploading.total)} · ${uploading.total > 0 ? Math.floor((uploading.sent / uploading.total) * 100) : 0}%`}
+            </span>
+          </div>
+          <div className="h-1 rounded bg-field overflow-hidden">
+            <div
+              className="h-full bg-accent transition-[width] duration-150"
+              style={{ width: `${uploading.total > 0 ? (uploading.sent / uploading.total) * 100 : 100}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 min-h-0 overflow-auto">
         {initial && loading ? (

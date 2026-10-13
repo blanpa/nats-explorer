@@ -12,6 +12,7 @@ import { Dialog } from '../ui/Dialog';
 import { Badge, EmptyState, ErrorState, LoadingState, PaneHeader } from '../ui/misc';
 import DomainSwitch from '../jetstream/DomainSwitch';
 import { useCanWrite } from '../../lib/auth';
+import { OpenBeside, useRowOpen } from '../ui/OpenBeside';
 
 export default function KvBucketList() {
   const canWrite = useCanWrite();
@@ -21,6 +22,7 @@ export default function KvBucketList() {
   const domainLabel = domainOverride || connDomain || undefined;
   const selected = useStore(s => s.selectedKvBucket);
   const setSelected = useStore(s => s.setSelectedKvBucket);
+  const rowOpen = useRowOpen('kv', setSelected);
   const tick = useStore(s => s.refreshTick);
   const [filter, setFilter] = useState('');
   const [creating, setCreating] = useState(false);
@@ -73,12 +75,13 @@ export default function KvBucketList() {
           buckets.map(b => (
             <div
               key={b.bucket}
-              className={cn('list-row flex-col items-stretch gap-0.5 py-2', selected === b.bucket && 'list-row-active')}
-              onClick={() => setSelected(b.bucket)}
+              className={cn('list-row group flex-col items-stretch gap-0.5 py-2', selected === b.bucket && 'list-row-active')}
+              onClick={e => rowOpen(e, b.bucket)}
             >
               <div className="flex items-center gap-2 min-w-0">
                 <KeyRound size={13} className="text-accent shrink-0" />
                 <span className="font-medium truncate">{b.bucket}</span>
+                <OpenBeside module="kv" name={b.bucket} />
                 <span className="ml-auto flex items-center gap-1">
                   {b.storage === 'Memory' && <Badge tone="info">mem</Badge>}
                   {b.ttl > 0 && <Badge tone="neutral">ttl {formatDurationNs(b.ttl)}</Badge>}

@@ -9,6 +9,9 @@ import { ancestorsOf, type FlatNode } from '../components/subjects/tree';
 import type { TimeRange } from '../lib/timeRange';
 import type { RequestMode } from '../lib/savedRequests';
 
+/** The modules whose detail can be split in two. */
+export type SplitModule = 'jetstream' | 'kv' | 'objects';
+
 export type Module = 'subjects' | 'state' | 'jetstream' | 'kv' | 'objects' | 'services' | 'requests' | 'events' | 'monitor' | 'cluster' | 'alerts' | 'audit';
 
 export const MODULES: { id: Module; label: string; hasExplorer: boolean }[] = [
@@ -169,6 +172,9 @@ export interface AppState {
   /** hide _INBOX and $-prefixed roots (JetStream API, KV/object internals, system events) */
   hideSystemSubjects: boolean;
   setHideSystemSubjects: (b: boolean) => void;
+  /** hide the KV_ and OBJ_ streams behind buckets and stores, which have modules of their own */
+  hideInternalStreams: boolean;
+  setHideInternalStreams: (b: boolean) => void;
   /**
    * Show the last payload next to each subject in the tree. Off by default:
    * the tree is for counts and rates, and the preview is the largest part of
@@ -246,6 +252,10 @@ export interface AppState {
   setSelectedKvKey: (k: string | null) => void;
   selectedObjStore: string | null;
   setSelectedObjStore: (s: string | null) => void;
+  /** A second stream, bucket or store open beside the first, in its module. */
+  beside: { module: SplitModule; name: string } | null;
+  openBeside: (module: SplitModule, name: string) => void;
+  closeBeside: () => void;
   selectedService: string | null;
   setSelectedService: (s: string | null) => void;
   selectedTemplateId: string | null;
@@ -297,6 +307,7 @@ export const useStore = create<AppState>((set, get) => ({
       patch.selectedKvKey = null;
       patch.selectedObjStore = null;
       patch.selectedService = null;
+      patch.beside = null;
     }
     set(patch);
   },
@@ -304,7 +315,7 @@ export const useStore = create<AppState>((set, get) => ({
     set(s =>
       s.activeConnId === id
         ? {}
-        : { activeConnId: id, selectedStream: null, selectedKvBucket: null, selectedKvKey: null, selectedObjStore: null, selectedService: null },
+        : { activeConnId: id, selectedStream: null, selectedKvBucket: null, selectedKvKey: null, selectedObjStore: null, selectedService: null, beside: null },
     ),
 
   // Shell ------------------------------------------------------------------
@@ -368,6 +379,11 @@ export const useStore = create<AppState>((set, get) => ({
   setHideSystemSubjects: b => {
     writeSetting('ne.hideSystemSubjects', b);
     set({ hideSystemSubjects: b });
+  },
+  hideInternalStreams: readSetting('ne.hideInternalStreams', true),
+  setHideInternalStreams: b => {
+    writeSetting('ne.hideInternalStreams', b);
+    set({ hideInternalStreams: b });
   },
   treePreview: readSetting('ne.treePreview', false),
   setTreePreview: b => {
@@ -594,6 +610,9 @@ export const useStore = create<AppState>((set, get) => ({
   setSelectedKvKey: k => set({ selectedKvKey: k }),
   selectedObjStore: null,
   setSelectedObjStore: s => set({ selectedObjStore: s }),
+  beside: null,
+  openBeside: (module, name) => set({ beside: { module, name } }),
+  closeBeside: () => set({ beside: null }),
   selectedService: null,
   setSelectedService: s => set({ selectedService: s }),
   selectedTemplateId: null,
@@ -613,6 +632,7 @@ export const useStore = create<AppState>((set, get) => ({
       selectedKvBucket: null,
       selectedKvKey: null,
       selectedObjStore: null,
+      beside: null,
     }));
   },
 }));

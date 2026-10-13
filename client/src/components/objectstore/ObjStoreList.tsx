@@ -11,6 +11,7 @@ import { Dialog } from '../ui/Dialog';
 import { Badge, EmptyState, ErrorState, LoadingState, PaneHeader } from '../ui/misc';
 import DomainSwitch from '../jetstream/DomainSwitch';
 import { useCanWrite } from '../../lib/auth';
+import { OpenBeside, useRowOpen } from '../ui/OpenBeside';
 
 export default function ObjStoreList() {
   const canWrite = useCanWrite();
@@ -20,6 +21,7 @@ export default function ObjStoreList() {
   const domainLabel = domainOverride || connDomain || undefined;
   const selected = useStore(s => s.selectedObjStore);
   const setSelected = useStore(s => s.setSelectedObjStore);
+  const rowOpen = useRowOpen('objects', setSelected);
   const tick = useStore(s => s.refreshTick);
   const [filter, setFilter] = useState('');
   const [creating, setCreating] = useState(false);
@@ -72,12 +74,13 @@ export default function ObjStoreList() {
           stores.map(s => (
             <div
               key={s.bucket}
-              className={cn('list-row flex-col items-stretch gap-0.5 py-2', selected === s.bucket && 'list-row-active')}
-              onClick={() => setSelected(s.bucket)}
+              className={cn('list-row group flex-col items-stretch gap-0.5 py-2', selected === s.bucket && 'list-row-active')}
+              onClick={e => rowOpen(e, s.bucket)}
             >
               <div className="flex items-center gap-2 min-w-0">
                 <Archive size={13} className="text-accent shrink-0" />
                 <span className="font-medium truncate">{s.bucket}</span>
+                <OpenBeside module="objects" name={s.bucket} />
                 <span className="ml-auto flex items-center gap-1">
                   {s.storage === 'Memory' && <Badge tone="info">mem</Badge>}
                   {s.sealed && <Badge tone="warn">sealed</Badge>}

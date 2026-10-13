@@ -307,6 +307,7 @@ All API endpoints are under `/api` and accept `connId` via query parameter or re
 | POST   | `/api/request`    | Request-reply       |
 | —      | `?domain=`        | On every JetStream/KV/Object Store route: address another JetStream domain for this call (defaults to the connection's `jsDomain` / `jsApiPrefix`) |
 | GET    | `/api/cluster/{connId}/overview` | Cluster-wide view. With system-account credentials on the connection: `$SYS.REQ.SERVER.PING.STATSZ` and `.JSZ` fan-out to every server (servers, meta cluster, stream placement); otherwise the connected node's `varz`/`jsz` with an explanatory error |
+| GET    | `/api/cluster/{connId}/topology` | Routes, gateways and leaf nodes, each as the server on its side reports them: `$SYS.REQ.SERVER.PING.ROUTEZ`, `.GATEWAYZ` and `.LEAFZ` to every server with system-account credentials, otherwise the connected node's `routez`, `gatewayz` and `leafz`. A route's connection pool is summed up per pair of servers |
 | GET    | `/api/monitoring/{connId}/leafz` | Leaf node connections (also `routez`, `varz`, `jsz`, `connz`, `subsz`, `healthz`) |
 | POST   | `/api/run`        | Repeat a publish or request `count` times (`concurrency`, `intervalMs`, `timeout`); subject, payload and headers may use {% raw %}`{{i}}`{% endraw %}, {% raw %}`{{ts}}`{% endraw %}, {% raw %}`{{uuid}}`{% endraw %}, {% raw %}`{{rand:MIN-MAX}}`{% endraw %}; returns counts, throughput, latency percentiles, sample replies and error samples (max 10 000 sends, 120 s) |
 
@@ -338,6 +339,7 @@ All API endpoints are under `/api` and accept `connId` via query parameter or re
 
 | Method | Endpoint                          | Description       |
 |:------ |:--------------------------------- |:----------------- |
+| GET    | `/api/search?connId=&q=` | What the command palette finds: the received subjects that contain `q` (without `$…`/`_INBOX…` unless `q` starts so), streams by name or subject, buckets, the keys of every bucket, stores and the objects of every store; 20 of each at most, within three seconds, `partial` when cut |
 | GET    | `/api/kv`                         | List buckets      |
 | POST   | `/api/kv`                         | Create bucket     |
 | GET    | `/api/kv/{bucket}`                | List keys         |

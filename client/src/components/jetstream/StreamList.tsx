@@ -1,10 +1,10 @@
 import { useMemo, useRef, useState } from 'react';
-import { Eye, EyeOff, Layers, Plus, RefreshCw, Upload } from 'lucide-react';
+import { Eye, EyeOff, Layers, Plus, RefreshCw, Upload, Waypoints } from 'lucide-react';
 import type { StreamInfo } from 'shared';
 import { api, describeJsError, errorMessage } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
 import { useJsDomainOverride, useStore } from '../../store';
-import { cn, formatBytes, formatNumber, readSetting, writeSetting } from '../../lib/utils';
+import { cn, formatBytes, formatNumber } from '../../lib/utils';
 import { IconButton } from '../ui/Button';
 import { SearchInput } from '../ui/Input';
 import { Badge, EmptyState, ErrorState, LoadingState, PaneHeader } from '../ui/misc';
@@ -12,6 +12,7 @@ import { toast } from '../ui/Toast';
 import StreamDialog from './StreamDialog';
 import DomainSwitch from './DomainSwitch';
 import { useCanWrite } from '../../lib/auth';
+import { OpenBeside, useRowOpen } from '../ui/OpenBeside';
 
 const isInternal = (name: string) => name.startsWith('KV_') || name.startsWith('OBJ_');
 
@@ -23,17 +24,15 @@ export default function StreamList() {
   const domainLabel = domainOverride || connDomain || undefined;
   const selected = useStore(s => s.selectedStream);
   const setSelected = useStore(s => s.setSelectedStream);
+  const rowOpen = useRowOpen('jetstream', setSelected);
   const tick = useStore(s => s.refreshTick);
   const [filter, setFilter] = useState('');
   const [creating, setCreating] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   // KV buckets and object stores are backed by KV_*/OBJ_* streams that have their own modules.
-  const [hideInternal, setHideInternalState] = useState(() => readSetting('ne.hideInternalStreams', true));
-  const setHideInternal = (b: boolean) => {
-    writeSetting('ne.hideInternalStreams', b);
-    setHideInternalState(b);
-  };
+  const hideInternal = useStore(s => s.hideInternalStreams);
+  const setHideInternal = useStore(s => s.setHideInternalStreams);
 
   const { data, error, loading, initial, reload } = useAsync<StreamInfo[]>(() => (connId ? api.listStreams(connId) : null), [connId, tick], {
     key: `streams:${connId}`,
@@ -72,6 +71,15 @@ export default function StreamList() {
         title="Streams"
         actions={
           <>
+            <IconButton
+              label="How the streams hang together"
+              size="xs"
+              onClick={() => setSelected(null)}
+              className={cn(!selected && 'text-accent')}
+              aria-pressed={!selected}
+            >
+              <Waypoints size={13} />
+            </IconButton>
             <IconButton
               label={hideInternal ? `Show KV/Object streams${internalCount ? ` (${internalCount} hidden)` : ''}` : 'Hide KV/Object streams'}
               size="xs"
@@ -132,12 +140,13 @@ export default function StreamList() {
           streams.map(s => (
             <div
               key={s.name}
-              className={cn('list-row flex-col items-stretch gap-0.5 py-2', selected === s.name && 'list-row-active')}
-              onClick={() => setSelected(s.name)}
+              className={cn('list-row group flex-col items-stretch gap-0.5 py-2', selected === s.name && 'list-row-active')}
+              onClick={e => rowOpen(e, s.name)}
             >
               <div className="flex items-center gap-2 min-w-0">
                 <Layers size={13} className="text-accent shrink-0" />
                 <span className="font-medium truncate">{s.name}</span>
+                <OpenBeside module="jetstream" name={s.name} />
                 <span className="ml-auto flex items-center gap-1 shrink-0">
                   {s.storage === 'Memory' && <Badge tone="info">mem</Badge>}
                   {s.retention !== 'Limits' && <Badge tone="warn">{s.retention.toLowerCase()}</Badge>}

@@ -1,6 +1,7 @@
 import type {
   Aggregation,
   ClusterOverview,
+  Topology,
   CliContextList,
   ConnectionConfig,
   ConnectionStatus,
@@ -44,6 +45,21 @@ import { serverUrl } from './basePath';
 import { useStore } from '../store';
 
 const BASE_URL = serverUrl('/api');
+
+/** One thing the search found: a subject, a stream, a bucket or store, or a key or object in one. */
+export interface SearchHit {
+  kind: 'subject' | 'stream' | 'bucket' | 'key' | 'store' | 'object';
+  name: string;
+  item?: string;
+  detail?: string;
+}
+
+export interface SearchResult {
+  hits: SearchHit[];
+  /** cut at a limit or at the time budget */
+  partial: boolean;
+  errors: string[];
+}
 
 export class ApiError extends Error {
   constructor(
@@ -114,6 +130,8 @@ export const api = {
     request<{ success: boolean; status: ConnectionStatus }>(`/connections/${enc(connId)}/subscriptions`, { method: 'PUT', ...json({ subscriptions }) }),
   getServerInfo: (connId: string) => request<ServerInfo>(`/server/${enc(connId)}`),
   clusterOverview: (connId: string) => request<ClusterOverview>(`/cluster/${enc(connId)}/overview`),
+  /** Routes, gateways and leaf nodes, as every server reports its side of them. */
+  clusterTopology: (connId: string) => request<Topology>(`/cluster/${enc(connId)}/topology`),
 
   // Monitoring
   getMonitoring: <T = unknown>(connId: string, endpoint: string, params: Record<string, string | number> = {}) => {
@@ -351,15 +369,64 @@ export const api = {
   /** Direct download link; the session cookie authenticates it. */
   getObjectUrl: (connId: string, store: string, name: string) => `${BASE_URL}${withConn(`/objectstore/${enc(store)}/${enc(name)}`, connId)}`,
   authInfo: () => request<AuthInfo>('/auth'),
-  /** Streams the file body directly; no base64 round-trip. */
-  putObject: (connId: string, store: string, file: File, description?: string) =>
-    request<{ success: boolean; size: number; chunks: number }>(withConn(`/objectstore/${enc(store)}/${enc(file.name)}`, connId, { description }), {
-      method: 'PUT',
-      body: file,
+  /**
+   * Streams the file body directly; no base64 round-trip. Through an
+   * XMLHttpRequest, because fetch does not tell how much of a body went out:
+   * `onProgress` hears the bytes sent, and `signal` cancels the upload.
+   */
+  putObject: (
+    connId: string,
+    store: string,
+    file: File,
+    opts: { description?: string; onProgress?: (sent: number, total: number) => void; signal?: AbortSignal } = {},
+  ) =>
+    new Promise<{ success: boolean; size: number; chunks: number }>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', `${BASE_URL}${withConn(`/objectstore/${enc(store)}/${enc(file.name)}`, connId, { description: opts.description })}`);
       // Always raw: the server reads an application/json body as the base64
       // envelope, so a .json file sent as its own type would be stored empty.
-      headers: { 'Content-Type': 'application/octet-stream' },
+      xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+      if (opts.onProgress) {
+        const report = opts.onProgress;
+        xhr.upload.onprogress = e => report(e.loaded, e.lengthComputable ? e.total : file.size);
+      }
+      xhr.onerror = () => reject(new ApiError('Backend unreachable: the upload was cut off', 0));
+      xhr.onabort = () => reject(new ApiError('Upload cancelled', 0));
+      xhr.onload = () => {
+        if (xhr.status === 401) {
+          useAuth.getState().setRequired(true);
+          reject(new ApiError('Authentication required', 401));
+          return;
+        }
+        if (xhr.status === 403) {
+          reject(new ApiError('Read-only account: this needs the admin role', 403));
+          return;
+        }
+        let data: unknown = null;
+        try {
+          data = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+        } catch {
+          reject(new ApiError(xhr.status >= 400 ? `${xhr.status} ${xhr.statusText}` : 'Unexpected non-JSON response', xhr.status));
+          return;
+        }
+        if (xhr.status >= 400) {
+          reject(new ApiError((data as { error?: string } | null)?.error || `${xhr.status} ${xhr.statusText}`, xhr.status));
+          return;
+        }
+        resolve(data as { success: boolean; size: number; chunks: number });
+      };
+      if (opts.signal) {
+        if (opts.signal.aborted) {
+          reject(new ApiError('Upload cancelled', 0));
+          return;
+        }
+        opts.signal.addEventListener('abort', () => xhr.abort(), { once: true });
+      }
+      xhr.send(file);
     }),
+
+  /** Subjects, streams, buckets, keys, stores and objects whose name holds `q`, for the command palette. */
+  search: (connId: string, q: string) => request<SearchResult>(withConn('/search', connId, { q })),
 
   // Services
   discoverServices: (connId: string) => request<ServiceInfo[]>(withConn('/services', connId)),

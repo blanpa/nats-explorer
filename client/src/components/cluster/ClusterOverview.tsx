@@ -107,6 +107,8 @@ export default function ClusterOverview({ connId }: { connId: string }) {
   const multiServer = (data?.servers.length ?? 0) > 1;
   const metaPeers = data.meta?.replicas ?? [];
   const offline = metaPeers.filter(p => p.offline).length;
+  // A super-cluster answers with the servers of every cluster.
+  const clusterNames = [...new Set(data.servers.map(s => s.cluster).filter(Boolean))].sort();
   const totalConns = data.servers.reduce((s, x) => s + x.connections, 0);
   const totalStreams = data.streams.length;
   const unhealthy = data.streams.filter(s => s.peers.some(p => p.offline || !p.current)).length;
@@ -125,7 +127,7 @@ export default function ClusterOverview({ connId }: { connId: string }) {
           <StatTile
             label="Servers"
             value={formatNumber(data.servers.length)}
-            sub={data.servers[0]?.cluster ? `cluster ${data.servers[0].cluster}` : undefined}
+            sub={clusterNames.length === 1 ? `cluster ${clusterNames[0]}` : clusterNames.length > 1 ? `${clusterNames.length} clusters` : undefined}
           />
           <StatTile label="Client connections" value={formatNumber(totalConns)} />
           <StatTile

@@ -16,6 +16,8 @@ function uptime(start?: string): string {
 
 /** One row per server of the cluster, with its load and JetStream footprint. */
 export default function ServersTable({ servers, onReload }: { servers: ClusterOverview['servers']; onReload?: (id: string, name: string) => void }) {
+  // A super-cluster lists the servers of several clusters.
+  const clusters = new Set(servers.map(s => s.cluster).filter(Boolean)).size > 1;
   return (
     <div>
       <SectionTitle>Servers · {servers.length}</SectionTitle>
@@ -24,6 +26,7 @@ export default function ServersTable({ servers, onReload }: { servers: ClusterOv
           <thead>
             <tr>
               <th>Name</th>
+              {clusters && <th>Cluster</th>}
               <th>Version</th>
               <th>Host</th>
               <th>Up</th>
@@ -50,6 +53,7 @@ export default function ServersTable({ servers, onReload }: { servers: ClusterOv
                     </Badge>
                   )}
                 </td>
+                {clusters && <td className="font-mono text-muted">{s.cluster || '–'}</td>}
                 <td className="font-mono text-muted">{s.version}</td>
                 <td className="font-mono text-muted">{s.host && s.host !== '0.0.0.0' ? s.host : <span className="text-faint">–</span>}</td>
                 <td className="font-mono text-muted" title={s.start ? formatDateTime(new Date(s.start).getTime()) : undefined}>

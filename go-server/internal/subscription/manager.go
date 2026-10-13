@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -662,6 +663,38 @@ func (m *Manager) statsLocked() Stats {
 		st.Patterns = append(st.Patterns, p.stats(n))
 	}
 	return st
+}
+
+// FindSubjects returns up to limit known subjects that contain q, ignoring
+// case, the shortest first: the palette searches subjects by it. The
+// system's own subjects ($JS.API…, _INBOX…) are left out unless q starts
+// like one, or they bury what was looked for.
+func (m *Manager) FindSubjects(q string, limit int) []string {
+	q = strings.ToLower(q)
+	system := strings.HasPrefix(q, "$") || strings.HasPrefix(q, "_")
+	var out []string
+	for _, sh := range m.shards {
+		sh.mu.Lock()
+		for subj := range sh.subjects {
+			if !system && (strings.HasPrefix(subj, "$") || strings.HasPrefix(subj, "_INBOX")) {
+				continue
+			}
+			if strings.Contains(strings.ToLower(subj), q) {
+				out = append(out, subj)
+			}
+		}
+		sh.mu.Unlock()
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if len(out[i]) != len(out[j]) {
+			return len(out[i]) < len(out[j])
+		}
+		return out[i] < out[j]
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
 }
 
 func (m *Manager) GetStats() Stats {

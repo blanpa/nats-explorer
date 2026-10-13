@@ -91,6 +91,12 @@ async function resolvePending(): Promise<void> {
   applySelection(link);
 }
 
+/** Opens what a link names, as if it had been followed: the command palette's way somewhere. */
+export function openLink(link: DeepLink): void {
+  pending = link;
+  void resolvePending();
+}
+
 /** The hash for what is on screen now. */
 function currentHash(): string {
   return formatLink(linkFromState(useStore.getState()));

@@ -9,20 +9,7 @@ import { duplicateOf } from '../../lib/streamForm';
 import { formatBytes, formatDateTime, formatDurationNs, formatNumber } from '../../lib/utils';
 import { Button, IconButton } from '../ui/Button';
 import { confirm } from '../ui/Dialog';
-import {
-  Badge,
-  EmptyState,
-  ErrorState,
-  KeyValueGrid,
-  LoadingState,
-  menuClass,
-  menuItemClass,
-  PaneHeader,
-  SectionTitle,
-  StatStrip,
-  StatTile,
-  Tabs,
-} from '../ui/misc';
+import { Badge, ErrorState, KeyValueGrid, LoadingState, menuClass, menuItemClass, PaneHeader, SectionTitle, StatStrip, StatTile, Tabs } from '../ui/misc';
 import { toast } from '../ui/Toast';
 import StreamDialog from './StreamDialog';
 import StreamMessages from './StreamMessages';
@@ -30,14 +17,15 @@ import ConsumerList from './ConsumerList';
 import StreamGaps from './StreamGaps';
 import Replication from './Replication';
 import { useCanWrite } from '../../lib/auth';
+import { useSelectedStream } from '../../lib/pane';
+import RelationsView from './RelationsView';
 
 type Tab = 'overview' | 'messages' | 'consumers';
 
 export default function StreamDetail() {
   const canWrite = useCanWrite();
   const connId = useStore(s => s.activeConnId);
-  const name = useStore(s => s.selectedStream);
-  const setSelected = useStore(s => s.setSelectedStream);
+  const [name, setSelected] = useSelectedStream();
   const bump = useStore(s => s.bumpRefresh);
   const [tab, setTab] = useState<Tab>('overview');
   const [editing, setEditing] = useState(false);
@@ -53,7 +41,8 @@ export default function StreamDetail() {
     setData,
   } = useAsync<StreamInfo>(() => (connId && name ? api.getStream(connId, name) : null), [connId, name], { key: `stream:${connId}:${name}`, interval: 5000 });
 
-  if (!name) return <EmptyState icon={Layers} title="Select a stream" description="State, messages and consumers of a stream." />;
+  // With no stream open, the picture of how they hang together.
+  if (!name) return <RelationsView />;
   if (initial && loading) return <LoadingState />;
   if (error && !stream) return <ErrorState title={`Cannot load stream ${name}`} message={error} action={<Button onClick={reload}>Retry</Button>} />;
   if (!stream || !connId) return null;
