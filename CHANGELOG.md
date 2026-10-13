@@ -4,6 +4,19 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-13
+
+A release about reaching further and seeing more of what is there. Alerts
+watch a window instead of one message and reach Slack, Teams and email; a
+template becomes a test that a CI step can run; streams, consumers and
+buckets can be told everything the server lets them be told. The explorer
+goes through an SSH bastion, lets an OpenID Connect provider decide who gets
+in, and narrows an account to the connections it may see. A cluster is drawn
+with its routes, gateways and leaf nodes, the streams with what feeds and
+copies them, two of anything stand side by side, and Ctrl-K finds a subject,
+a key or an object by name. And it no longer records its own bookkeeping as
+the network's traffic.
+
 ### Added
 - **The topology.** A third tab of the Cluster module draws the clusters as boxes with their servers, the routes between them, the gateways from cluster to cluster and the leaf nodes under their hub, from what every server reports of its own side through the system account. Beneath it the gateways, routes and leaf nodes as tables with direction, state, the server on the other side, RTT, pending bytes and traffic; a gateway that is configured and not connected is red, a server known only from the other side dashed, a slow RTT counted. In a super-cluster the overview says how many clusters it saw and gives the server table a cluster column.
 - **How the streams hang together.** With no stream open, the JetStream module shows the subjects each stream stores, which stream mirrors or sources which with the lag, a stream of another domain copied from, and the consumers of each with what they have not delivered and not had acknowledged.
@@ -251,6 +264,7 @@ The first release that ships as an installable desktop application. Everything b
 
 Initial web UI: subject tree, message detail, JetStream, Key-Value, Object Store, services, monitoring, multi-connection, Docker and cross-compiled server binaries.
 
+[0.6.0]: https://github.com/blanpa/nats-explorer/releases/tag/v0.6.0
 [0.5.0]: https://github.com/blanpa/nats-explorer/releases/tag/v0.5.0
 [0.4.0]: https://github.com/blanpa/nats-explorer/releases/tag/v0.4.0
 [0.3.0]: https://github.com/blanpa/nats-explorer/releases/tag/v0.3.0
