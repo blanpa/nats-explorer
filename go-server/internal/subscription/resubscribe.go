@@ -25,6 +25,7 @@ func (m *Manager) SetSubjects(nc *nats.Conn, subjects []string) error {
 		m.mu.Unlock()
 		return m.Start(nc, subjects)
 	}
+	m.setOwnInbox(nc)
 	old := m.subs
 	oldPatterns := m.patternList()
 	m.subs = nil

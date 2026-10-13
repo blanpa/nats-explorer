@@ -24,6 +24,7 @@ nav_order: 3
 - Subjects split by `.` into a virtualized tree with the message count and rate of each subject and each branch. A collapsed branch also says how many subjects with messages are under it
 - The quote icon in the header puts the last payload next to each subject. It is off by default, and off it is not sent over the socket at all
 - Filter with several words; system roots (`$JS`, `$KV`, `$SYS`, `_INBOX`, …) are hidden behind a toggle
+- **Only the network's traffic.** What the explorer does itself is not counted or recorded, even under `>`: the replies it waits for, its calls into the JetStream API, a KV put, the chunks of an object upload, a service discovery, the deliveries of the consumers it reads a stream with, and the server's heartbeats and flow control to its inboxes. Each connection waits for answers under an inbox prefix of its own (`_INBOX.<id>.…`, which a permission on `_INBOX.>` still covers), and that is how they are told apart. A message the explorer publishes or a request it sends to an ordinary subject is traffic like anyone's and stays, and so do the server's advisories
 - Selecting a branch shows the recent messages of everything below it
 - Large subject spaces cost what is on screen, not what the server sees: see [Performance](#performance)
 - Two subscriptions that overlap -- `uns.>` next to `uns.acme.>` -- are marked "doubled": NATS delivers one copy per subscription, so every message below the narrower pattern arrives twice, the rates and counts double, and nothing else says why

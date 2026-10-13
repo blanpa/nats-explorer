@@ -204,6 +204,10 @@ type Manager struct {
 	subjectCount   atomic.Int64
 	focused        atomic.Pointer[[]*client] // clients with a focus, replaced on change
 
+	// the inbox prefix of the connection, followed by a dot: what arrives
+	// under it, or answers to it, is the explorer's own bookkeeping
+	ownInbox atomic.Pointer[string]
+
 	// control plane
 	mu      sync.RWMutex
 	tree    *tree
@@ -343,6 +347,7 @@ func (m *Manager) Start(nc *nats.Conn, subjects []string) error {
 	// A manager with no patterns runs and receives nothing, which is what
 	// a connection with every subscription removed asked for.
 	m.Subjects = subjects
+	m.setOwnInbox(nc)
 	patterns := make([]*patternStat, len(m.Subjects))
 	for i, subj := range m.Subjects {
 		patterns[i] = &patternStat{pattern: subj}
@@ -385,15 +390,54 @@ func (m *Manager) Start(nc *nats.Conn, subjects []string) error {
 	return nil
 }
 
-// receive hands a message to its shard. A JetStream consumer's delivery is
-// left out: it carries the subject it was stored under, so a wildcard
-// subscription that also matches the consumer's inbox would take a stored
-// message -- the explorer's own stream browsing included -- for a new one.
+// receive hands a message to its shard, unless it is not traffic of the
+// network but bookkeeping (see ownTraffic).
 func (m *Manager) receive(msg *nats.Msg, ps *patternStat, stopCh <-chan struct{}) {
-	if strings.HasPrefix(msg.Reply, "$JS.ACK.") {
+	if ownTraffic(msg, m.ownInbox.Load()) {
 		return
 	}
 	m.shardOf(msg.Subject).enqueue(delivery{msg: msg, ps: ps, seq: uint64(m.totalRecv.Add(1)), now: time.Now().UnixMilli()}, stopCh)
+}
+
+func (m *Manager) setOwnInbox(nc *nats.Conn) {
+	if nc == nil || nc.Opts.InboxPrefix == "" {
+		m.ownInbox.Store(nil)
+		return
+	}
+	p := nc.Opts.InboxPrefix + "."
+	m.ownInbox.Store(&p)
+}
+
+// ownTraffic tells the messages a wildcard subscription sees that are not
+// what anybody published to be read:
+//
+//   - a JetStream consumer's delivery: it carries the subject it was stored
+//     under, so a subscription that also matches the consumer's inbox would
+//     take a stored message -- the explorer's own stream browsing included --
+//     for a new one;
+//   - a reply to one of the explorer's own requests, which arrives on its
+//     inbox prefix: API answers, publish acknowledgements, service pings;
+//   - the explorer's own calls into the system's subjects -- the JetStream
+//     API, a KV put, the chunks of an object upload, a service discovery --
+//     which are requests answered on that inbox. A message published from
+//     the explorer to an ordinary subject is someone's traffic and stays;
+//   - the server's control messages to an inbox: a heartbeat, flow control,
+//     "no responders", a pull request's timeout. They have a status and no
+//     payload.
+func ownTraffic(msg *nats.Msg, inbox *string) bool {
+	if strings.HasPrefix(msg.Reply, "$JS.ACK.") {
+		return true
+	}
+	if len(msg.Data) == 0 && msg.Header != nil && msg.Header.Get("Status") != "" {
+		return true
+	}
+	if inbox == nil || *inbox == "" {
+		return false
+	}
+	if strings.HasPrefix(msg.Subject, *inbox) {
+		return true
+	}
+	return strings.HasPrefix(msg.Subject, "$") && strings.HasPrefix(msg.Reply, *inbox)
 }
 
 // work drains a shard's queue until the manager stops.

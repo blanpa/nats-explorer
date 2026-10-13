@@ -315,6 +315,11 @@ func (s *Store) Connect(cfg Config) (*Managed, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Inboxes of this connection's own: every reply the explorer waits for,
+	// the JetStream API's included, arrives under one prefix, so a `>`
+	// subscription can tell its own traffic from the network's (see
+	// subscription.Manager). Still under _INBOX, which permissions allow.
+	opts = append(opts, nats.CustomInboxPrefix(nats.NewInbox()))
 	// Through a bastion: one SSH session, every dial of the NATS client
 	// through it, the system-account connection included.
 	if cfg.SSH != nil && strings.TrimSpace(cfg.SSH.Host) != "" {
