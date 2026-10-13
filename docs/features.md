@@ -56,6 +56,10 @@ The overflow menu of a subject asks the question a wildcard makes hard: what wou
 
 `*` covers one token and `>` the rest; stream subjects overlap; a consumer filter one level too deep is invisible until nothing arrives. `GET /api/match?subject=` answers the JetStream half for scripts.
 
+## Narrow windows
+
+Below 768 pixels -- a phone, a tablet at the line, a split screen -- the list and the detail take turns: choosing a subject, a stream or a bucket shows its detail, and "Back to the list" shows the list again. Headers put their buttons on a second line rather than pushing the name out, and the module rail scrolls.
+
 ## Links
 
 The address bar says what is on screen: the module, the connection, the subject with its time range, the stream, the bucket and its key, the store, the service or the request template -- `#/subjects?conn=…&subject=plant.oven.temp&from=…&to=…`. Copy it, or click the link icon in the header, and whoever opens it sees the same view: the connection is switched to, a saved one that is closed is opened, the branches above the subject unfold and the window is set. A link to a connection this explorer does not know says so and applies the rest.

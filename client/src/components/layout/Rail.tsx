@@ -49,7 +49,7 @@ export default function Rail() {
   const setPaletteOpen = useStore(s => s.setPaletteOpen);
 
   return (
-    <nav className="w-12 shrink-0 flex flex-col items-center py-2 gap-1 bg-canvas border-r border-line" aria-label="Modules">
+    <nav className="w-12 shrink-0 flex flex-col items-center py-2 gap-1 bg-canvas border-r border-line overflow-y-auto" aria-label="Modules">
       {MODULES.map(m => {
         const Icon = ICONS[m.id];
         const isActive = module === m.id;

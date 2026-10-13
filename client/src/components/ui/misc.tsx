@@ -158,7 +158,7 @@ export function PaneHeader({ title, actions, children, className }: { title?: Re
     <div className={cn('pane-header', className)}>
       {title && <span className="pane-title truncate">{title}</span>}
       {children}
-      {actions && <div className="ml-auto flex items-center gap-1 shrink-0">{actions}</div>}
+      {actions && <div className="pane-header-actions ml-auto flex items-center gap-1 shrink-0">{actions}</div>}
     </div>
   );
 }

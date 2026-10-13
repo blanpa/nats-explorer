@@ -5,6 +5,7 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 ## [Unreleased]
 
 ### Added
+- **Narrow windows.** Below 768 pixels the list and the detail take turns, with a way back, and headers wrap their buttons instead of losing the name.
 - **Object stores, sealed and thinned.** Objects are ticked and deleted many at once, with what failed named, and a store can be sealed. The KV bulk delete moved to its own path, so a key named `delete` is a key again.
 - **Cluster operations.** A stream's or a consumer's leader steps down, a peer that is gone is removed from a stream's group, and through the system account a server reloads its configuration and the meta leader moves; each asks first and passes the server's answer on.
 - **Through an SSH bastion.** A server reachable only through a jump host is dialled through one SSH session to it, every connection of the NATS client included; password or private key, and the bastion's host key pinned once it was seen.

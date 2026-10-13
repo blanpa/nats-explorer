@@ -83,7 +83,7 @@ export default function Header() {
     <header className="h-11 shrink-0 flex items-center gap-3 px-3 bg-panel border-b border-line">
       <div className="flex items-center gap-2 pr-1 select-none">
         <Logo />
-        <span className="text-sm font-semibold tracking-tight">NATS Explorer</span>
+        <span className="text-sm font-semibold tracking-tight hidden sm:inline">NATS Explorer</span>
       </div>
 
       <div className="flex-1" />

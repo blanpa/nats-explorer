@@ -132,6 +132,13 @@ export interface AppState {
   closeConnectionsDialog: () => void;
   settingsOpen: boolean;
   setSettingsOpen: (open: boolean) => void;
+  /**
+   * On a narrow window the explorer and the detail take turns: which one is
+   * shown. Choosing something in the list shows its detail; the back button
+   * shows the list again.
+   */
+  narrowPane: 'list' | 'detail';
+  setNarrowPane: (p: 'list' | 'detail') => void;
   /** the command palette, Ctrl-K */
   paletteOpen: boolean;
   setPaletteOpen: (open: boolean) => void;
@@ -325,6 +332,8 @@ export const useStore = create<AppState>((set, get) => ({
   closeConnectionsDialog: () => set({ connectionsDialog: { open: false, editId: null } }),
   settingsOpen: false,
   setSettingsOpen: open => set({ settingsOpen: open }),
+  narrowPane: 'list',
+  setNarrowPane: p => set({ narrowPane: p }),
   paletteOpen: false,
   setPaletteOpen: open => set({ paletteOpen: open }),
   historyDb: appInfo.historyDb ?? false,
