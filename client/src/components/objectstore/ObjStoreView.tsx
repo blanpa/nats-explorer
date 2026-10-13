@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Archive, Download, FileIcon, RefreshCw, Trash2, Upload } from 'lucide-react';
+import { Archive, Download, FileIcon, Lock, RefreshCw, Trash2, Upload } from 'lucide-react';
 import type { ObjInfo } from 'shared';
 import { api, errorMessage } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
@@ -7,7 +7,7 @@ import { useStore } from '../../store';
 import { cn, formatBytes, formatCount, formatDateTime, formatNumber } from '../../lib/utils';
 import { Button, IconButton } from '../ui/Button';
 import { confirm } from '../ui/Dialog';
-import { EmptyState, ErrorState, LoadingState, PaneHeader } from '../ui/misc';
+import { Badge, EmptyState, ErrorState, LoadingState, PaneHeader } from '../ui/misc';
 import { toast } from '../ui/Toast';
 import { useCanWrite } from '../../lib/auth';
 
@@ -20,6 +20,9 @@ export default function ObjStoreView() {
   const fileInput = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const stores = useAsync(() => (connId ? api.listObjectStores(connId) : null), [connId, store], { key: `objstores:${connId}` });
+  const sealed = !!stores.data?.find(s => s.bucket === store)?.sealed;
 
   const { data, error, loading, initial, reload } = useAsync<ObjInfo[]>(() => (connId && store ? api.listObjects(connId, store) : null), [connId, store], {
     key: `objects:${connId}:${store}`,
@@ -61,6 +64,48 @@ export default function ObjStoreView() {
       bump();
     } catch (err) {
       toast.error('Delete failed', errorMessage(err));
+    }
+  };
+
+  const deleteChecked = async () => {
+    const names = [...checked];
+    if (
+      !(await confirm({
+        title: `Delete ${formatCount(names.length)} objects?`,
+        message: 'They are removed from the store.',
+        confirmLabel: 'Delete',
+        danger: true,
+      }))
+    )
+      return;
+    try {
+      const res = await api.deleteObjects(connId, store, names);
+      const failed = Object.entries(res.failed);
+      if (failed.length) toast.warning(`${failed.length} of ${names.length} objects not deleted`, failed.map(([n, e]) => `${n}: ${e}`).join('\n'));
+      setChecked(new Set());
+      reload();
+      bump();
+    } catch (err) {
+      toast.error('Delete failed', errorMessage(err));
+    }
+  };
+
+  const seal = async () => {
+    if (
+      !(await confirm({
+        title: `Seal ${store}?`,
+        message: 'A sealed store takes no more uploads and loses no objects. There is no way back.',
+        confirmLabel: 'Seal',
+        danger: true,
+      }))
+    )
+      return;
+    try {
+      await api.sealObjectStore(connId, store);
+      stores.reload();
+      bump();
+    } catch (err) {
+      toast.error('Seal failed', errorMessage(err));
     }
   };
 
@@ -110,7 +155,17 @@ export default function ObjStoreView() {
             <input ref={fileInput} type="file" multiple hidden onChange={e => e.target.files && upload(e.target.files)} />
             {canWrite && (
               <>
-                <Button variant="primary" icon={<Upload size={13} />} loading={!!uploading} onClick={() => fileInput.current?.click()}>
+                {checked.size > 0 && !sealed && (
+                  <Button variant="danger" icon={<Trash2 size={13} />} onClick={deleteChecked}>
+                    Delete {formatCount(checked.size)}
+                  </Button>
+                )}
+                {!sealed && (
+                  <IconButton label="Seal the store" onClick={seal}>
+                    <Lock size={14} />
+                  </IconButton>
+                )}
+                <Button variant="primary" icon={<Upload size={13} />} loading={!!uploading} disabled={sealed} onClick={() => fileInput.current?.click()}>
                   {uploading ? `Uploading ${uploading}` : 'Upload'}
                 </Button>
                 <Button variant="danger" icon={<Trash2 size={13} />} onClick={deleteStore}>
@@ -123,7 +178,10 @@ export default function ObjStoreView() {
       >
         <Archive size={16} className="text-accent shrink-0" />
         <div className="min-w-0">
-          <div className="text-md font-semibold truncate">{store}</div>
+          <div className="text-md font-semibold truncate flex items-center gap-1.5">
+            {store}
+            {sealed && <Badge tone="warn">sealed</Badge>}
+          </div>
           <div className="text-xs text-muted">
             {formatCount(objects.length)} objects · {formatBytes(totalSize)}
           </div>
@@ -141,6 +199,17 @@ export default function ObjStoreView() {
           <table className="table">
             <thead>
               <tr>
+                {canWrite && !sealed && (
+                  <th className="w-8">
+                    <input
+                      type="checkbox"
+                      className="checkbox"
+                      aria-label="Tick every object"
+                      checked={objects.length > 0 && objects.every(o => checked.has(o.name))}
+                      onChange={e => setChecked(e.target.checked ? new Set(objects.map(o => o.name)) : new Set())}
+                    />
+                  </th>
+                )}
                 <th>Name</th>
                 <th>Description</th>
                 <th className="num">Size</th>
@@ -153,6 +222,24 @@ export default function ObjStoreView() {
             <tbody>
               {objects.map(o => (
                 <tr key={o.name}>
+                  {canWrite && !sealed && (
+                    <td>
+                      <input
+                        type="checkbox"
+                        className="checkbox"
+                        aria-label={`Tick ${o.name}`}
+                        checked={checked.has(o.name)}
+                        onChange={e =>
+                          setChecked(prev => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(o.name);
+                            else next.delete(o.name);
+                            return next;
+                          })
+                        }
+                      />
+                    </td>
+                  )}
                   <td className="font-mono">
                     <span className="inline-flex items-center gap-2">
                       <FileIcon size={13} className="text-muted" /> {o.name}

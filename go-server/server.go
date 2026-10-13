@@ -515,7 +515,8 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 		r.Get("/kv", kvHandler.ListBuckets)
 		r.Post("/kv", kvHandler.CreateBucket)
 		r.Put("/kv/{bucket}", kvHandler.UpdateBucket)
-		r.Post("/kv/{bucket}/delete", kvHandler.DeleteKeys)
+		// Outside /kv/{bucket}/{key}: a key may be called anything, "delete" included.
+		r.Post("/kv-bulk-delete/{bucket}", kvHandler.DeleteKeys)
 		r.Get("/kv/{bucket}", kvHandler.ListKeys)
 		r.Delete("/kv/{bucket}", kvHandler.DeleteBucket)
 		r.Get("/kv/{bucket}/status", kvHandler.BucketStatus)
@@ -533,6 +534,8 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 		r.Put("/objectstore/{store}/{name}", objHandler.PutObject)
 		r.Post("/objectstore/{store}/{name}", objHandler.PutObject)
 		r.Delete("/objectstore/{store}/{name}", objHandler.DeleteObject)
+		r.Post("/objectstore-seal/{store}", objHandler.SealStore)
+		r.Post("/objectstore-bulk-delete/{store}", objHandler.DeleteObjects)
 
 		r.Get("/monitoring/{connId}/{endpoint}", monHandler.Proxy)
 

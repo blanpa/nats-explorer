@@ -187,7 +187,7 @@ func TestServerKVUpdateRevisionsAndBulkDelete(t *testing.T) {
 		Deleted int               `json:"deleted"`
 		Failed  map[string]string `json:"failed"`
 	}
-	if st := api.do("POST", "/api/kv/cfg/delete"+q, map[string]interface{}{"keys": []string{"line.0", "line.1", "line.2"}, "purge": true}, &bulk); st != 200 || bulk.Deleted != 3 || len(bulk.Failed) != 0 {
+	if st := api.do("POST", "/api/kv-bulk-delete/cfg"+q, map[string]interface{}{"keys": []string{"line.0", "line.1", "line.2"}, "purge": true}, &bulk); st != 200 || bulk.Deleted != 3 || len(bulk.Failed) != 0 {
 		t.Fatalf("bulk delete: %d %+v", st, bulk)
 	}
 	var keys []string
@@ -195,7 +195,7 @@ func TestServerKVUpdateRevisionsAndBulkDelete(t *testing.T) {
 	if len(keys) != 3 {
 		t.Fatalf("keys after the bulk delete = %v", keys)
 	}
-	if st := api.do("POST", "/api/kv/cfg/delete"+q, map[string]interface{}{"keys": []string{}}, nil); st != 400 {
+	if st := api.do("POST", "/api/kv-bulk-delete/cfg"+q, map[string]interface{}{"keys": []string{}}, nil); st != 400 {
 		t.Fatalf("an empty bulk delete: %d", st)
 	}
 }

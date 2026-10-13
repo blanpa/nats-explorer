@@ -318,7 +318,7 @@ export const api = {
     request<KvBucketInfo>(withConn(`/kv/${enc(bucket)}`, connId), { method: 'PUT', ...json(config) }),
   /** Many keys at once; what failed is named back. */
   deleteKvKeys: (connId: string, bucket: string, keys: string[], purge = false) =>
-    request<KvBulkDeleteResult>(withConn(`/kv/${enc(bucket)}/delete`, connId), { method: 'POST', ...json({ keys, purge }) }),
+    request<KvBulkDeleteResult>(withConn(`/kv-bulk-delete/${enc(bucket)}`, connId), { method: 'POST', ...json({ keys, purge }) }),
   deleteKvBucket: (connId: string, bucket: string) => request<{ success: boolean }>(withConn(`/kv/${enc(bucket)}`, connId), { method: 'DELETE' }),
   listKvKeys: (connId: string, bucket: string) => request<string[]>(withConn(`/kv/${enc(bucket)}`, connId)),
   getKvEntry: (connId: string, bucket: string, key: string) => request<KvEntry>(withConn(`/kv/${enc(bucket)}/${enc(key)}`, connId)),
@@ -339,6 +339,13 @@ export const api = {
     request<{ success: boolean }>(withConn('/objectstore', connId), { method: 'POST', ...json(config) }),
   deleteObjectStore: (connId: string, store: string) => request<{ success: boolean }>(withConn(`/objectstore/${enc(store)}`, connId), { method: 'DELETE' }),
   listObjects: (connId: string, store: string) => request<ObjInfo[]>(withConn(`/objectstore/${enc(store)}`, connId)),
+  /** No more uploads, no more deletes, for good. */
+  sealObjectStore: (connId: string, store: string) => request<{ success: boolean }>(withConn(`/objectstore-seal/${enc(store)}`, connId), { method: 'POST' }),
+  deleteObjects: (connId: string, store: string, names: string[]) =>
+    request<{ deleted: number; failed: Record<string, string> }>(withConn(`/objectstore-bulk-delete/${enc(store)}`, connId), {
+      method: 'POST',
+      ...json({ names }),
+    }),
   deleteObject: (connId: string, store: string, name: string) =>
     request<{ success: boolean }>(withConn(`/objectstore/${enc(store)}/${enc(name)}`, connId), { method: 'DELETE' }),
   /** Direct download link; the session cookie authenticates it. */

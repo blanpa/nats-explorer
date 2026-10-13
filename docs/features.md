@@ -257,6 +257,7 @@ A stream that mirrors or sources from another says so, with the lag and the time
 
 - Stores with size and chunk count; objects with description, digest and modification time
 - Drag & drop or file upload (streamed), direct download, delete objects and stores
+- Objects ticked and deleted many at once, with what failed named; a store sealed, after a confirmation, takes no more uploads
 
 ## Services
 

@@ -280,3 +280,45 @@ func uintToString(n uint64) string {
 	}
 	return string(buf[i:])
 }
+
+// SealStore answers POST /api/objectstore-seal/{store}: no more puts, no
+// more deletes, for good.
+func (h *ObjectStoreHandler) SealStore(w http.ResponseWriter, r *http.Request) {
+	os, ctx, cancel, ok := h.store(w, r, 10*time.Second)
+	if !ok {
+		return
+	}
+	defer cancel()
+	if err := os.Seal(ctx); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, map[string]bool{"success": true})
+}
+
+// DeleteObjects answers POST /api/objectstore-bulk-delete/{store} with
+// {"names": [...]}: each one, with what failed named back.
+func (h *ObjectStoreHandler) DeleteObjects(w http.ResponseWriter, r *http.Request) {
+	os, ctx, cancel, ok := h.store(w, r, 2*time.Minute)
+	if !ok {
+		return
+	}
+	defer cancel()
+	var body struct {
+		Names []string `json:"names"`
+	}
+	if err := decodeBody(r, &body); err != nil || len(body.Names) == 0 || len(body.Names) > 10000 {
+		writeError(w, http.StatusBadRequest, "between 1 and 10000 names")
+		return
+	}
+	failed := map[string]string{}
+	deleted := 0
+	for _, name := range body.Names {
+		if err := os.Delete(ctx, name); err != nil {
+			failed[name] = err.Error()
+			continue
+		}
+		deleted++
+	}
+	writeJSON(w, map[string]interface{}{"deleted": deleted, "failed": failed})
+}
