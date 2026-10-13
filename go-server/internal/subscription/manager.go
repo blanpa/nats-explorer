@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -361,9 +362,7 @@ func (m *Manager) Start(nc *nats.Conn, subjects []string) error {
 
 	for i, subj := range m.Subjects {
 		ps := patterns[i]
-		sub, err := nc.Subscribe(subj, func(msg *nats.Msg) {
-			m.shardOf(msg.Subject).enqueue(delivery{msg: msg, ps: ps, seq: uint64(m.totalRecv.Add(1)), now: time.Now().UnixMilli()}, stopCh)
-		})
+		sub, err := nc.Subscribe(subj, func(msg *nats.Msg) { m.receive(msg, ps, stopCh) })
 		if err != nil {
 			m.Stop()
 			return err
@@ -383,6 +382,17 @@ func (m *Manager) Start(nc *nats.Conn, subjects []string) error {
 	go m.loop(stopCh, StatsInterval, m.tick)
 
 	return nil
+}
+
+// receive hands a message to its shard. A JetStream consumer's delivery is
+// left out: it carries the subject it was stored under, so a wildcard
+// subscription that also matches the consumer's inbox would take a stored
+// message -- the explorer's own stream browsing included -- for a new one.
+func (m *Manager) receive(msg *nats.Msg, ps *patternStat, stopCh <-chan struct{}) {
+	if strings.HasPrefix(msg.Reply, "$JS.ACK.") {
+		return
+	}
+	m.shardOf(msg.Subject).enqueue(delivery{msg: msg, ps: ps, seq: uint64(m.totalRecv.Add(1)), now: time.Now().UnixMilli()}, stopCh)
 }
 
 // work drains a shard's queue until the manager stops.

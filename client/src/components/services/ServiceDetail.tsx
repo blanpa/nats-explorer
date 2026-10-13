@@ -88,7 +88,7 @@ export default function ServiceDetail() {
                           label="Send a request to this endpoint"
                           size="xs"
                           onClick={() => {
-                            prefillPublish({ subject: ep.subject });
+                            prefillPublish({ subject: ep.subject, mode: 'request' });
                             setModule('subjects');
                           }}
                         >
@@ -123,7 +123,7 @@ export default function ServiceDetail() {
             size="xs"
             variant="ghost"
             onClick={() => {
-              prefillPublish({ subject: `$SRV.PING.${svc.name}` });
+              prefillPublish({ subject: `$SRV.PING.${svc.name}`, mode: 'request' });
               setModule('subjects');
             }}
           >

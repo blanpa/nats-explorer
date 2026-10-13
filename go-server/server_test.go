@@ -280,6 +280,18 @@ func TestServerEndToEnd(t *testing.T) {
 	if cd := res.Header.Get("Content-Disposition"); !strings.Contains(cd, "blob.bin") {
 		t.Errorf("content-disposition = %q", cd)
 	}
+	// A JSON file sent as its own type is not the envelope and must not be
+	// stored empty.
+	req, _ = http.NewRequest("PUT", srv.URL+"/api/objectstore/files/plain.json"+q, strings.NewReader(`{"hello":"world"}`))
+	req.Header.Set("Content-Type", "application/json")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Errorf("json file without envelope: status %d, want 400", res.StatusCode)
+	}
 
 	// Binary publish shows up base64 encoded in the live feed.
 	ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http")+"/ws", nil)

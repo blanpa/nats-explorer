@@ -1,10 +1,6 @@
 package subscription
 
-import (
-	"time"
-
-	"github.com/nats-io/nats.go"
-)
+import "github.com/nats-io/nats.go"
 
 // Changing the subscriptions of a running connection used to stop the
 // manager and start it over, which threw away the subject tree, the counters
@@ -60,9 +56,7 @@ func (m *Manager) SetSubjects(nc *nats.Conn, subjects []string) error {
 	var subs []*nats.Subscription
 	for i, subj := range subjects {
 		ps := patterns[i]
-		sub, err := nc.Subscribe(subj, func(msg *nats.Msg) {
-			m.shardOf(msg.Subject).enqueue(delivery{msg: msg, ps: ps, seq: uint64(m.totalRecv.Add(1)), now: time.Now().UnixMilli()}, stopCh)
-		})
+		sub, err := nc.Subscribe(subj, func(msg *nats.Msg) { m.receive(msg, ps, stopCh) })
 		if err != nil {
 			for _, s := range subs {
 				s.Unsubscribe()

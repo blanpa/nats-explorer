@@ -36,7 +36,7 @@ export default function AuditView() {
     >
       <div className="flex items-center gap-2 ml-3">
         <Input inputSize="sm" className="w-36" value={user} onChange={e => setUser(e.target.value)} placeholder="User" aria-label="Filter by user" />
-        <Select inputSize="sm" value={method} onChange={e => setMethod(e.target.value)} aria-label="Filter by method">
+        <Select inputSize="sm" className="w-28" value={method} onChange={e => setMethod(e.target.value)} aria-label="Filter by method">
           {METHODS.map(m => (
             <option key={m || 'all'} value={m}>
               {m || 'Any method'}

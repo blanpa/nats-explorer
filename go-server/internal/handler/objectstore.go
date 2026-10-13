@@ -214,14 +214,20 @@ func (h *ObjectStoreHandler) PutObject(w http.ResponseWriter, r *http.Request) {
 	var reader io.Reader
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		var body struct {
-			Data        string `json:"data"`
-			Description string `json:"description,omitempty"`
+			Data        *string `json:"data"`
+			Description string  `json:"description,omitempty"`
 		}
 		if err := decodeBody(r, &body); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		data, err := base64.StdEncoding.DecodeString(body.Data)
+		// A JSON file sent as itself has no "data" and would be stored
+		// empty; say so instead.
+		if body.Data == nil {
+			writeError(w, http.StatusBadRequest, `a JSON body is the envelope {"data": "<base64>"}; send a file as application/octet-stream`)
+			return
+		}
+		data, err := base64.StdEncoding.DecodeString(*body.Data)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid base64 data")
 			return

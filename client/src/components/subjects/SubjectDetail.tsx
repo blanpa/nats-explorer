@@ -702,6 +702,7 @@ function SingleSubjectView() {
                 onFieldSelect={toggleChartField}
                 selectedFields={chartFields}
                 maxHeight={showDiff ? 320 : undefined}
+                className="shrink-0"
               />
 
               {subject && <SchemaPanel subject={subject} range={range} />}

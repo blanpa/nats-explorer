@@ -7,6 +7,7 @@ import { byArrival, messageKey } from '../lib/messages';
 import { clearAsyncCache } from '../lib/useAsync';
 import { ancestorsOf, type FlatNode } from '../components/subjects/tree';
 import type { TimeRange } from '../lib/timeRange';
+import type { RequestMode } from '../lib/savedRequests';
 
 export type Module = 'subjects' | 'state' | 'jetstream' | 'kv' | 'objects' | 'services' | 'requests' | 'events' | 'monitor' | 'cluster' | 'alerts' | 'audit';
 
@@ -232,8 +233,8 @@ export interface AppState {
   totalSubjects: number;
   publishOpen: boolean;
   setPublishOpen: (b: boolean) => void;
-  publishPrefill: { subject: string; payload?: string } | null;
-  prefillPublish: (p: { subject: string; payload?: string } | null) => void;
+  publishPrefill: { subject: string; payload?: string; mode?: RequestMode } | null;
+  prefillPublish: (p: { subject: string; payload?: string; mode?: RequestMode } | null) => void;
 
   // Module selections
   selectedStream: string | null;

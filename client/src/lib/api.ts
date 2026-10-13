@@ -356,7 +356,9 @@ export const api = {
     request<{ success: boolean; size: number; chunks: number }>(withConn(`/objectstore/${enc(store)}/${enc(file.name)}`, connId, { description }), {
       method: 'PUT',
       body: file,
-      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      // Always raw: the server reads an application/json body as the base64
+      // envelope, so a .json file sent as its own type would be stored empty.
+      headers: { 'Content-Type': 'application/octet-stream' },
     }),
 
   // Services

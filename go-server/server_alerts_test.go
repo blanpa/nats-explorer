@@ -101,6 +101,12 @@ func TestServerAlerts(t *testing.T) {
 	if st := api.do("POST", "/api/alerts/rules/r1/test", rule, &test); st != 200 || test.Matched != 1 || test.Sampled < 1 {
 		t.Fatalf("rule test: %d %+v", st, test)
 	}
+	// Nothing matching is an empty list, not null: the dialog reads its length.
+	var none map[string]json.RawMessage
+	nothing := map[string]interface{}{"name": "none", "pattern": "nowhere.>", "expr": "true", "severity": "warning"}
+	if st := api.do("POST", "/api/alerts/rules/r2/test", nothing, &none); st != 200 || string(none["matches"]) != "[]" {
+		t.Fatalf("rule test without matches: %d matches=%s", st, none["matches"])
+	}
 
 	// A payload below the threshold resolves it. The engine evaluates a
 	// subject at most once a second, so the second message has to wait.

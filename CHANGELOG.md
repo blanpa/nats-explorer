@@ -24,6 +24,15 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 - **A disk limit for the persistent history.** The retention bounded the database by age alone, so "Forever" and a firehose both ended with a full disk. `HISTORY_MAX_MB`, and the same setting in the UI, caps it by size: once the stored messages take more, the oldest are deleted before their retention is up, checked once a minute and counted apart from what aged out. The file stops growing there rather than shrinking, because SQLite reuses the freed pages.
 - **The address is the view.** The hash carries the module, the connection, the subject with its time range, the stream, the bucket and its key, the store, the service or the template, so a link can be sent and opens the same thing: the connection switched to or, if it is only saved, opened; the branches above the subject unfolded; the window set. A link icon in the header copies it, which the desktop app needs because it has no address bar. The back button walks back through the subjects opened.
 
+### Fixed
+- **A JSON file uploads as itself.** An object store took any `application/json` body for the base64 envelope, so a `.json` file dropped on a store was stored empty, with a success. The browser now uploads every file as raw bytes, and the server refuses a JSON body without `data` instead of storing nothing.
+- **Reading a stream is not traffic.** A consumer's delivery carries the subject the message was stored under, so the connection's `>` subscription, which also matches the consumer's inbox, counted every stream page read through a subject filter -- and every other consumer in the account -- as new messages, all stamped with the moment of the read. Deliveries with a `$JS.ACK` reply are left out of the live feed and the history.
+- **A rule test without a match.** Testing an alert rule that matched nothing answered `null` for the matches and the whole page went blank. The test also reads the persistent history when it is on, not only what arrived since the last restart, and a pattern with a wildcard reads wide enough to fill its sample.
+- **The oldest unacknowledged message of a filtered consumer.** The window behind the ack floor was read without the consumer's filter, so a consumer on `orders.paid` behind twenty `orders.created` was told its messages were no longer in the stream.
+- **The payload next to a diff.** With a chart and the diff open, the payload of the subject shrank to nothing under the schema panel.
+- **A changed connection, applied.** The backend keeps the settings a connection was opened with, and the dialog of an open connection only saved; a fixed monitoring URL did nothing until a disconnect. "Save & reconnect" applies it.
+- **A service endpoint gets a request.** The send button of an endpoint and "Ping via request" opened the drawer in publish mode, which sends and shows no answer.
+
 ## [0.5.0] - 2026-09-12
 
 A release about telling the truth on screen. A chart no longer draws a line

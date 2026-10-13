@@ -59,7 +59,7 @@ export default function PublishPanel() {
 
   useEffect(() => {
     if (prefill) {
-      setDraft(d => ({ ...d, subject: prefill.subject, payload: prefill.payload ?? d.payload }));
+      setDraft(d => ({ ...d, subject: prefill.subject, payload: prefill.payload ?? d.payload, mode: prefill.mode ?? d.mode }));
       clearPrefill(null);
     }
   }, [prefill, clearPrefill]);

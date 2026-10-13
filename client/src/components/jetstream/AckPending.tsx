@@ -24,18 +24,22 @@ export default function AckPending({ connId, stream, consumer }: { connId: strin
   const from = consumer.ackFloor.streamSeq + 1;
   const to = consumer.delivered.streamSeq;
   const stuck = consumer.numAckPending > 0 && to >= from;
-  const { data } = useAsync(() => (stuck ? api.getStreamMessages(connId, stream, { startSeq: from, limit: WINDOW }) : null), [connId, stream, from, to], {
-    key: stuck ? `ackpending:${connId}:${stream}:${consumer.name}:${from}` : undefined,
-  });
-  if (!stuck) return null;
-
   // A filtered consumer was never given the subjects it does not take, so
-  // they are not what it is waiting for.
+  // they are not what it is waiting for. With one filter the server skips
+  // them; read unfiltered, the window can be all the other subjects.
   const filters = consumer.config.filterSubjects?.length
     ? consumer.config.filterSubjects
     : consumer.config.filterSubject
       ? [consumer.config.filterSubject]
       : [];
+  const subject = filters.length === 1 ? filters[0] : undefined;
+  const { data } = useAsync(
+    () => (stuck ? api.getStreamMessages(connId, stream, { startSeq: from, limit: WINDOW, subject }) : null),
+    [connId, stream, from, to, subject],
+    { key: stuck ? `ackpending:${connId}:${stream}:${consumer.name}:${from}:${subject ?? ''}` : undefined },
+  );
+  if (!stuck) return null;
+
   const mine = (data?.messages ?? []).filter(m => m.seq <= to && (filters.length === 0 || filters.some(f => subjectMatches(f, m.subject))));
   const oldest = mine[0];
 
@@ -74,9 +78,13 @@ export default function AckPending({ connId, stream, consumer }: { connId: strin
               </div>
             )}
           </>
-        ) : (
-          <div className="text-xs text-muted">The messages of that window are no longer in the stream.</div>
-        )}
+        ) : data ? (
+          <div className="text-xs text-muted">
+            {data.messages.length > 0
+              ? `None of the ${WINDOW} oldest of the window is on a subject this consumer takes.`
+              : 'The messages of that window are no longer in the stream.'}
+          </div>
+        ) : null}
       </div>
     </div>
   );

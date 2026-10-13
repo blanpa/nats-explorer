@@ -128,6 +128,15 @@ export default function ConnectionDialog() {
     if (await connect(draft.id)) close();
   };
 
+  // The backend holds the settings a connection was opened with, so a
+  // changed server list, monitoring URL or credential applies only anew.
+  const saveAndReconnect = async () => {
+    if (!save() || !draft) return;
+    const current = liveById.get(draft.id);
+    if (current) await disconnect(current.id);
+    if (await connect(draft.id)) close();
+  };
+
   const del = async () => {
     if (!draft) return;
     if (
@@ -184,9 +193,16 @@ export default function ConnectionDialog() {
             Save
           </Button>
           {live?.connected ? (
-            <Button variant="danger" icon={<Unplug size={13} />} onClick={() => disconnect(live.id)}>
-              Disconnect
-            </Button>
+            <>
+              <Button variant="danger" icon={<Unplug size={13} />} onClick={() => disconnect(live.id)}>
+                Disconnect
+              </Button>
+              {dirty && (
+                <Button variant="primary" icon={<Plug size={13} />} loading={busy} disabled={!valid} onClick={saveAndReconnect}>
+                  Save & reconnect
+                </Button>
+              )}
+            </>
           ) : (
             <Button variant="primary" icon={<Plug size={13} />} loading={busy} disabled={!valid} onClick={saveAndConnect}>
               {dirty ? 'Save & connect' : 'Connect'}

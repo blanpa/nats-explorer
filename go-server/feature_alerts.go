@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -86,7 +87,11 @@ func smtpFromEnv() alerts.SMTP {
 }
 
 const (
-	alertsTestLimit   = 200
+	alertsTestLimit = 200
+	// A pattern with a wildcard is read through its literal prefix, whose
+	// newest messages can be mostly other subjects; read wider than the
+	// sample so it still fills up.
+	alertsTestScan    = 25 * alertsTestLimit
 	alertsTestMatches = 5
 	alertsEventLimit  = 200
 )
@@ -268,6 +273,9 @@ func init() {
 				if len(matches) > alertsTestMatches {
 					matches = matches[:alertsTestMatches]
 				}
+				if matches == nil {
+					matches = []message.NatsMessage{} // [] on the wire, not null
+				}
 				out["matches"] = matches
 				if len(sampled) == 0 {
 					out["note"] = "nothing recorded yet for this pattern; the rule still applies to new messages"
@@ -279,14 +287,32 @@ func init() {
 }
 
 // testAlertRule samples the recorded messages of a rule's pattern and returns
-// them together with the ones the expression matches (newest first).
+// them together with the ones the expression matches (newest first). The
+// database, when it is on, still holds what came before a restart; memory
+// starts empty again.
 func testAlertRule(d *deps, req *http.Request, rule alerts.Rule, prog *filter.Program) (sampled, matched []message.NatsMessage) {
 	for _, prefix := range alertSamplePrefixes(d, rule.Pattern) {
 		for _, st := range handler.VisibleStatuses(d.store, req) {
-			for _, m := range d.history.Search(st.ID, prefix, "", alertsTestLimit, 0) {
+			var recorded []message.NatsMessage
+			if db := d.tee.DB(); db != nil {
+				part, err := db.Search(req.Context(), st.ID, prefix, "", 0, math.MaxInt64, alertsTestScan)
+				if err != nil {
+					log.Printf("alerts: rule test reads memory, database failed: %v", err)
+				}
+				recorded = part
+			}
+			if len(recorded) == 0 {
+				recorded = d.history.Search(st.ID, prefix, "", alertsTestScan, 0)
+			}
+			taken := 0
+			for _, m := range recorded {
+				if taken == alertsTestLimit {
+					break
+				}
 				if !alerts.MatchSubject(rule.Pattern, m.Subject) {
 					continue
 				}
+				taken++
 				sampled = append(sampled, m)
 				if prog == nil || prog.MatchMessage(&m) {
 					matched = append(matched, m)
