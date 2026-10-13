@@ -18,7 +18,7 @@ test('browse, edit and live update', async ({ page }) => {
   await expect(page.locator('.jv')).toContainText('"auto"');
 
   // Edit through the UI (PUT path).
-  await page.getByRole('button', { name: 'Edit' }).click();
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
   await page.locator('textarea').fill('{"mode":"manual"}');
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.locator('.jv')).toContainText('"manual"');
