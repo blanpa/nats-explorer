@@ -165,6 +165,8 @@ export default function StreamDetail() {
   };
 
   const st = stream.state;
+  // The server keeps entries of its own under _nats.*; they are its bookkeeping, not the reader's metadata.
+  const userMetadata = Object.entries(stream.metadata ?? {}).filter(([k]) => !k.startsWith('_nats.'));
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -338,7 +340,7 @@ export default function StreamDetail() {
               </div>
             </div>
 
-            {(stream.republish || stream.subjectTransform || (stream.metadata && Object.keys(stream.metadata).length > 0)) && (
+            {(stream.republish || stream.subjectTransform || userMetadata.length > 0) && (
               <div>
                 <SectionTitle>Routing and metadata</SectionTitle>
                 <KeyValueGrid
@@ -356,7 +358,7 @@ export default function StreamDetail() {
                     ...(stream.subjectTransform
                       ? [{ label: 'Subject transform', value: `${stream.subjectTransform.src || '>'} → ${stream.subjectTransform.dest}`, mono: true }]
                       : []),
-                    ...Object.entries(stream.metadata ?? {}).map(([k, v]) => ({ label: k, value: v, mono: true })),
+                    ...userMetadata.map(([k, v]) => ({ label: k, value: v, mono: true })),
                   ]}
                 />
               </div>
