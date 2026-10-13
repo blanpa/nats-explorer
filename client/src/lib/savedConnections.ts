@@ -35,6 +35,19 @@ export interface SavedConnection {
   sysPass?: string;
   sysNkeySeed?: string;
   sysCreds?: string;
+  /**
+   * Through a bastion host. Flat fields, because the settings file keeps
+   * the secrets of a connection apart by their top-level name: sshPassword,
+   * sshKey and sshPassphrase go to the keyring, the rest stays in the file.
+   */
+  sshEnabled?: boolean;
+  sshHost?: string;
+  sshPort?: number;
+  sshUser?: string;
+  sshPassword?: string;
+  sshKey?: string;
+  sshPassphrase?: string;
+  sshHostKey?: string;
 }
 
 export const SYSTEM_TOPICS: { key: SystemTopicKey; subject: string; label: string; description: string }[] = [
@@ -146,7 +159,22 @@ export function toConnectionConfig(saved: SavedConnection): ConnectionConfig {
     monitoringPort: saved.monitoringPort || undefined,
     jsDomain: saved.jsDomain?.trim() || undefined,
     jsApiPrefix: saved.jsApiPrefix?.trim() || undefined,
+    ssh: sshConfig(saved),
     ...systemAccountConfig(saved),
+  };
+}
+
+/** The bastion, when the connection goes through one. */
+function sshConfig(saved: SavedConnection): ConnectionConfig['ssh'] {
+  if (!saved.sshEnabled || !saved.sshHost?.trim()) return undefined;
+  return {
+    host: saved.sshHost.trim(),
+    port: saved.sshPort || undefined,
+    user: saved.sshUser?.trim() ?? '',
+    password: saved.sshPassword || undefined,
+    privateKey: saved.sshKey?.trim() || undefined,
+    passphrase: saved.sshPassphrase || undefined,
+    hostKey: saved.sshHostKey?.trim() || undefined,
   };
 }
 

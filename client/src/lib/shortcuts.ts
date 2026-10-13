@@ -1,9 +1,19 @@
+import { useStore } from '../store';
+
 /**
- * Global keyboard shortcuts: "/" focuses the explorer's filter, "j"/"k"
- * move through the subject tree. Typing into a field is never intercepted.
+ * Global keyboard shortcuts: Ctrl-K (Cmd-K) opens the command palette,
+ * "/" focuses the explorer's filter, "j"/"k" move through the subject
+ * tree. Typing into a field is never intercepted, except for the palette,
+ * which is wanted from anywhere.
  */
 export function installShortcuts(): () => void {
   const onKey = (e: KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      const s = useStore.getState();
+      s.setPaletteOpen(!s.paletteOpen);
+      return;
+    }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;

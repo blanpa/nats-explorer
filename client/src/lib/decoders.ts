@@ -8,20 +8,57 @@ import { readSetting, uuid, writeSetting } from './utils';
  * The libraries load on first use so the main bundle stays small.
  */
 
-export type DecoderFormat = 'msgpack' | 'protobuf' | 'avro';
+export type DecoderFormat = 'msgpack' | 'protobuf' | 'avro' | 'script';
 
 export interface DecoderRule {
   id: string;
   /** NATS subject pattern; `*` matches one token, `>` the rest */
   pattern: string;
   format: DecoderFormat;
-  /** .proto source or Avro schema JSON; unused for msgpack */
+  /** .proto source, Avro schema JSON, or the body of a JavaScript function; unused for msgpack */
   schema?: string;
   /** fully qualified protobuf message type, e.g. acme.Telemetry */
   messageType?: string;
 }
 
-export const FORMAT_LABELS: Record<DecoderFormat, string> = { msgpack: 'MessagePack', protobuf: 'Protocol Buffers', avro: 'Avro' };
+export const FORMAT_LABELS: Record<DecoderFormat, string> = { msgpack: 'MessagePack', protobuf: 'Protocol Buffers', avro: 'Avro', script: 'JavaScript' };
+
+/**
+ * What a script decoder is handed beside the bytes: the readers a house
+ * format needs, so the body can say `view.getUint16(0)` and `text(bytes)`
+ * instead of building them.
+ */
+export interface ScriptHelpers {
+  /** the bytes as a DataView, for fixed-width fields */
+  view: DataView;
+  /** the bytes as UTF-8 text */
+  text: (b?: Uint8Array) => string;
+  /** the bytes as JSON */
+  json: (b?: Uint8Array) => unknown;
+  /** the bytes as hex, for a preview or a lookup */
+  hex: (b?: Uint8Array) => string;
+}
+
+/**
+ * Compiles the body of a script rule: a function of `bytes` and `helpers`
+ * that returns the decoded value. It runs in this browser, like a
+ * userscript, and only for the rules written here; a body that does not
+ * compile says so once, when the rule is saved.
+ */
+export function compileScript(body: string): (bytes: Uint8Array) => unknown {
+  if (!body.trim()) throw new Error('write the body of a function: it gets bytes and helpers, and returns the value');
+  const fn = new Function('bytes', 'helpers', body) as (bytes: Uint8Array, helpers: ScriptHelpers) => unknown;
+  const text = (b: Uint8Array) => new TextDecoder().decode(b);
+  return bytes => {
+    const helpers: ScriptHelpers = {
+      view: new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength),
+      text: (b = bytes) => text(b),
+      json: (b = bytes) => JSON.parse(text(b)),
+      hex: (b = bytes) => Array.from(b, x => x.toString(16).padStart(2, '0')).join(''),
+    };
+    return fn(bytes, helpers);
+  };
+}
 
 const KEY = 'ne.decoders.v1';
 
@@ -74,6 +111,8 @@ async function compile(rule: DecoderRule): Promise<Decoder> {
       const type = avro.Type.forSchema(JSON.parse(rule.schema));
       return bytes => plain(type.fromBuffer(Buffer.from(bytes)));
     }
+    case 'script':
+      return compileScript(rule.schema ?? '');
   }
 }
 

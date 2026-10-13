@@ -11,6 +11,8 @@ const PLACEHOLDER: Record<DecoderFormat, string> = {
   msgpack: '',
   protobuf: 'syntax = "proto3";\npackage acme;\nmessage Reading {\n  string sensor_id = 1;\n  double value = 2;\n}',
   avro: '{ "type": "record", "name": "Reading", "fields": [ { "name": "sensor", "type": "string" }, { "name": "value", "type": "double" } ] }',
+  script:
+    '// bytes: Uint8Array, helpers: { view, text(), json(), hex() }\nreturn {\n  id: helpers.view.getUint16(0),\n  value: helpers.view.getFloat32(2, true),\n  unit: helpers.text(bytes.subarray(6)),\n};',
 };
 
 /**
@@ -124,7 +126,11 @@ function DecoderEditor({ onClose, prefill }: { onClose: () => void; prefill?: st
                 <Field
                   label="Format"
                   hint={
-                    draft.format === 'msgpack' ? 'MessagePack is self-describing, so it needs no schema.' : 'The schema below describes how to read the bytes.'
+                    draft.format === 'msgpack'
+                      ? 'MessagePack is self-describing, so it needs no schema.'
+                      : draft.format === 'script'
+                        ? 'A function of your own reads the bytes: for a house format no library knows. It runs in this browser, for this rule only.'
+                        : 'The schema below describes how to read the bytes.'
                   }
                 >
                   <Select value={draft.format} onChange={e => patch({ format: e.target.value as DecoderFormat })}>
@@ -161,7 +167,15 @@ function DecoderEditor({ onClose, prefill }: { onClose: () => void; prefill?: st
                 </Field>
               )}
               {draft.format !== 'msgpack' && (
-                <Field label={draft.format === 'protobuf' ? '.proto source' : 'Avro schema (JSON)'} className="flex-1">
+                <Field
+                  label={draft.format === 'protobuf' ? '.proto source' : draft.format === 'avro' ? 'Avro schema (JSON)' : 'function (bytes, helpers)'}
+                  hint={
+                    draft.format === 'script'
+                      ? 'The body of a JavaScript function. It gets the bytes as a Uint8Array and helpers with a DataView and text(), json(), hex(); whatever it returns is shown as the payload, an object becoming the tree.'
+                      : undefined
+                  }
+                  className="flex-1"
+                >
                   <Textarea
                     className="min-h-[180px] text-xs"
                     value={draft.schema ?? ''}

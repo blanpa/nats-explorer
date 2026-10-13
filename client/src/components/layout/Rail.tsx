@@ -9,6 +9,7 @@ import {
   Radio,
   ScrollText,
   Send,
+  Search,
   Server,
   Settings,
   Siren,
@@ -45,6 +46,7 @@ export default function Rail() {
   const theme = useStore(s => s.theme);
   const toggleTheme = useStore(s => s.toggleTheme);
   const setSettingsOpen = useStore(s => s.setSettingsOpen);
+  const setPaletteOpen = useStore(s => s.setPaletteOpen);
 
   return (
     <nav className="w-12 shrink-0 flex flex-col items-center py-2 gap-1 bg-canvas border-r border-line" aria-label="Modules">
@@ -81,6 +83,17 @@ export default function Rail() {
       })}
 
       <div className="flex-1" />
+
+      <Tooltip content="Command palette (Ctrl-K)">
+        <button
+          type="button"
+          onClick={() => setPaletteOpen(true)}
+          aria-label="Command palette"
+          className="w-9 h-9 rounded flex items-center justify-center text-muted hover:text-fg hover:bg-field transition-colors"
+        >
+          <Search size={17} strokeWidth={1.9} />
+        </button>
+      </Tooltip>
 
       <Tooltip content="Settings">
         <button

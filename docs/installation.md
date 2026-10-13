@@ -108,7 +108,7 @@ printf 'alice:admin:%s\nbob:viewer:%s\n' "$ADMIN_HASH" "$VIEWER_HASH" > users.tx
 AUTH_USERS=users.txt ./nats-explorer
 ```
 
-Admins may publish, create, edit and delete; viewers get a read-only explorer (writes answer `403`). Scripts and Prometheus can authenticate with HTTP basic auth or, with `AUTH_TOKEN`, a bearer token; browsers use the session cookie set by `POST /api/login`. Sessions live in memory and end with a restart.
+Admins may publish, create, edit and delete; viewers get a read-only explorer (writes answer `403`). Scripts and Prometheus can authenticate with HTTP basic auth, with `AUTH_TOKEN` as a bearer token, or with a personal token made in the settings (`Authorization: Bearer ne_…`), one per script with its own role, revoked on its own. Browsers use the session cookie set by `POST /api/login`. With `STORAGE_DIR` the sessions and the personal tokens survive a restart; without it they live in memory.
 
 ### Metrics
 

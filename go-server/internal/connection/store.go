@@ -41,6 +41,8 @@ type Config struct {
 	// is the raw alternative for imported JetStream APIs; it wins when set.
 	JSDomain    string `json:"jsDomain,omitempty"`
 	JSAPIPrefix string `json:"jsApiPrefix,omitempty"`
+	// SSH, when set, routes the connection through a bastion host.
+	SSH *SSHConfig `json:"ssh,omitempty"`
 	// Optional credentials for the NATS system account ($SYS). They open a
 	// second connection used only for cluster-wide monitoring requests.
 	SysAuthMethod string `json:"sysAuthMethod,omitempty"`
@@ -72,6 +74,10 @@ type Status struct {
 	ConnectedAt int64  `json:"connectedAt,omitempty"`
 	// Bundle marks an imported support bundle: recorded messages, no server.
 	Bundle bool `json:"bundle,omitempty"`
+	// SSH says the connection goes through a bastion; SSHHostKey is the
+	// bastion's key as presented when none was pinned, for pinning it.
+	SSH        bool   `json:"ssh,omitempty"`
+	SSHHostKey string `json:"sshHostKey,omitempty"`
 }
 
 type Managed struct {
@@ -82,6 +88,8 @@ type Managed struct {
 	SysError    string
 	Color       string
 	ConnectedAt time.Time
+	// tunnel is the SSH session the connection goes through, if any.
+	tunnel *sshDialer
 
 	mu        sync.Mutex
 	lastError string
@@ -114,6 +122,10 @@ func (m *Managed) status() Status {
 		SysAccount:    m.SysNC != nil && m.SysNC.IsConnected(),
 		SysError:      m.SysError,
 		LastError:     lastErr,
+	}
+	if m.tunnel != nil {
+		st.SSH = true
+		st.SSHHostKey = m.tunnel.HostKeySeen()
 	}
 	if nc == nil {
 		return st
@@ -303,15 +315,31 @@ func (s *Store) Connect(cfg Config) (*Managed, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Through a bastion: one SSH session, every dial of the NATS client
+	// through it, the system-account connection included.
+	if cfg.SSH != nil && strings.TrimSpace(cfg.SSH.Host) != "" {
+		tunnel, err := newSSHDialer(*cfg.SSH)
+		if err != nil {
+			return nil, err
+		}
+		managed.tunnel = tunnel
+		opts = append(opts, nats.SetCustomDialer(tunnel))
+	}
 
 	nc, err := nats.Connect(strings.Join(cfg.Servers, ","), opts...)
 	if err != nil {
+		if managed.tunnel != nil {
+			managed.tunnel.Close()
+		}
 		return nil, err
 	}
 
 	// The system-account connection is optional: a failure is reported, not fatal.
 	if cfg.SysAuthMethod != "" && cfg.SysAuthMethod != "none" {
 		sysOpts, err := buildSysOptions(cfg)
+		if managed.tunnel != nil && err == nil {
+			sysOpts = append(sysOpts, nats.SetCustomDialer(managed.tunnel))
+		}
 		if err != nil {
 			managed.SysError = err.Error()
 		} else if sysNC, err := nats.Connect(strings.Join(cfg.Servers, ","), sysOpts...); err != nil {
@@ -348,6 +376,9 @@ func (s *Store) Disconnect(connID string) error {
 	}
 	if managed.SysNC != nil {
 		managed.SysNC.Close()
+	}
+	if managed.tunnel != nil {
+		managed.tunnel.Close()
 	}
 	s.notify()
 	return nil

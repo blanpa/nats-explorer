@@ -120,6 +120,10 @@ type Service struct {
 	mu       sync.Mutex
 	sessions map[string]session
 	sweep    time.Time
+	// store keeps the sessions and the personal tokens between restarts;
+	// nil keeps them for this run only.
+	store  Store
+	tokens []Token
 }
 
 // New builds a service. Either argument may be empty.
@@ -174,6 +178,7 @@ func (s *Service) NewSession(id Identity) string {
 	key := hex.EncodeToString(buf)
 	s.mu.Lock()
 	s.sessions[key] = session{id: id, expires: time.Now().Add(SessionTTL)}
+	s.saveSessions()
 	s.mu.Unlock()
 	return key
 }
@@ -184,10 +189,15 @@ func (s *Service) Lookup(key string) (Identity, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if now.After(s.sweep) {
+		swept := false
 		for k, ss := range s.sessions {
 			if now.After(ss.expires) {
 				delete(s.sessions, k)
+				swept = true
 			}
+		}
+		if swept {
+			s.saveSessions()
 		}
 		s.sweep = now.Add(10 * time.Minute)
 	}
@@ -202,6 +212,7 @@ func (s *Service) Lookup(key string) (Identity, bool) {
 func (s *Service) Revoke(key string) {
 	s.mu.Lock()
 	delete(s.sessions, key)
+	s.saveSessions()
 	s.mu.Unlock()
 }
 
@@ -221,7 +232,10 @@ func (s *Service) Identify(r *http.Request) (Identity, bool) {
 		return s.Login(name, pass)
 	}
 	if tok := bearer(r); tok != "" {
-		return s.LoginToken(tok)
+		if id, ok := s.LoginToken(tok); ok {
+			return id, true
+		}
+		return s.lookupToken(tok)
 	}
 	return Identity{}, false
 }

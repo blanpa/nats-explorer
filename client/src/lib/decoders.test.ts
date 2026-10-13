@@ -80,3 +80,30 @@ describe('decodeWith', () => {
     expect(bad.ok).toBe(false);
   });
 });
+
+describe('script decoders', () => {
+  it('runs the body with the bytes and the helpers', async () => {
+    const rule: DecoderRule = {
+      id: 's',
+      pattern: 'house.>',
+      format: 'script',
+      schema:
+        'return { id: helpers.view.getUint16(0), value: helpers.view.getFloat32(2, true), unit: helpers.text(bytes.subarray(6)), hex: helpers.hex(bytes.subarray(0, 2)) };',
+    };
+    const bytes = new Uint8Array(9);
+    const view = new DataView(bytes.buffer);
+    view.setUint16(0, 258);
+    view.setFloat32(2, 21.5, true);
+    bytes.set(new TextEncoder().encode('°C'), 6);
+    expect(await decodeWith(rule, bytes)).toEqual({ ok: true, value: { id: 258, value: 21.5, unit: '°C', hex: '0102' } });
+  });
+
+  it('reports a body that does not compile or throws, and refuses to write', async () => {
+    const broken: DecoderRule = { id: 'b', pattern: 'x', format: 'script', schema: 'return {' };
+    const res = await decodeWith(broken, new Uint8Array(1));
+    expect(res.ok).toBe(false);
+    const throwing: DecoderRule = { id: 't', pattern: 'x', format: 'script', schema: 'throw new Error("no")' };
+    expect(await decodeWith(throwing, new Uint8Array(1))).toEqual({ ok: false, error: 'no' });
+    await expect(encodeWith(throwing, {})).rejects.toThrow(/cannot be written/);
+  });
+});

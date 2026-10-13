@@ -18,7 +18,7 @@ nav_order: 3
 
 - Numeric fields of the latest message as sparklines with the current value; the history rail is open by default
 - The subject header says when the last message arrived and how long ago, which is what says a subject has gone quiet; the status bar says how long the connection has been up
-- Keyboard: `/` focuses the filter of the current module, Escape clears it, `j`/`k` walk the subject tree, arrow keys expand and collapse
+- Keyboard: `/` focuses the filter of the current module, Escape clears it, `j`/`k` walk the subject tree, arrow keys expand and collapse; Ctrl-K opens the **command palette**, where the modules, the saved and open connections, the theme, the settings and a link to the view are a few letters away
 - The explorer and the history rail are dragged to width by the handle on their edge; a double-click resets, and both widths are remembered
 - Watch several subjects at once: Ctrl/Cmd-click adds subjects to the selection; the detail pane then shows the latest value and rate of each and one list of everything arriving on any of them, newest first
 - Subjects split by `.` into a virtualized tree with the message count and rate of each subject and each branch. A collapsed branch also says how many subjects with messages are under it
@@ -181,6 +181,7 @@ The Alerts module lists what is firing right now, the rules with the number of s
 - **The same payload again** is marked ×2, ×3 in the lists. A repeated `Nats-Msg-Id` is already called out, and it catches what NATS knows about; a retry storm looks different -- the identical payload seconds later with a fresh id, doubling counters while the rows differ by their timestamp alone. A subject whose payload practically never changes is left alone, because that is a level rather than a retry
 - Headers with their meaning: the ones NATS sets explain themselves -- the deduplication key, the publish preconditions, the rollups, where a sourced message came from -- and a `Nats-Msg-Id` seen twice among the messages on screen is marked
 - Payload decoders: rules per subject pattern decode MessagePack, Protocol Buffers (paste the `.proto`; the message types it defines are offered under the field, and a file that does not parse says so there) or Avro (paste the schema) into the JSON tree; the rules are kept with the other settings. A protobuf rule works in both directions -- the same `.proto` encodes a payload written as JSON in the publish form, so Sparkplug B and its like can be sent as well as read
+- **A decoder of your own**: a rule can carry the body of a JavaScript function instead of a schema, for a house format no library knows. It gets the bytes and helpers with a DataView and `text()`, `json()`, `hex()`, and whatever it returns is shown as the payload, an object becoming the tree. It runs in your own browser, like a userscript, and only for the rules you wrote
 - The decoded value reaches the lists too, not only the opened message: the subject tree, the history rail, the message table and the merged view show the fields rather than the word "binary", decoded once per payload and bounded, so a subject whose payloads are all protobuf is no longer a history of identical rows
 - **Protobuf without its `.proto`**: a binary payload that parses as a protobuf message is offered as **Fields** -- field numbers as keys, repeated fields as arrays, nested messages as subtrees, which is `protoc --decode_raw` in the panel. The guesses are named above the tree rather than hidden: length-delimited bytes read as text where they are printable and as a nested message otherwise, a 64-bit field as a double where that is a number someone would write down, and a varint past 2^53 as a string because a number would round it
 - Click a number in the JSON to chart it over time as line, area, step, bars or dots
@@ -307,6 +308,7 @@ The monitoring URL defaults to port 8222 of the first server and can be set per 
 
 - Several servers at once, colour-coded; switch between them
 - Authentication: none, token, username/password, NKey seed, credentials file (JWT)
+- **Through an SSH bastion**: a server reachable only through a jump host is dialled through one SSH session to it, every connection of the NATS client included, so the servers are named as the bastion sees them. Password or private key; the bastion's host key is pinned once it was seen, which is what the first connection shows it for
 - **From a `nats` CLI context**: the desktop app offers the contexts of the machine it runs on as a starting point for a connection, with the credentials and certificate files a context names read in, and what could not be read named. A server does the same only when `NATS_CONTEXTS_DIR` points it at a directory, because an admin of a shared explorer must not be able to read files off the server by naming them in a context
 - TLS with CA certificate, client certificate and key (pasted or loaded from files), plus an insecure mode for test setups
 - Optional system-account credentials for the Cluster module
@@ -327,6 +329,8 @@ Once a day the explorer asks GitHub's release listing whether a newer release ex
 - `AUTH_USERS`: accounts with the roles `admin` and `viewer`; the UI shows a login and hides the write actions from viewers, the backend rejects their writes with `403`
 - Sessions are HttpOnly cookies set by `POST /api/login`; no credential sits in the websocket URL or in browser storage
 - `GET /metrics` for Prometheus, protected like the API
+- **Sessions survive a restart** where the server has a directory of its own, so a deploy does not log everyone out
+- **Personal API tokens**, one per script or scraper, with a name and a role, made in the settings and shown once; each is revoked on its own, instead of rotating the shared `AUTH_TOKEN` for all. Sent as `Authorization: Bearer ne_…`
 
 ## Support bundle
 

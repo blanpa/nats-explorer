@@ -132,6 +132,9 @@ export interface AppState {
   closeConnectionsDialog: () => void;
   settingsOpen: boolean;
   setSettingsOpen: (open: boolean) => void;
+  /** the command palette, Ctrl-K */
+  paletteOpen: boolean;
+  setPaletteOpen: (open: boolean) => void;
   /** the backend also writes the history to SQLite, so time ranges beyond
    * memory can be queried. A setting, so it changes while the app runs. */
   historyDb: boolean;
@@ -322,6 +325,8 @@ export const useStore = create<AppState>((set, get) => ({
   closeConnectionsDialog: () => set({ connectionsDialog: { open: false, editId: null } }),
   settingsOpen: false,
   setSettingsOpen: open => set({ settingsOpen: open }),
+  paletteOpen: false,
+  setPaletteOpen: open => set({ paletteOpen: open }),
   historyDb: appInfo.historyDb ?? false,
   historyRetention: appInfo.historyRetention ?? '',
   setHistoryDb: (enabled, retention) => {

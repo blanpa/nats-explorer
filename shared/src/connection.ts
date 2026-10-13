@@ -29,6 +29,8 @@ export interface ConnectionConfig {
   jsDomain?: string;
   /** Raw JetStream API prefix for imported APIs; takes precedence over jsDomain. */
   jsApiPrefix?: string;
+  /** Through a bastion host: one SSH session, every dial of the NATS client through it. */
+  ssh?: SshConfig;
   /** Optional system-account ($SYS) credentials for cluster-wide monitoring. */
   sysAuthMethod?: AuthMethod;
   sysToken?: string;
@@ -36,6 +38,19 @@ export interface ConnectionConfig {
   sysPass?: string;
   sysNkeySeed?: string;
   sysCreds?: string;
+}
+
+/** The bastion a connection goes through. */
+export interface SshConfig {
+  host: string;
+  port?: number;
+  user: string;
+  password?: string;
+  /** PEM of a private key, with its passphrase where it has one */
+  privateKey?: string;
+  passphrase?: string;
+  /** the bastion's public key pinned, as a known_hosts line; empty accepts and reports it */
+  hostKey?: string;
 }
 
 /** Live state of a managed connection, pushed over the websocket. */
@@ -58,6 +73,9 @@ export interface ConnectionStatus {
   /** an imported support bundle: recorded messages, nothing can be sent */
   bundle?: boolean;
   connectedAt?: number;
+  /** goes through a bastion; the host key seen when none was pinned, for pinning it */
+  ssh?: boolean;
+  sshHostKey?: string;
 }
 
 export interface ConnectResponse {

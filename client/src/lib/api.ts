@@ -39,7 +39,7 @@ import type {
   MatchResponse,
   StreamGaps,
 } from 'shared';
-import { type AuthInfo, useAuth } from './auth';
+import { type ApiToken, type AuthInfo, useAuth } from './auth';
 import { serverUrl } from './basePath';
 import { useStore } from '../store';
 
@@ -225,6 +225,12 @@ export const api = {
 
   /** The nats CLI's contexts on the machine the backend runs on, as connections. */
   listContexts: () => request<CliContextList>('/contexts'),
+
+  // Personal API tokens, for the scripts and the scrapers.
+  listTokens: () => request<{ tokens: ApiToken[]; supported: boolean }>('/tokens'),
+  /** The token itself comes back once, in the clear. */
+  createToken: (name: string, role: 'admin' | 'viewer') => request<{ token: string; info: ApiToken }>('/tokens', { method: 'POST', ...json({ name, role }) }),
+  deleteToken: (id: string) => request<void>(`/tokens/${enc(id)}`, { method: 'DELETE' }),
 
   // Streams
   listStreams: (connId: string) => request<StreamInfo[]>(withConn('/streams', connId)),

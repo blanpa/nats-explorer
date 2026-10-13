@@ -117,6 +117,11 @@ func (s *appServer) Close() {
 
 func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 	authSvc := auth.New(cfg.authToken, cfg.users)
+	if cfg.settings != nil {
+		// Sessions and personal tokens outlive a restart where there is a
+		// place to keep them.
+		authSvc.Persist(cfg.settings)
+	}
 	if cfg.mode == "" {
 		cfg.mode = "server"
 	}
@@ -432,6 +437,7 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 				f.api(r, d)
 			}
 		}
+		authSvc.TokenRoutes(r)
 		r.Post("/connect", connHandler.Connect)
 		r.Post("/disconnect", connHandler.Disconnect)
 		r.Post("/disconnect-all", func(w http.ResponseWriter, req *http.Request) {

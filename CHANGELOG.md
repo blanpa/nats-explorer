@@ -5,6 +5,10 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 ## [Unreleased]
 
 ### Added
+- **Through an SSH bastion.** A server reachable only through a jump host is dialled through one SSH session to it, every connection of the NATS client included; password or private key, and the bastion's host key pinned once it was seen.
+- **Sessions that survive a restart, and personal API tokens.** Where the server has a directory of its own a deploy no longer logs everyone out, and tokens for the scripts and the scrapers are made in the settings, one per script with a name and a role, shown once and revoked on their own.
+- **A decoder of your own.** A decoder rule can carry the body of a JavaScript function instead of a schema, for a house format no library knows; it runs in the browser, for that rule only.
+- **A command palette.** Ctrl-K: the modules, the saved and open connections, the theme, the settings and a link to the view, a few letters away.
 - **A connection from a `nats` CLI context.** The desktop app offers the contexts of its own machine as a starting point, with the credentials and certificate files they name read in and what could not be read named; a server does the same only with `NATS_CONTEXTS_DIR`.
 - **A newer release, named.** Once a day the explorer asks GitHub's release listing and shows a newer release as a link in the status bar; one request, nothing sent but the request, and a setting switches it off.
 - **A template can be a test.** An expectation on a request template -- a CEL expression every reply must satisfy and a latency the p95 must stay under -- turns a run or a single request into a verdict, with every error and every refused reply counted and named. `nats-explorer run collection.json` sends an exported collection from a terminal through the same executor, prints PASS or FAIL per template with the reasons, and exits with 1 when one fails, which is what a CI step needs.

@@ -23,7 +23,7 @@ const (
 )
 
 // secretFields are removed from saved connections before they hit settings.json.
-var secretFields = []string{"token", "pass", "nkeySeed", "creds", "tlsKey", "sysToken", "sysPass", "sysNkeySeed", "sysCreds"}
+var secretFields = []string{"token", "pass", "nkeySeed", "creds", "tlsKey", "sysToken", "sysPass", "sysNkeySeed", "sysCreds", "sshPassword", "sshKey", "sshPassphrase"}
 
 var keyPattern = regexp.MustCompile(`^ne\.[A-Za-z0-9_.-]{1,64}$`)
 

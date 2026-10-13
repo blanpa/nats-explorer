@@ -2,13 +2,13 @@ import { useState } from 'react';
 import { Database, HardDrive } from 'lucide-react';
 import type { HistoryPersistence } from 'shared';
 import { api, errorMessage } from '../../lib/api';
-import { useCanWrite } from '../../lib/auth';
+import { type ApiToken, useAuth, useCanWrite } from '../../lib/auth';
 import { useAsync } from '../../lib/useAsync';
 import { formatBytes, formatDateTime, formatNumber, parseGoDuration } from '../../lib/utils';
 import { useStore } from '../../store';
 import { setUpdateCheckEnabled, updateCheckEnabled } from '../../lib/updateCheck';
 import { Button } from '../ui/Button';
-import { Dialog } from '../ui/Dialog';
+import { confirm, Dialog } from '../ui/Dialog';
 import { Checkbox, Field, Input, Select } from '../ui/Input';
 import { Badge, ErrorState, Hint, KeyValueGrid, LoadingState, SectionTitle } from '../ui/misc';
 import { toast } from '../ui/Toast';
@@ -331,6 +331,110 @@ function UpdatesSection() {
   );
 }
 
+/**
+ * Personal API tokens: one per script or scraper, with a name and a role,
+ * revoked one at a time instead of rotating the shared AUTH_TOKEN for all.
+ * The token is shown once, when it is made.
+ */
+function TokensSection() {
+  const mode = useAuth(s => s.mode);
+  const role = useAuth(s => s.role);
+  const { data, error, reload, initial, loading } = useAsync(() => (mode !== 'none' && role === 'admin' ? api.listTokens() : null), [mode, role]);
+  const [name, setName] = useState('');
+  const [newRole, setNewRole] = useState<'admin' | 'viewer'>('viewer');
+  const [made, setMade] = useState<{ token: string; name: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  if (mode === 'none' || role !== 'admin') return null;
+  if (initial && loading) return null;
+
+  const create = async () => {
+    setBusy(true);
+    try {
+      const res = await api.createToken(name.trim(), newRole);
+      setMade({ token: res.token, name: res.info.name });
+      setName('');
+      reload();
+    } catch (err) {
+      toast.error('Token not made', errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const revoke = async (t: ApiToken) => {
+    if (
+      !(await confirm({
+        title: `Revoke ${t.name}?`,
+        message: 'Every request carrying this token is refused from then on.',
+        confirmLabel: 'Revoke',
+        danger: true,
+      }))
+    )
+      return;
+    try {
+      await api.deleteToken(t.id);
+      reload();
+    } catch (err) {
+      toast.error('Token not revoked', errorMessage(err));
+    }
+  };
+
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionTitle>API tokens</SectionTitle>
+      {error ? (
+        <p className="text-sm text-danger">{error}</p>
+      ) : data && !data.supported ? (
+        <p className="text-sm text-muted">Personal tokens need a server with a directory of its own (STORAGE_DIR), where they survive a restart.</p>
+      ) : (
+        <>
+          <p className="text-xs text-muted">
+            One per script or scraper, sent as <code className="font-mono">Authorization: Bearer …</code>. A viewer token reads, an admin token writes; each is
+            revoked on its own.
+          </p>
+          {(data?.tokens ?? []).length > 0 && (
+            <div className="card divide-y divide-line/70">
+              {data?.tokens.map(t => (
+                <div key={t.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
+                  <span className="font-mono truncate">{t.name}</span>
+                  <Badge tone={t.role === 'admin' ? 'accent' : 'neutral'}>{t.role}</Badge>
+                  <span className="text-xs text-faint ml-auto shrink-0" title={`Made ${formatDateTime(t.created)}`}>
+                    {t.lastUsed ? `used ${formatDateTime(t.lastUsed)}` : 'never used'}
+                  </span>
+                  <Button size="xs" variant="ghost" className="text-danger" onClick={() => revoke(t)}>
+                    Revoke
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex items-end gap-2">
+            <Field label="Name" className="flex-1">
+              <Input value={name} onChange={e => setName(e.target.value)} placeholder="grafana" />
+            </Field>
+            <Field label="Role">
+              <Select value={newRole} onChange={e => setNewRole(e.target.value as 'admin' | 'viewer')}>
+                <option value="viewer">viewer</option>
+                <option value="admin">admin</option>
+              </Select>
+            </Field>
+            <Button variant="primary" disabled={!name.trim()} loading={busy} onClick={create}>
+              Make token
+            </Button>
+          </div>
+          {made && (
+            <div className="text-xs rounded border border-ok/30 bg-ok/5 p-2 flex flex-col gap-1">
+              <span>
+                The token for <span className="font-mono">{made.name}</span>, shown once:
+              </span>
+              <code className="font-mono break-all select-all">{made.token}</code>
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 /** Settings of this installation that live on the backend, not in the browser. */
 export default function SettingsDialog() {
   const open = useStore(s => s.settingsOpen);
@@ -340,6 +444,7 @@ export default function SettingsDialog() {
       {open && (
         <div className="flex flex-col gap-6">
           <HistorySection />
+          <TokensSection />
           <UpdatesSection />
         </div>
       )}

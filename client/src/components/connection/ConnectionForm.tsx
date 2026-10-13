@@ -275,6 +275,75 @@ export default function ConnectionForm({ draft, isNew, live, patch, onSubmit }: 
         </div>
       )}
 
+      {/* A server behind a bastion: one SSH session, every dial of the NATS
+          client through it. The host key is pinned once it was seen, which
+          is what a first connection is for. */}
+      <Checkbox
+        label="Through an SSH bastion"
+        description="The servers above are reached through an SSH connection to a jump host, as the bastion sees them."
+        checked={!!draft.sshEnabled}
+        onChange={e => patch({ sshEnabled: e.target.checked })}
+      />
+      {draft.sshEnabled && (
+        <div className="flex flex-col gap-3 rounded border border-line p-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Field label="SSH host" required>
+              <Input mono value={draft.sshHost ?? ''} onChange={e => patch({ sshHost: e.target.value })} placeholder="bastion.example.com" />
+            </Field>
+            <Field label="SSH port">
+              <Input
+                type="number"
+                min={1}
+                max={65535}
+                value={draft.sshPort ?? ''}
+                onChange={e => patch({ sshPort: Number(e.target.value) || undefined })}
+                placeholder="22"
+              />
+            </Field>
+            <Field label="SSH user" required>
+              <Input mono value={draft.sshUser ?? ''} onChange={e => patch({ sshUser: e.target.value })} placeholder="ops" />
+            </Field>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Field label="SSH password" hint="Or a key below; both are tried when both are given.">
+              <Input type="password" value={draft.sshPassword ?? ''} onChange={e => patch({ sshPassword: e.target.value })} autoComplete="off" />
+            </Field>
+            <PemField
+              label="SSH private key"
+              hint="The PEM of the key file."
+              value={draft.sshKey ?? ''}
+              onChange={v => patch({ sshKey: v })}
+              placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+            />
+            <Field label="Key passphrase">
+              <Input type="password" value={draft.sshPassphrase ?? ''} onChange={e => patch({ sshPassphrase: e.target.value })} autoComplete="off" />
+            </Field>
+          </div>
+          <Field
+            label="Bastion host key"
+            hint="Pinned, the connection refuses any other key. Empty accepts the key the bastion presents and shows it here after connecting, to be pinned."
+          >
+            <div className="flex gap-2">
+              <Input
+                mono
+                value={draft.sshHostKey ?? ''}
+                onChange={e => patch({ sshHostKey: e.target.value })}
+                placeholder="ssh-ed25519 AAAA…"
+                spellCheck={false}
+              />
+              {live?.sshHostKey && !draft.sshHostKey?.trim() && (
+                <Button size="sm" variant="outline" onClick={() => patch({ sshHostKey: live.sshHostKey })} title={live.sshHostKey}>
+                  Pin the key seen
+                </Button>
+              )}
+            </div>
+            {live?.sshHostKey && !draft.sshHostKey?.trim() && (
+              <p className="text-xs text-warn mt-1">Connected without a pinned host key: the bastion presented {live.sshHostKey.slice(0, 40)}…</p>
+            )}
+          </Field>
+        </div>
+      )}
+
       <div className="flex items-start gap-2 text-xs text-muted rounded border border-warn/30 bg-warn/5 px-3 py-2 mt-auto">
         <AlertTriangle size={13} className="text-warn shrink-0 mt-0.5" />
         <span>

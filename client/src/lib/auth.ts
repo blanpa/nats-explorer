@@ -2,6 +2,15 @@ import { create } from 'zustand';
 import { serverUrl } from './basePath';
 
 export type AuthMode = 'none' | 'token' | 'users';
+
+/** A personal API token as listed: never the token itself. */
+export interface ApiToken {
+  id: string;
+  name: string;
+  role: 'admin' | 'viewer';
+  created: number;
+  lastUsed?: number;
+}
 export type Role = 'admin' | 'viewer' | '';
 
 export interface AuthInfo {

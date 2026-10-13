@@ -11,6 +11,7 @@ import StatusBar from './components/layout/StatusBar';
 import ExplorerResizeHandle from './components/layout/ResizeHandle';
 import ConnectionDialog from './components/connection/ConnectionDialog';
 import SettingsDialog from './components/layout/SettingsDialog';
+import CommandPalette from './components/layout/CommandPalette';
 import LoginDialog from './components/connection/LoginDialog';
 import { useAuth } from './lib/auth';
 import { ConfirmHost } from './components/ui/Dialog';
@@ -51,6 +52,7 @@ export default function App() {
       </div>
       <ConnectionDialog />
       <SettingsDialog />
+      <CommandPalette />
       <LoginDialog />
       <ConfirmHost />
       <Toaster />
