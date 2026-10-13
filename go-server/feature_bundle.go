@@ -110,7 +110,7 @@ func init() {
 func exportBundle(w http.ResponseWriter, r *http.Request, d *deps) {
 	connID := r.URL.Query().Get("connId")
 	if connID == "" {
-		if list := d.store.AllStatuses(); len(list) > 0 {
+		if list := handler.VisibleStatuses(d.store, r); len(list) > 0 {
 			connID = list[0].ID
 		}
 	}

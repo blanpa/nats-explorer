@@ -283,11 +283,16 @@ func TestServerRangeTotal(t *testing.T) {
 		return fmt.Sprintf("/api/history/range?connId=t1&subject=tot.a&branch=1&from=%d&to=%d&limit=5%s", from, to, extra)
 	}
 
+	// The page is read before the count, so while the writer commits one
+	// answer can carry a page from before the commit and a total from after
+	// it. Wait for an answer where both have caught up; a fresh variable
+	// each time, so a field the answer leaves out is not the last one's.
 	var page ranged
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
+		page = ranged{}
 		api.do("GET", url("&count=1"), nil, &page)
-		if page.Total != nil && *page.Total == 2*total {
+		if page.Total != nil && *page.Total == 2*total && len(page.Messages) == 5 {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)

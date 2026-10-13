@@ -182,7 +182,7 @@ func (h *HistoryHandler) connIDs(r *http.Request) []string {
 	if id := r.URL.Query().Get("connId"); id != "" {
 		return []string{id}
 	}
-	statuses := h.Store.AllStatuses()
+	statuses := VisibleStatuses(h.Store, r)
 	ids := make([]string, 0, len(statuses))
 	for _, s := range statuses {
 		ids = append(ids, s.ID)

@@ -27,6 +27,36 @@ type Client struct {
 	once sync.Once
 	// binary clients receive MessagePack frames instead of JSON text.
 	binary bool
+	// Allow says whether the tab may see a connection; nil sees all. Set
+	// once when the client is added, from the caller's identity.
+	Allow func(connID string) bool
+}
+
+// ConnScoped is an event about one connection: a tab that may not see the
+// connection does not get it.
+type ConnScoped interface{ ConnScope() string }
+
+// Scoped is an event about several connections: each tab gets the part it
+// may see, or nothing when ScopeFor answers nil.
+type Scoped interface {
+	ScopeFor(allow func(connID string) bool) interface{}
+}
+
+// scoped is what a client receives of an event: the event, a narrowed
+// copy, or nil for nothing.
+func (c *Client) scoped(event interface{}) interface{} {
+	if c.Allow == nil {
+		return event
+	}
+	switch e := event.(type) {
+	case ConnScoped:
+		if !c.Allow(e.ConnScope()) {
+			return nil
+		}
+	case Scoped:
+		return e.ScopeFor(c.Allow)
+	}
+	return event
 }
 
 // Binary reports whether the client negotiated MessagePack frames.
@@ -74,12 +104,18 @@ func NewHub() *Hub {
 // goroutines. The send channel is never closed; the writer exits via done so a
 // concurrent Broadcast can never hit a closed channel. binary selects
 // MessagePack frames for this client.
-func (h *Hub) AddClient(conn *websocket.Conn, binary bool) *Client {
+//
+// allow, when not nil, narrows what the client is sent to the connections
+// it says yes to; it is fixed before the client is visible to a broadcast.
+func (h *Hub) AddClient(conn *websocket.Conn, binary bool, allow ...func(connID string) bool) *Client {
 	client := &Client{
 		conn:   conn,
 		send:   make(chan []byte, sendBuffer),
 		done:   make(chan struct{}),
 		binary: binary,
+	}
+	if len(allow) > 0 {
+		client.Allow = allow[0]
 	}
 
 	h.mu.Lock()
@@ -158,6 +194,10 @@ func (h *Hub) readPump(client *Client) {
 }
 
 func (h *Hub) SendToClient(c *Client, event interface{}) {
+	event = c.scoped(event)
+	if event == nil {
+		return
+	}
 	data, err := Encode(event, c.binary)
 	if err != nil {
 		return
@@ -175,6 +215,19 @@ func (h *Hub) Broadcast(event interface{}) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for client := range h.clients {
+		// A restricted tab gets its own encoding of what it may see.
+		if client.Allow != nil {
+			if ev := client.scoped(event); ev != nil {
+				if data, err := Encode(ev, client.binary); err == nil {
+					select {
+					case client.send <- data:
+					case <-client.done:
+					default:
+					}
+				}
+			}
+			continue
+		}
 		i := 0
 		if client.binary {
 			i = 1

@@ -15,7 +15,7 @@ func TestServerTokensAndPersistedSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hash, _ := auth.HashPassword("pw")
+	hash := mustBcrypt(t, "pw")
 	users := []auth.User{{Name: "admin", Role: auth.RoleAdmin, Hash: []byte(hash)}, {Name: "viewer", Role: auth.RoleViewer, Hash: []byte(hash)}}
 	srv := newTestServer(t, serverConfig{users: users, settings: store})
 	admin := &apiClient{t: t, base: srv.URL, basic: "admin:pw"}

@@ -4,7 +4,9 @@ go 1.26.0
 
 require (
 	cel.dev/cel-go v0.32.0
+	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/go-chi/chi/v5 v5.2.5
+	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/gorilla/websocket v1.5.3
 	github.com/nats-io/nats-server/v2 v2.14.6
 	github.com/nats-io/nats.go v1.53.1
@@ -12,6 +14,7 @@ require (
 	github.com/wailsapp/wails/v2 v2.11.0
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/crypto v0.55.0
+	golang.org/x/oauth2 v0.37.0
 	modernc.org/sqlite v1.58.0
 )
 

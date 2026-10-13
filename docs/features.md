@@ -335,6 +335,8 @@ Once a day the explorer asks GitHub's release listing whether a newer release ex
 - `AUTH_USERS`: accounts with the roles `admin` and `viewer`; the UI shows a login and hides the write actions from viewers, the backend rejects their writes with `403`
 - Sessions are HttpOnly cookies set by `POST /api/login`; no credential sits in the websocket URL or in browser storage
 - `GET /metrics` for Prometheus, protected like the API
+- **Single sign-on** through an OpenID Connect provider -- Keycloak, Entra ID, Okta, Google, Authentik -- with the authorization code flow, PKCE and a nonce. A group claim makes an admin or a viewer, or keeps someone out; another claim can narrow the connections a user sees
+- **Rights per connection**: an account, a personal token or a single sign-on user can be narrowed to some connections by name. It sees those and no others -- in the connection list, behind every API call, on the websocket, in the alerts -- and may not open a connection under another name or act on all of them at once
 - **Sessions survive a restart** where the server has a directory of its own, so a deploy does not log everyone out
 - **Personal API tokens**, one per script or scraper, with a name and a role, made in the settings and shown once; each is revoked on its own, instead of rotating the shared `AUTH_TOKEN` for all. Sent as `Authorization: Bearer ne_…`
 

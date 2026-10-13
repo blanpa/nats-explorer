@@ -12,6 +12,7 @@ import (
 	"nats-explorer/internal/alerts"
 	"nats-explorer/internal/auth"
 	"nats-explorer/internal/filter"
+	"nats-explorer/internal/handler"
 	"nats-explorer/internal/message"
 )
 
@@ -22,6 +23,44 @@ type alertsEvent struct {
 	Type   string         `json:"type"`
 	Active []alerts.Alert `json:"active"`
 	Events []alerts.Event `json:"events,omitempty"`
+}
+
+// visibleAlerts and visibleEvents narrow the REST answers the way the
+// websocket push is narrowed.
+func visibleAlerts(d *deps, req *http.Request, list []alerts.Alert) []alerts.Alert {
+	out := make([]alerts.Alert, 0, len(list))
+	for _, a := range list {
+		if handler.MayUse(d.store, req, a.ConnID) {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func visibleEvents(d *deps, req *http.Request, list []alerts.Event) []alerts.Event {
+	out := make([]alerts.Event, 0, len(list))
+	for _, e := range list {
+		if handler.MayUse(d.store, req, e.ConnID) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// ScopeFor narrows the alerts to the connections a tab may see.
+func (e alertsEvent) ScopeFor(allow func(string) bool) interface{} {
+	out := alertsEvent{Type: e.Type, Active: []alerts.Alert{}}
+	for _, a := range e.Active {
+		if allow(a.ConnID) {
+			out.Active = append(out.Active, a)
+		}
+	}
+	for _, ev := range e.Events {
+		if allow(ev.ConnID) {
+			out.Events = append(out.Events, ev)
+		}
+	}
+	return out
 }
 
 // alertsKey is where the rules live in the settings store, maintenanceKey
@@ -86,7 +125,7 @@ func init() {
 			}
 
 			r.Get("/alerts", func(w http.ResponseWriter, req *http.Request) {
-				featureJSON(w, map[string]interface{}{"active": engine.Active()})
+				featureJSON(w, map[string]interface{}{"active": visibleAlerts(d, req, engine.Active())})
 			})
 			r.Get("/alerts/rules", func(w http.ResponseWriter, req *http.Request) {
 				featureJSON(w, map[string]interface{}{"rules": engine.Rules()})
@@ -96,7 +135,7 @@ func init() {
 				if n, err := strconv.Atoi(req.URL.Query().Get("limit")); err == nil && n > 0 {
 					limit = min(n, 1000)
 				}
-				featureJSON(w, map[string]interface{}{"events": engine.Events(limit)})
+				featureJSON(w, map[string]interface{}{"events": visibleEvents(d, req, engine.Events(limit))})
 			})
 
 			r.Put("/alerts/rules", func(w http.ResponseWriter, req *http.Request) {
@@ -167,13 +206,19 @@ func init() {
 					return
 				}
 				acked := body.Acked == nil || *body.Acked
+				for _, a := range engine.Active() {
+					if a.Key == body.Key && !handler.MayUse(d.store, req, a.ConnID) {
+						featureError(w, http.StatusNotFound, "no such alert")
+						return
+					}
+				}
 				by := auth.FromContext(req.Context()).Name
 				if !engine.Ack(body.Key, by, acked) {
 					featureError(w, http.StatusNotFound, "no such alert")
 					return
 				}
 				engine.Flush()
-				featureJSON(w, map[string]interface{}{"active": engine.Active()})
+				featureJSON(w, map[string]interface{}{"active": visibleAlerts(d, req, engine.Active())})
 			})
 
 			// Maintenance windows: planned silence for a line that is down
@@ -218,7 +263,7 @@ func init() {
 					}
 					prog = p
 				}
-				sampled, matches := testAlertRule(d, rule, prog)
+				sampled, matches := testAlertRule(d, req, rule, prog)
 				out := map[string]interface{}{"sampled": len(sampled), "matched": len(matches)}
 				if len(matches) > alertsTestMatches {
 					matches = matches[:alertsTestMatches]
@@ -235,9 +280,9 @@ func init() {
 
 // testAlertRule samples the recorded messages of a rule's pattern and returns
 // them together with the ones the expression matches (newest first).
-func testAlertRule(d *deps, rule alerts.Rule, prog *filter.Program) (sampled, matched []message.NatsMessage) {
+func testAlertRule(d *deps, req *http.Request, rule alerts.Rule, prog *filter.Program) (sampled, matched []message.NatsMessage) {
 	for _, prefix := range alertSamplePrefixes(d, rule.Pattern) {
-		for _, st := range d.store.AllStatuses() {
+		for _, st := range handler.VisibleStatuses(d.store, req) {
 			for _, m := range d.history.Search(st.ID, prefix, "", alertsTestLimit, 0) {
 				if !alerts.MatchSubject(rule.Pattern, m.Subject) {
 					continue

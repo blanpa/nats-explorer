@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { KeyRound, LogIn } from 'lucide-react';
+import { serverUrl } from '../../lib/basePath';
 import { useAuth } from '../../lib/auth';
 import { wsClient } from '../../lib/ws';
 import { useStore } from '../../store';
@@ -22,7 +23,14 @@ export default function LoginDialog() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const users = mode === 'users';
+  const oidc = useAuth(s => !!s.oidc);
+  const ssoOnly = mode === 'oidc';
   const ready = secret.trim().length > 0 && (!users || user.trim().length > 0);
+  // Single sign-on is a page of the provider, not a form here: the browser
+  // goes there and comes back with the session.
+  const sso = () => {
+    window.location.href = serverUrl('/api/oidc/login');
+  };
 
   const submit = async () => {
     if (!ready || busy) return;
@@ -44,50 +52,61 @@ export default function LoginDialog() {
     <Dialog
       open={required}
       onOpenChange={() => undefined}
-      title={users ? 'Sign in' : 'API token required'}
+      title={users || ssoOnly ? 'Sign in' : 'API token required'}
       description={
-        users
-          ? 'This NATS Explorer backend asks for an account. Viewers can look at everything; admins can also publish and change things.'
-          : 'This NATS Explorer backend is protected with AUTH_TOKEN. Enter the token to continue; the session lasts a day.'
+        ssoOnly
+          ? 'This NATS Explorer backend signs in through your organisation. Viewers can look at everything; admins can also publish and change things.'
+          : users
+            ? 'This NATS Explorer backend asks for an account. Viewers can look at everything; admins can also publish and change things.'
+            : 'This NATS Explorer backend is protected with AUTH_TOKEN. Enter the token to continue; the session lasts a day.'
       }
       width="sm"
       footer={
         <>
           <SourceLink className="text-xs mr-auto" showLicense />
-          <Button variant="primary" icon={users ? <LogIn size={13} /> : <KeyRound size={13} />} disabled={!ready || busy} onClick={submit}>
-            {users ? 'Sign in' : 'Unlock'}
-          </Button>
+          {oidc && (
+            <Button variant={ssoOnly ? 'primary' : 'outline'} icon={<LogIn size={13} />} onClick={sso}>
+              Sign in with single sign-on
+            </Button>
+          )}
+          {!ssoOnly && (
+            <Button variant="primary" icon={users ? <LogIn size={13} /> : <KeyRound size={13} />} disabled={!ready || busy} onClick={submit}>
+              {users ? 'Sign in' : 'Unlock'}
+            </Button>
+          )}
         </>
       }
     >
-      <form
-        className="flex flex-col gap-3"
-        onSubmit={e => {
-          e.preventDefault();
-          submit();
-        }}
-      >
-        {users && (
-          <Field label="User">
-            <Input autoFocus value={user} onChange={e => setUser(e.target.value)} autoComplete="username" />
+      {ssoOnly ? null : (
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={e => {
+            e.preventDefault();
+            submit();
+          }}
+        >
+          {users && (
+            <Field label="User">
+              <Input autoFocus value={user} onChange={e => setUser(e.target.value)} autoComplete="username" />
+            </Field>
+          )}
+          <Field label={users ? 'Password' : 'Token'}>
+            <Input
+              type="password"
+              mono={!users}
+              autoFocus={!users}
+              value={secret}
+              onChange={e => setSecret(e.target.value)}
+              autoComplete={users ? 'current-password' : 'off'}
+            />
           </Field>
-        )}
-        <Field label={users ? 'Password' : 'Token'}>
-          <Input
-            type="password"
-            mono={!users}
-            autoFocus={!users}
-            value={secret}
-            onChange={e => setSecret(e.target.value)}
-            autoComplete={users ? 'current-password' : 'off'}
-          />
-        </Field>
-        {error && (
-          <p className="text-xs text-danger" role="alert">
-            {error}
-          </p>
-        )}
-      </form>
+          {error && (
+            <p className="text-xs text-danger" role="alert">
+              {error}
+            </p>
+          )}
+        </form>
+      )}
     </Dialog>
   );
 }

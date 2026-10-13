@@ -139,7 +139,7 @@ func (h *ConnectionHandler) DisconnectAll(w http.ResponseWriter, r *http.Request
 }
 
 func (h *ConnectionHandler) ListConnections(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, h.Store.AllStatuses())
+	writeJSON(w, VisibleStatuses(h.Store, r))
 }
 
 func (h *ConnectionHandler) Status(w http.ResponseWriter, r *http.Request) {
@@ -147,7 +147,7 @@ func (h *ConnectionHandler) Status(w http.ResponseWriter, r *http.Request) {
 	if connID != "" {
 		writeJSON(w, h.Store.GetStatus(connID))
 	} else {
-		writeJSON(w, h.Store.AllStatuses())
+		writeJSON(w, VisibleStatuses(h.Store, r))
 	}
 }
 

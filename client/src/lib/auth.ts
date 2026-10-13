@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { serverUrl } from './basePath';
 
-export type AuthMode = 'none' | 'token' | 'users';
+export type AuthMode = 'none' | 'token' | 'users' | 'oidc';
 
 /** A personal API token as listed: never the token itself. */
 export interface ApiToken {
@@ -18,6 +18,10 @@ export interface AuthInfo {
   authenticated: boolean;
   user: string;
   role: Role;
+  /** single sign-on is offered beside, or instead of, a password */
+  oidc?: boolean;
+  /** the connections this account is narrowed to; empty or absent is all of them */
+  connections?: string[] | null;
 }
 
 interface AuthState extends AuthInfo {

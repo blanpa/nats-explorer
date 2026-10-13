@@ -42,6 +42,21 @@ type subjectTreeEvent struct {
 	Removed []string                    `json:"removed"`
 }
 
+func (e messageBatchEvent) ConnScope() string { return e.ConnID }
+func (e statsEvent) ConnScope() string        { return e.ConnID }
+func (e subjectTreeEvent) ConnScope() string  { return e.ConnID }
+
+// ScopeFor narrows the connection list to what a tab may see.
+func (e connectionsEvent) ScopeFor(allow func(string) bool) interface{} {
+	out := connectionsEvent{Type: e.Type, Data: make([]connection.Status, 0, len(e.Data))}
+	for _, st := range e.Data {
+		if allow(st.ID) {
+			out.Data = append(out.Data, st)
+		}
+	}
+	return out
+}
+
 func connectionsOf(statuses []connection.Status) connectionsEvent {
 	return connectionsEvent{Type: "connections", Data: statuses}
 }

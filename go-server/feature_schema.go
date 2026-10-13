@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"nats-explorer/internal/handler"
 	"net/http"
 	"strconv"
 	"time"
@@ -48,7 +49,7 @@ func init() {
 				if id := q.Get("connId"); id != "" {
 					ids = []string{id}
 				} else {
-					for _, st := range d.store.AllStatuses() {
+					for _, st := range handler.VisibleStatuses(d.store, req) {
 						ids = append(ids, st.ID)
 					}
 				}

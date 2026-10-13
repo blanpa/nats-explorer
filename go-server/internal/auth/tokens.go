@@ -37,19 +37,22 @@ const (
 // Token is a personal API token: the hash of it, never the token itself,
 // which is shown once when it is made.
 type Token struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Role    Role   `json:"role"`
-	Created int64  `json:"created"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Role Role   `json:"role"`
+	// Connections narrows what the token sees; empty is every connection.
+	Connections []string `json:"connections,omitempty"`
+	Created     int64    `json:"created"`
 	// LastUsed is unix ms of the last request that carried it.
 	LastUsed int64  `json:"lastUsed,omitempty"`
 	Hash     string `json:"hash,omitempty"`
 }
 
 type storedSession struct {
-	User    string `json:"user"`
-	Role    Role   `json:"role"`
-	Expires int64  `json:"expires"`
+	User        string   `json:"user"`
+	Role        Role     `json:"role"`
+	Connections []string `json:"connections,omitempty"`
+	Expires     int64    `json:"expires"`
 }
 
 // Persist loads the sessions and tokens from the store and writes every
@@ -64,7 +67,7 @@ func (s *Service) Persist(store Store) {
 			for key, ss := range saved {
 				exp := time.UnixMilli(ss.Expires)
 				if exp.After(now) {
-					s.sessions[key] = session{id: Identity{Name: ss.User, Role: ss.Role}, expires: exp}
+					s.sessions[key] = session{id: Identity{Name: ss.User, Role: ss.Role, Connections: ss.Connections}, expires: exp}
 				}
 			}
 		}
@@ -85,7 +88,7 @@ func (s *Service) saveSessions() {
 	}
 	out := make(map[string]storedSession, len(s.sessions))
 	for key, ss := range s.sessions {
-		out[key] = storedSession{User: ss.id.Name, Role: ss.id.Role, Expires: ss.expires.UnixMilli()}
+		out[key] = storedSession{User: ss.id.Name, Role: ss.id.Role, Connections: ss.id.Connections, Expires: ss.expires.UnixMilli()}
 	}
 	data, _ := json.Marshal(out)
 	s.store.Set(sessionsKey, data)
@@ -114,7 +117,7 @@ func hashToken(plain string) string {
 }
 
 // CreateToken makes a token and returns it in the clear, once.
-func (s *Service) CreateToken(name string, role Role) (string, Token, error) {
+func (s *Service) CreateToken(name string, role Role, connections ...string) (string, Token, error) {
 	name = strings.TrimSpace(name)
 	switch {
 	case s.Mode() == "none":
@@ -133,7 +136,7 @@ func (s *Service) CreateToken(name string, role Role) (string, Token, error) {
 	plain := tokenPrefix + hex.EncodeToString(buf)
 	id := make([]byte, 8)
 	rand.Read(id)
-	t := Token{ID: hex.EncodeToString(id), Name: name, Role: role, Created: time.Now().UnixMilli(), Hash: hashToken(plain)}
+	t := Token{ID: hex.EncodeToString(id), Name: name, Role: role, Connections: splitPatterns(strings.Join(connections, ",")), Created: time.Now().UnixMilli(), Hash: hashToken(plain)}
 	s.mu.Lock()
 	s.tokens = append(s.tokens, t)
 	s.saveTokens()
@@ -185,7 +188,7 @@ func (s *Service) lookupToken(plain string) (Identity, bool) {
 				s.tokens[i].LastUsed = now
 				s.saveTokens()
 			}
-			return Identity{Name: "token:" + s.tokens[i].Name, Role: s.tokens[i].Role}, true
+			return Identity{Name: "token:" + s.tokens[i].Name, Role: s.tokens[i].Role, Connections: s.tokens[i].Connections}, true
 		}
 	}
 	return Identity{}, false
@@ -213,8 +216,9 @@ func (s *Service) TokenRoutes(r chi.Router) {
 			return
 		}
 		var body struct {
-			Name string `json:"name"`
-			Role Role   `json:"role"`
+			Name        string   `json:"name"`
+			Role        Role     `json:"role"`
+			Connections []string `json:"connections"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -223,7 +227,13 @@ func (s *Service) TokenRoutes(r chi.Router) {
 		if body.Role == "" {
 			body.Role = RoleViewer
 		}
-		plain, t, err := s.CreateToken(body.Name, body.Role)
+		// A token can see no more than whoever makes it.
+		maker := FromContext(r.Context())
+		conns := body.Connections
+		if maker.Restricted() && len(conns) == 0 {
+			conns = maker.Connections
+		}
+		plain, t, err := s.CreateToken(body.Name, body.Role, conns...)
 		if err != nil {
 			status := http.StatusBadRequest
 			if errors.Is(err, ErrNoAuth) || errors.Is(err, ErrNoStore) {

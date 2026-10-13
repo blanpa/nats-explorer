@@ -5,6 +5,8 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 ## [Unreleased]
 
 ### Added
+- **Single sign-on.** `OIDC_ISSUER` and a client id let an OpenID Connect provider decide who gets in, with the authorization code flow, PKCE and a nonce; a group claim makes an admin or a viewer or keeps someone out.
+- **Rights per connection.** An account in the users file (a fourth field), a personal token or a single sign-on user (a claim) can be narrowed to some connections by name. It sees those and no others, in the API, on the websocket and in the alerts, and may not open a connection under another name or act on all of them at once.
 - **Narrow windows.** Below 768 pixels the list and the detail take turns, with a way back, and headers wrap their buttons instead of losing the name.
 - **Object stores, sealed and thinned.** Objects are ticked and deleted many at once, with what failed named, and a store can be sealed. The KV bulk delete moved to its own path, so a key named `delete` is a key again.
 - **Cluster operations.** A stream's or a consumer's leader steps down, a peer that is gone is removed from a stream's group, and through the system account a server reloads its configuration and the meta leader moves; each asks first and passes the server's answer on.

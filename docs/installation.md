@@ -83,6 +83,7 @@ cd nats-explorer && ./nats-explorer
 | `PORT` | `3002` | HTTP port of the web UI and API |
 | `PUBLIC_PATH` | auto | UI files; defaults to `public/` next to the binary or `client/dist` in a checkout |
 | `AUTH_TOKEN` | unset | When set, every API and websocket call needs this token. The UI asks for it once; the backend answers with a session cookie that lasts a day |
+| `OIDC_ISSUER` | unset | Single sign-on: the issuer URL of an OpenID Connect provider (Keycloak, Entra ID, Okta, Google, Authentik). Needs `OIDC_CLIENT_ID` and, for a confidential client, `OIDC_CLIENT_SECRET`; the callback is `<base>/api/oidc/callback`, or `OIDC_REDIRECT_URL`. `OIDC_ROLE_CLAIM` (default `groups`) is read for `OIDC_ADMIN_VALUES`, which make an admin, and `OIDC_ALLOWED_VALUES`, which, when set, are required to get in at all; `OIDC_CONNECTIONS_CLAIM` names a claim that narrows the connections a user sees |
 | `AUTH_USERS` | unset | Path of a users file (`name:role:bcrypt-hash` per line, roles `admin` and `viewer`). The UI asks for a login; viewers see everything but cannot publish or change anything. `nats-explorer hash-password` prints a hash |
 | `STORAGE_DIR` | unset | Keep connections, templates and preferences in this directory instead of the browser (single-user servers). Same layout as the desktop app. Saved connections marked "Connect when the server starts" are opened by the backend at start |
 | `NO_KEYRING` | unset | With `STORAGE_DIR`: always use `secrets.json` instead of the system keyring |
@@ -108,7 +109,7 @@ printf 'alice:admin:%s\nbob:viewer:%s\n' "$ADMIN_HASH" "$VIEWER_HASH" > users.tx
 AUTH_USERS=users.txt ./nats-explorer
 ```
 
-Admins may publish, create, edit and delete; viewers get a read-only explorer (writes answer `403`). Scripts and Prometheus can authenticate with HTTP basic auth, with `AUTH_TOKEN` as a bearer token, or with a personal token made in the settings (`Authorization: Bearer ne_…`), one per script with its own role, revoked on its own. Browsers use the session cookie set by `POST /api/login`. With `STORAGE_DIR` the sessions and the personal tokens survive a restart; without it they live in memory.
+Admins may publish, create, edit and delete; viewers get a read-only explorer (writes answer `403`). A fourth field narrows an account to some connections, by name or id with `*` and `?`: `lab:admin:$2a$…:lab-*,test` sees the connections whose name starts with `lab-` and the one called `test`, in the API, on the websocket and in the alerts alike, and may not open a connection under another name. A personal token made by such an account sees no more than it does. Scripts and Prometheus can authenticate with HTTP basic auth, with `AUTH_TOKEN` as a bearer token, or with a personal token made in the settings (`Authorization: Bearer ne_…`), one per script with its own role, revoked on its own. Browsers use the session cookie set by `POST /api/login`. With `STORAGE_DIR` the sessions and the personal tokens survive a restart; without it they live in memory.
 
 ### Metrics
 

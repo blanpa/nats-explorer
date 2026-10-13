@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io/fs"
 	"log"
@@ -90,6 +91,8 @@ type serverConfig struct {
 	historyQueueBytes int64
 	// historyMaxBytes caps the database; 0 is no cap.
 	historyMaxBytes int64
+	// oidc switches single sign-on on; nil is off.
+	oidc *auth.OIDCConfig
 	// open the saved connections flagged for it when the server starts
 	autoConnect bool
 	// basePath mounts everything under a prefix ("/nats"), for a reverse
@@ -117,6 +120,16 @@ func (s *appServer) Close() {
 
 func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 	authSvc := auth.New(cfg.authToken, cfg.users)
+	if cfg.oidc != nil {
+		oc := *cfg.oidc
+		oc.BasePath = cfg.basePath
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		if err := authSvc.EnableOIDC(ctx, oc); err != nil {
+			log.Fatalf("%v", err)
+		}
+		cancel()
+		log.Printf("Single sign-on through %s", oc.Issuer)
+	}
 	if cfg.settings != nil {
 		// Sessions and personal tokens outlive a restart where there is a
 		// place to keep them.
@@ -345,6 +358,14 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 				return
 			}
 		}
+		if c.Allow != nil {
+			var target struct {
+				ConnID string `json:"connId"`
+			}
+			if json.Unmarshal(data, &target) == nil && target.ConnID != "" && !c.Allow(target.ConnID) {
+				return
+			}
+		}
 		liveHandler.HandleCommand(c, data, func(ev interface{}) { hub.SendToClient(c, ev) })
 	}
 	hub.OnDisconnect = func(c *ws.Client) {
@@ -371,6 +392,8 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 	r.Get("/api/auth", authSvc.Info)
 	r.Post("/api/login", authSvc.LoginHandler)
 	r.Post("/api/logout", authSvc.LogoutHandler)
+	r.Get("/api/oidc/login", authSvc.OIDCLogin)
+	r.Get("/api/oidc/callback", authSvc.OIDCCallback)
 	// Prometheus exposition of the explorer's own counters (protected like the API).
 	r.With(authSvc.Require).Get("/metrics", func(w http.ResponseWriter, req *http.Request) {
 		subMu.RLock()
@@ -409,7 +432,13 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 		}
 
 		// ?enc=msgpack switches the tab to MessagePack frames.
-		client := hub.AddClient(conn, req.URL.Query().Get("enc") == "msgpack")
+		// An account narrowed to some connections sees only those, on the
+		// socket as in the API.
+		var allow func(string) bool
+		if id := auth.FromContext(req.Context()); id.Restricted() {
+			allow = func(connID string) bool { return id.AllowsConn(connID, store.GetStatus(connID).Name) }
+		}
+		client := hub.AddClient(conn, req.URL.Query().Get("enc") == "msgpack", allow)
 
 		// The tree follows once the tab sends its view.
 		hub.SendToClient(client, connectionsOf(store.AllStatuses()))
@@ -426,6 +455,7 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 		// write must still reach the audit log. chi wants every middleware
 		// before the first route.
 		r.Use(authSvc.Require)
+		r.Use(restrictConnections(store, cfg.basePath))
 		for _, f := range features {
 			if f.apiMiddleware != nil {
 				r.Use(f.apiMiddleware(d))

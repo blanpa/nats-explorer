@@ -125,6 +125,28 @@ func main() {
 		}
 		cfg.historyQueueBytes = n
 	}
+	// OIDC_ISSUER switches single sign-on on: the company's identity
+	// provider decides who may in, a claim decides the role.
+	if issuer := os.Getenv("OIDC_ISSUER"); issuer != "" {
+		split := func(v string) []string {
+			var out []string
+			for _, p := range strings.Split(v, ",") {
+				if p = strings.TrimSpace(p); p != "" {
+					out = append(out, p)
+				}
+			}
+			return out
+		}
+		cfg.oidc = &auth.OIDCConfig{
+			Issuer: issuer, ClientID: os.Getenv("OIDC_CLIENT_ID"), ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
+			RedirectURL: os.Getenv("OIDC_REDIRECT_URL"), RoleClaim: os.Getenv("OIDC_ROLE_CLAIM"),
+			AdminValues: split(os.Getenv("OIDC_ADMIN_VALUES")), AllowedValues: split(os.Getenv("OIDC_ALLOWED_VALUES")),
+			ConnectionsClaim: os.Getenv("OIDC_CONNECTIONS_CLAIM"),
+		}
+		if cfg.oidc.ClientID == "" {
+			log.Fatalf("OIDC_ISSUER is set, OIDC_CLIENT_ID is not")
+		}
+	}
 	// HISTORY_MAX_MB caps the database: once the rows take more, the oldest
 	// messages go before their retention is up. The one answer to a
 	// retention of forever that does not end with a full disk.

@@ -37,7 +37,7 @@ function UserBadge() {
   return (
     <div className="flex items-center gap-1" title={role === 'admin' ? 'Admin: may publish and change things' : 'Viewer: read-only'}>
       <Badge tone={role === 'admin' ? 'accent' : 'neutral'}>
-        <ShieldCheck size={11} /> {mode === 'users' ? `${user} · ${role}` : 'token'}
+        <ShieldCheck size={11} /> {mode === 'users' || mode === 'oidc' || user ? `${user} · ${role}` : 'token'}
       </Badge>
       <IconButton
         label="Sign out"

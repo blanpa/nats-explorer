@@ -19,6 +19,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -38,17 +39,58 @@ const (
 type Identity struct {
 	Name string `json:"user"`
 	Role Role   `json:"role"`
+	// Connections narrows what the caller sees to the connections whose id
+	// or name matches one of these patterns (`*` and `?` as in a file
+	// name). Empty is every connection.
+	Connections []string `json:"connections,omitempty"`
 }
+
+// AllowsConn says whether the identity may see a connection, by its id or
+// its name.
+func (id Identity) AllowsConn(connID, name string) bool {
+	if len(id.Connections) == 0 {
+		return true
+	}
+	for _, p := range id.Connections {
+		if ok, _ := path.Match(p, connID); ok {
+			return true
+		}
+		if name != "" {
+			if ok, _ := path.Match(p, name); ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Restricted says whether the identity sees less than every connection.
+func (id Identity) Restricted() bool { return len(id.Connections) > 0 }
 
 // User is one line of the users file.
 type User struct {
 	Name string
 	Role Role
 	Hash []byte
+	// Connections, from an optional fourth field, narrows what the user sees.
+	Connections []string
 }
 
-// ParseUsers reads "name:role:bcrypt-hash" lines. Blank lines and lines
-// starting with # are skipped.
+// splitPatterns reads a comma-separated list of connection patterns.
+func splitPatterns(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// ParseUsers reads "name:role:bcrypt-hash[:connections]" lines, the last
+// field a comma-separated list of connection names or ids, `*` allowed.
+// Blank lines and lines starting with # are skipped. A bcrypt hash holds
+// no colon, so the fourth field is unambiguous.
 func ParseUsers(r io.Reader) ([]User, error) {
 	var users []User
 	seen := map[string]bool{}
@@ -58,9 +100,18 @@ func ParseUsers(r io.Reader) ([]User, error) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		parts := strings.SplitN(line, ":", 3)
-		if len(parts) != 3 || parts[0] == "" {
-			return nil, fmt.Errorf("line %d: want name:role:bcrypt-hash", n)
+		parts := strings.SplitN(line, ":", 4)
+		if len(parts) < 3 || parts[0] == "" {
+			return nil, fmt.Errorf("line %d: want name:role:bcrypt-hash[:connections]", n)
+		}
+		var conns []string
+		if len(parts) == 4 {
+			conns = splitPatterns(parts[3])
+			for _, p := range conns {
+				if _, err := path.Match(p, ""); err != nil {
+					return nil, fmt.Errorf("line %d: connection pattern %q: %v", n, p, err)
+				}
+			}
 		}
 		role := Role(strings.ToLower(strings.TrimSpace(parts[1])))
 		if role != RoleAdmin && role != RoleViewer {
@@ -74,7 +125,7 @@ func ParseUsers(r io.Reader) ([]User, error) {
 			return nil, fmt.Errorf("line %d: user %q listed twice", n, parts[0])
 		}
 		seen[parts[0]] = true
-		users = append(users, User{Name: parts[0], Role: role, Hash: []byte(hash)})
+		users = append(users, User{Name: parts[0], Role: role, Hash: []byte(hash), Connections: conns})
 	}
 	if err := sc.Err(); err != nil {
 		return nil, err
@@ -124,6 +175,8 @@ type Service struct {
 	// nil keeps them for this run only.
 	store  Store
 	tokens []Token
+	// oidc is the identity provider, when single sign-on is on.
+	oidc *oidcProvider
 }
 
 // New builds a service. Either argument may be empty.
@@ -136,11 +189,14 @@ func New(token string, users []User) *Service {
 	return s
 }
 
-// Mode reports "none", "token" or "users".
+// Mode reports "none", "token", "users" or "oidc". With single sign-on and
+// a users file both, the login offers both and the mode is "users".
 func (s *Service) Mode() string {
 	switch {
 	case len(s.users) > 0:
 		return "users"
+	case s.oidc != nil:
+		return "oidc"
 	case s.token != "":
 		return "token"
 	default:
@@ -158,7 +214,7 @@ func (s *Service) Login(name, password string) (Identity, bool) {
 	if err := bcrypt.CompareHashAndPassword(hash, []byte(password)); err != nil || !ok {
 		return Identity{}, false
 	}
-	return Identity{Name: u.Name, Role: u.Role}, true
+	return Identity{Name: u.Name, Role: u.Role, Connections: u.Connections}, true
 }
 
 // LoginToken checks the shared token; it always grants admin.
@@ -290,6 +346,8 @@ func (s *Service) Info(w http.ResponseWriter, r *http.Request) {
 		"authenticated": ok,
 		"user":          id.Name,
 		"role":          id.Role,
+		"connections":   id.Connections,
+		"oidc":          s.oidc != nil,
 		// kept for older clients: true when a login is needed
 		"required": !ok,
 	})

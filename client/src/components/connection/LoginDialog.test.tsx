@@ -52,4 +52,18 @@ describe('LoginDialog', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('wrong credentials');
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
+
+  it('offers single sign-on, alone when it is the only way in', () => {
+    useAuth.setState({ mode: 'oidc', oidc: true, required: true, authenticated: false });
+    render(<LoginDialog />);
+    expect(screen.getByRole('button', { name: 'Sign in with single sign-on' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Password')).toBeNull();
+  });
+
+  it('offers single sign-on beside a password', () => {
+    useAuth.setState({ mode: 'users', oidc: true, required: true, authenticated: false });
+    render(<LoginDialog />);
+    expect(screen.getByRole('button', { name: 'Sign in with single sign-on' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Password')).toBeInTheDocument();
+  });
 });
