@@ -18,6 +18,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 
+	"nats-explorer/internal/filter"
 	"nats-explorer/internal/message"
 )
 
@@ -37,6 +38,155 @@ type runBody struct {
 	Count       int    `json:"count"`
 	Concurrency int    `json:"concurrency"`
 	IntervalMs  int    `json:"intervalMs"`
+}
+
+// Expect is what a run, or a single request, has to live up to: an
+// expression every reply must satisfy, and a latency the replies must stay
+// under. With it a saved template is a test, and a run a verdict.
+type Expect struct {
+	// Expr is CEL over the reply: payload, subject, headers, size.
+	Expr string `json:"expr,omitempty"`
+	// MaxLatencyMs bounds the p95 of a run, or the one reply of a request.
+	MaxLatencyMs float64 `json:"maxLatencyMs,omitempty"`
+}
+
+// Verdict is the answer: how many were checked, how many failed, and why,
+// in a few words each.
+type Verdict struct {
+	Passed  bool     `json:"passed"`
+	Checked int      `json:"checked"`
+	Failed  int      `json:"failed"`
+	Reasons []string `json:"reasons,omitempty"`
+}
+
+const verdictReasons = 5
+
+// RunSpec is a repeated send as the HTTP body or a collection file
+// describes it, with the limits already applied by Normalize.
+type RunSpec struct {
+	Mode        string
+	Subject     string
+	Payload     string
+	PayloadType string
+	Headers     map[string][]string
+	Timeout     time.Duration
+	Count       int
+	Concurrency int
+	Interval    time.Duration
+	Expect      *Expect
+}
+
+// Normalize applies the limits: a count of at least one and at most the
+// maximum, a concurrency no larger than the count, a timeout and an
+// interval within bounds. It answers with what a bad request would say.
+func (spec *RunSpec) Normalize() error {
+	if spec.Subject == "" {
+		return errors.New("subject required")
+	}
+	if spec.Mode != "request" {
+		spec.Mode = "publish"
+	}
+	if spec.Count < 1 {
+		spec.Count = 1
+	}
+	if spec.Count > runMaxCount {
+		return fmt.Errorf("count must be at most %d", runMaxCount)
+	}
+	if spec.Concurrency < 1 {
+		spec.Concurrency = 1
+	}
+	if spec.Concurrency > runMaxConcurrency {
+		spec.Concurrency = runMaxConcurrency
+	}
+	if spec.Concurrency > spec.Count {
+		spec.Concurrency = spec.Count
+	}
+	if spec.Timeout <= 0 {
+		spec.Timeout = 5 * time.Second
+	}
+	if spec.Timeout > 60*time.Second {
+		spec.Timeout = 60 * time.Second
+	}
+	if spec.Interval < 0 {
+		spec.Interval = 0
+	}
+	if spec.Interval > 10*time.Second {
+		spec.Interval = 10 * time.Second
+	}
+	// An encoded payload is the same bytes for every message of the run, so
+	// it is decoded once, before anything is sent: a run that cannot send is
+	// a bad request, not a thousand failures.
+	if spec.PayloadType == "binary" {
+		if _, err := payloadBytes(spec.Payload, spec.PayloadType, 1, time.Now(), mrand.New(mrand.NewSource(1))); err != nil {
+			return err
+		}
+	}
+	if _, err := compileExpect(spec.Expect); err != nil {
+		return err
+	}
+	return nil
+}
+
+// compileExpect readies the expression; an empty one checks nothing.
+func compileExpect(e *Expect) (*filter.Program, error) {
+	if e == nil || strings.TrimSpace(e.Expr) == "" {
+		return nil, nil
+	}
+	prog, err := filter.Compile(e.Expr)
+	if err != nil {
+		return nil, fmt.Errorf("expect: %w", err)
+	}
+	return prog, nil
+}
+
+// replyMatches evaluates the expectation against one reply.
+func replyMatches(prog *filter.Program, reply *nats.Msg, now time.Time) bool {
+	if prog == nil {
+		return true
+	}
+	rec := message.NewRecord(reply, 0, now.UnixMilli())
+	ok, err := prog.Eval(filter.VarsOf(rec))
+	return err == nil && ok
+}
+
+// judge fills the verdict from what was counted: every error, every reply
+// the expression refused, a p95 over the bound, a run cut short.
+func (res *RunResult) judge(spec RunSpec, mismatched int, p95 float64) {
+	v := &Verdict{Checked: res.Sent}
+	addReason := func(r string) {
+		if len(v.Reasons) < verdictReasons {
+			v.Reasons = append(v.Reasons, r)
+		}
+	}
+	if res.Errors > 0 {
+		v.Failed += res.Errors
+		labels := make([]string, 0, len(res.ErrorCounts))
+		for label := range res.ErrorCounts {
+			labels = append(labels, label)
+		}
+		sort.Strings(labels)
+		for _, label := range labels {
+			addReason(fmt.Sprintf("%d× %s", res.ErrorCounts[label], label))
+		}
+	}
+	if mismatched > 0 {
+		v.Failed += mismatched
+		addReason(fmt.Sprintf("%d of %d replies do not satisfy %s", mismatched, res.OK, spec.Expect.Expr))
+	}
+	if spec.Expect != nil && spec.Expect.MaxLatencyMs > 0 && res.Mode == "request" && res.OK > 0 && p95 > spec.Expect.MaxLatencyMs {
+		v.Failed++
+		addReason(fmt.Sprintf("p95 %.1f ms over the %.0f ms allowed", p95, spec.Expect.MaxLatencyMs))
+	}
+	if spec.Expect != nil && strings.TrimSpace(spec.Expect.Expr) != "" && res.Mode != "request" {
+		v.Failed++
+		addReason("an expression judges replies, and a publish gets none")
+	}
+	if res.Stopped {
+		v.Failed++
+		addReason("the run was stopped before it was done")
+	}
+	v.Passed = v.Failed == 0
+	res.Verdict = v
 }
 
 type runReply struct {
@@ -95,7 +245,8 @@ func histogram(sorted []float64) []latencyBucket {
 	return out
 }
 
-type runResult struct {
+// RunResult is what a run reports instead of every reply.
+type RunResult struct {
 	Mode         string         `json:"mode"`
 	Sent         int            `json:"sent"`
 	OK           int            `json:"ok"`
@@ -107,6 +258,8 @@ type runResult struct {
 	ErrorSamples []runError     `json:"errorSamples"`
 	ErrorCounts  map[string]int `json:"errorCounts"`
 	Stopped      bool           `json:"stopped"`
+	// Verdict is how the run did against what it was asked to live up to.
+	Verdict *Verdict `json:"verdict,omitempty"`
 }
 
 // errLabel names a failure the way a single request does. A deadline on
@@ -184,76 +337,18 @@ func percentile(sorted []float64, p float64) float64 {
 	return sorted[idx]
 }
 
-// Run repeats a publish or request count times with the given concurrency
-// and returns a summary instead of every reply.
-func (h *PublishHandler) Run(w http.ResponseWriter, r *http.Request) {
-	var body runBody
-	if err := decodeBody(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if body.ConnID == "" {
-		body.ConnID = connIDFromRequest(r)
-	}
-	if body.ConnID == "" || body.Subject == "" {
-		writeError(w, http.StatusBadRequest, "connId and subject required")
-		return
-	}
-	if body.Mode != "request" {
-		body.Mode = "publish"
-	}
-	if body.Count < 1 {
-		body.Count = 1
-	}
-	if body.Count > runMaxCount {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("count must be at most %d", runMaxCount))
-		return
-	}
-	if body.Concurrency < 1 {
-		body.Concurrency = 1
-	}
-	if body.Concurrency > runMaxConcurrency {
-		body.Concurrency = runMaxConcurrency
-	}
-	if body.Concurrency > body.Count {
-		body.Concurrency = body.Count
-	}
-	timeout := time.Duration(body.Timeout) * time.Millisecond
-	if timeout <= 0 {
-		timeout = 5 * time.Second
-	}
-	if timeout > 60*time.Second {
-		timeout = 60 * time.Second
-	}
-	// An encoded payload is the same bytes for every message of the run, so
-	// it is decoded once, before anything is sent: a run that cannot send is
-	// a bad request, not a thousand failures.
-	if body.PayloadType == "binary" {
-		if _, err := payloadBytes(body.Payload, body.PayloadType, 1, time.Now(), mrand.New(mrand.NewSource(1))); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-	interval := time.Duration(body.IntervalMs) * time.Millisecond
-	if interval < 0 {
-		interval = 0
-	}
-	if interval > 10*time.Second {
-		interval = 10 * time.Second
-	}
-
-	nc, err := h.Store.GetNC(body.ConnID)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), runMaxDuration)
+// Execute runs the spec against a connection: the workers, the timing, the
+// summary and the verdict. The HTTP handler and the command line both come
+// here, so a collection run in CI measures exactly what the module shows.
+func Execute(ctx context.Context, nc *nats.Conn, spec RunSpec) RunResult {
+	prog, _ := compileExpect(spec.Expect)
+	ctx, cancel := context.WithTimeout(ctx, runMaxDuration)
 	defer cancel()
 
-	res := runResult{Mode: body.Mode, Replies: []runReply{}, ErrorSamples: []runError{}, ErrorCounts: map[string]int{}}
+	res := RunResult{Mode: spec.Mode, Replies: []runReply{}, ErrorSamples: []runError{}, ErrorCounts: map[string]int{}}
 	var mu sync.Mutex
 	var latencies []float64
+	mismatched := 0
 	jobs := make(chan int)
 	var wg sync.WaitGroup
 	started := time.Now()
@@ -263,20 +358,20 @@ func (h *PublishHandler) Run(w http.ResponseWriter, r *http.Request) {
 		rnd := mrand.New(mrand.NewSource(seed))
 		first := true
 		for i := range jobs {
-			if !first && interval > 0 {
+			if !first && spec.Interval > 0 {
 				select {
-				case <-time.After(interval):
+				case <-time.After(spec.Interval):
 				case <-ctx.Done():
 					return
 				}
 			}
 			first = false
 			now := time.Now()
-			data, _ := payloadBytes(body.Payload, body.PayloadType, i, now, rnd)
-			msg := &nats.Msg{Subject: expandTemplate(body.Subject, i, now, rnd), Data: data}
-			if len(body.Headers) > 0 {
+			data, _ := payloadBytes(spec.Payload, spec.PayloadType, i, now, rnd)
+			msg := &nats.Msg{Subject: expandTemplate(spec.Subject, i, now, rnd), Data: data}
+			if len(spec.Headers) > 0 {
 				msg.Header = make(nats.Header)
-				for k, vals := range body.Headers {
+				for k, vals := range spec.Headers {
 					for _, v := range vals {
 						msg.Header.Add(k, expandTemplate(v, i, now, rnd))
 					}
@@ -286,8 +381,8 @@ func (h *PublishHandler) Run(w http.ResponseWriter, r *http.Request) {
 			var reply *nats.Msg
 			var err error
 			t0 := time.Now()
-			if body.Mode == "request" {
-				reply, err = nc.RequestMsgWithContext(withTimeout(ctx, timeout), msg)
+			if spec.Mode == "request" {
+				reply, err = nc.RequestMsgWithContext(withTimeout(ctx, spec.Timeout), msg)
 			} else {
 				err = nc.PublishMsg(msg)
 			}
@@ -305,6 +400,9 @@ func (h *PublishHandler) Run(w http.ResponseWriter, r *http.Request) {
 				res.OK++
 				if reply != nil {
 					latencies = append(latencies, elapsed)
+					if !replyMatches(prog, reply, now) {
+						mismatched++
+					}
 					if len(res.Replies) < runSampleReplies {
 						payload, payloadType := message.EncodePayload(reply.Data)
 						res.Replies = append(res.Replies, runReply{I: i, Subject: reply.Subject, Payload: payload, PayloadType: payloadType, Size: len(reply.Data), DurationMs: elapsed})
@@ -315,12 +413,12 @@ func (h *PublishHandler) Run(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	for c := 0; c < body.Concurrency; c++ {
+	for c := 0; c < spec.Concurrency; c++ {
 		wg.Add(1)
 		go worker(started.UnixNano() + int64(c))
 	}
 feed:
-	for i := 1; i <= body.Count; i++ {
+	for i := 1; i <= spec.Count; i++ {
 		select {
 		case jobs <- i:
 		case <-ctx.Done():
@@ -330,33 +428,62 @@ feed:
 	}
 	close(jobs)
 	wg.Wait()
-
-	if body.Mode == "publish" {
-		if err := nc.FlushTimeout(5 * time.Second); err != nil {
-			res.ErrorCounts["flush: "+err.Error()]++
-		}
+	if spec.Mode == "publish" {
+		nc.FlushTimeout(2 * time.Second)
 	}
+
 	res.DurationMs = float64(time.Since(started).Microseconds()) / 1000.0
 	if res.DurationMs > 0 {
 		res.PerSecond = float64(res.Sent) / (res.DurationMs / 1000.0)
 	}
+	var p95 float64
 	if len(latencies) > 0 {
 		sort.Float64s(latencies)
-		sum := 0.0
+		var sum float64
 		for _, l := range latencies {
 			sum += l
 		}
+		p95 = percentile(latencies, 0.95)
 		res.Latency = &latencyStats{
-			Min:       latencies[0],
-			Avg:       sum / float64(len(latencies)),
-			P50:       percentile(latencies, 0.5),
-			P95:       percentile(latencies, 0.95),
-			P99:       percentile(latencies, 0.99),
-			Max:       latencies[len(latencies)-1],
-			Histogram: histogram(latencies),
+			Min: latencies[0], Avg: sum / float64(len(latencies)),
+			P50: percentile(latencies, 0.50), P95: p95, P99: percentile(latencies, 0.99),
+			Max: latencies[len(latencies)-1], Histogram: histogram(latencies),
 		}
 	}
-	writeJSON(w, res)
+	res.judge(spec, mismatched, p95)
+	return res
+}
+
+// Run repeats a publish or request count times with the given concurrency
+// and returns a summary instead of every reply.
+func (h *PublishHandler) Run(w http.ResponseWriter, r *http.Request) {
+	var body runBody
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if body.ConnID == "" {
+		body.ConnID = connIDFromRequest(r)
+	}
+	if body.ConnID == "" {
+		writeError(w, http.StatusBadRequest, "connId and subject required")
+		return
+	}
+	spec := RunSpec{
+		Mode: body.Mode, Subject: body.Subject, Payload: body.Payload, PayloadType: body.PayloadType, Headers: body.Headers,
+		Timeout: time.Duration(body.Timeout) * time.Millisecond, Count: body.Count, Concurrency: body.Concurrency,
+		Interval: time.Duration(body.IntervalMs) * time.Millisecond, Expect: body.Expect,
+	}
+	if err := spec.Normalize(); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	nc, err := h.Store.GetNC(body.ConnID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, Execute(r.Context(), nc, spec))
 }
 
 // withTimeout derives a per-request context; the returned cancel is dropped

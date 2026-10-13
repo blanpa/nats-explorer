@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	mrand "math/rand"
 	"net/http"
 	"time"
@@ -25,6 +26,8 @@ type publishBody struct {
 	// gets sent: hex, base64 and protobuf are written in the browser and
 	// arrive here as bytes, because JSON has no way to carry them otherwise.
 	PayloadType string `json:"payloadType,omitempty"`
+	// Expect, when given, judges the reply; see run.go.
+	Expect *Expect `json:"expect,omitempty"`
 }
 
 func (h *PublishHandler) parse(w http.ResponseWriter, r *http.Request) (*nats.Conn, *nats.Msg, publishBody, bool) {
@@ -119,16 +122,35 @@ func (h *PublishHandler) Request(w http.ResponseWriter, r *http.Request) {
 	}
 
 	payload, payloadType := message.EncodePayload(resp.Data)
+	elapsed := float64(time.Since(started).Microseconds()) / 1000.0
 	out := map[string]interface{}{
 		"subject":     resp.Subject,
 		"payload":     payload,
 		"payloadType": payloadType,
 		"reply":       resp.Reply,
 		"size":        len(resp.Data),
-		"durationMs":  float64(time.Since(started).Microseconds()) / 1000.0,
+		"durationMs":  elapsed,
 	}
 	if len(resp.Header) > 0 {
 		out["headers"] = resp.Header
+	}
+	if body.Expect != nil {
+		prog, err := compileExpect(body.Expect)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		v := &Verdict{Checked: 1}
+		if !replyMatches(prog, resp, started) {
+			v.Failed++
+			v.Reasons = append(v.Reasons, "the reply does not satisfy "+body.Expect.Expr)
+		}
+		if body.Expect.MaxLatencyMs > 0 && elapsed > body.Expect.MaxLatencyMs {
+			v.Failed++
+			v.Reasons = append(v.Reasons, fmt.Sprintf("%.1f ms over the %.0f ms allowed", elapsed, body.Expect.MaxLatencyMs))
+		}
+		v.Passed = v.Failed == 0
+		out["verdict"] = v
 	}
 	writeJSON(w, out)
 }

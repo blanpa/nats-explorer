@@ -29,6 +29,10 @@ func main() {
 		hashPassword(os.Args[2:])
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "run" {
+		runCollection(os.Args[2:])
+		return
+	}
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "3002"

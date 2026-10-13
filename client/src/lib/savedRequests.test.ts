@@ -72,3 +72,21 @@ describe('request drafts', () => {
     expect(emptyDraft('a.b').subject).toBe('a.b');
   });
 });
+
+describe('expectations', () => {
+  it('travel through the draft and the file, and vanish when they say nothing', () => {
+    const d = { ...emptyDraft('svc.ok'), mode: 'request' as const, expectExpr: ' payload.status == "ok" ', expectMaxLatencyMs: 250 };
+    const t = savedFromDraft(d, { id: 'x', name: 'ok' });
+    expect(t.expect).toEqual({ expr: 'payload.status == "ok"', maxLatencyMs: 250 });
+    expect(draftFromSaved(t)).toMatchObject({ expectExpr: 'payload.status == "ok"', expectMaxLatencyMs: 250 });
+    expect(savedFromDraft(emptyDraft('a'), { id: 'y', name: '' }).expect).toBeUndefined();
+    const parsed = parseCollection(
+      JSON.stringify([
+        { subject: 'a', mode: 'request', expect: { expr: '', maxLatencyMs: -5 } },
+        { subject: 'b', expect: { maxLatencyMs: 10 } },
+      ]),
+    );
+    expect(parsed[0].expect).toBeUndefined();
+    expect(parsed[1].expect).toEqual({ maxLatencyMs: 10 });
+  });
+});

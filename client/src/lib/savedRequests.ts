@@ -1,3 +1,4 @@
+import type { Expectation } from 'shared';
 import { uuid } from './utils';
 import { persist } from './storage';
 import { PAYLOAD_FORMATS, type PayloadFormat } from './payloadFormat';
@@ -23,7 +24,19 @@ export interface SavedRequest {
   count?: number;
   concurrency?: number;
   intervalMs?: number;
+  /** what the reply, or the run, has to live up to; with it the template is a test */
+  expect?: Expectation;
   updatedAt: number;
+}
+
+/** The expectation as a file or a form holds it, or nothing when it says nothing. */
+export function cleanExpectation(raw: unknown): Expectation | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const out: Expectation = {};
+  if (typeof r.expr === 'string' && r.expr.trim()) out.expr = r.expr.trim();
+  if (typeof r.maxLatencyMs === 'number' && Number.isFinite(r.maxLatencyMs) && r.maxLatencyMs > 0) out.maxLatencyMs = r.maxLatencyMs;
+  return out.expr || out.maxLatencyMs ? out : undefined;
 }
 
 const isFormat = (v: unknown): v is PayloadFormat => PAYLOAD_FORMATS.some(f => f.id === v);
@@ -97,6 +110,7 @@ export function parseCollection(text: string): SavedRequest[] {
       count: num(r.count),
       concurrency: num(r.concurrency),
       intervalMs: num(r.intervalMs),
+      expect: cleanExpectation(r.expect),
       updatedAt: num(r.updatedAt) ?? Date.now(),
     });
   }
@@ -114,10 +128,31 @@ export interface RequestDraft {
   count: number;
   concurrency: number;
   intervalMs: number;
+  /** CEL over the reply; empty checks nothing */
+  expectExpr: string;
+  /** the p95 of a run or the one reply must stay under this; 0 is no bound */
+  expectMaxLatencyMs: number;
 }
 
 export function emptyDraft(subject = ''): RequestDraft {
-  return { mode: 'publish', subject, payload: '', format: 'json', headers: [], timeout: 5000, count: 1, concurrency: 1, intervalMs: 0 };
+  return {
+    mode: 'publish',
+    subject,
+    payload: '',
+    format: 'json',
+    headers: [],
+    timeout: 5000,
+    count: 1,
+    concurrency: 1,
+    intervalMs: 0,
+    expectExpr: '',
+    expectMaxLatencyMs: 0,
+  };
+}
+
+/** The draft's expectation as the API takes it, or nothing. */
+export function expectationOf(d: Pick<RequestDraft, 'expectExpr' | 'expectMaxLatencyMs'>): Expectation | undefined {
+  return cleanExpectation({ expr: d.expectExpr, maxLatencyMs: d.expectMaxLatencyMs });
 }
 
 export function draftFromSaved(t: SavedRequest): RequestDraft {
@@ -131,6 +166,8 @@ export function draftFromSaved(t: SavedRequest): RequestDraft {
     count: t.count ?? 1,
     concurrency: t.concurrency ?? 1,
     intervalMs: t.intervalMs ?? 0,
+    expectExpr: t.expect?.expr ?? '',
+    expectMaxLatencyMs: t.expect?.maxLatencyMs ?? 0,
   };
 }
 
@@ -151,6 +188,7 @@ export function savedFromDraft(d: RequestDraft, base: Pick<SavedRequest, 'id' | 
     count: repeated ? d.count : undefined,
     concurrency: repeated ? d.concurrency : undefined,
     intervalMs: repeated && d.intervalMs > 0 ? d.intervalMs : undefined,
+    expect: expectationOf(d),
     updatedAt: Date.now(),
   };
 }

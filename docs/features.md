@@ -273,6 +273,15 @@ A stream that mirrors or sources from another says so, with the lag and the time
 
 A run reports its latency as minimum, average, p50, p95, p99 and maximum, plus a histogram of where the replies landed. The shape matters: a summary hides a run where most replies are fast and a few sit on the timeout.
 
+**A template can be a test.** An expectation on it -- a CEL expression every reply must satisfy, `payload.status == "ok"`, and a latency the p95 must stay under -- turns a run, or a single request, into a verdict: passed, or how many failed and why, every error and every refused reply counted. The same collection, exported as JSON, runs from a terminal:
+
+```bash
+nats-explorer run --server nats://localhost:4222 --creds ops.creds collection.json
+nats-explorer run --only smoke --json results.json collection.json
+```
+
+Every template is sent the way the module sends it, with the same executor and the same verdict; `PASS` or `FAIL` per line with the counts and the reasons, and an exit code of 1 as soon as one fails, which is what a CI step needs. `NATS_URL`, `NATS_CREDS`, `NATS_USER`, `NATS_PASSWORD`, `NATS_TOKEN` and `NATS_NKEY` stand in for the flags. A protobuf payload is encoded with the browser's decoder rules and is the one kind the terminal cannot send.
+
 ## Monitoring
 
 <img src="{{ '/screenshots/monitoring-dark.png' | relative_url }}" alt="The monitoring dashboard with the throughput history" loading="lazy">

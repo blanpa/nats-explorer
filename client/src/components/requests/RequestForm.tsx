@@ -1,9 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Braces, Plus, Send, Trash2 } from 'lucide-react';
-import type { RequestReply, RunResult } from 'shared';
+import type { RequestReply, RunResult, Verdict } from 'shared';
 import { api, errorMessage } from '../../lib/api';
 import { schemasApi } from '../../lib/api.schemas';
-import type { RequestDraft } from '../../lib/savedRequests';
+import { expectationOf, type RequestDraft } from '../../lib/savedRequests';
 import { useStore } from '../../store';
 import { cn, formatDurationMs, formatNumber, previewPayload, tryParseJson } from '../../lib/utils';
 import { isBinaryFormat, PAYLOAD_FORMATS, payloadProblem, prettyPayload, toWire, wireLength } from '../../lib/payloadFormat';
@@ -55,6 +55,7 @@ export function useRequestRunner() {
       // are written as text and cannot travel as one.
       const wire = await toWire(draft.format, draft.payload, draft.subject.trim(), useDecoders.getState().rules);
       const body = { subject: draft.subject.trim(), ...wire, headers: Object.keys(hdrs).length ? hdrs : undefined };
+      const expect = expectationOf(draft);
       if (draft.count > 1) {
         setRun(
           await api.run(connId, {
@@ -64,10 +65,11 @@ export function useRequestRunner() {
             concurrency: draft.concurrency,
             intervalMs: draft.intervalMs,
             timeout: draft.timeout,
+            expect,
           }),
         );
       } else if (draft.mode === 'request') {
-        setReply(await api.requestReply(connId, { ...body, timeout: draft.timeout }));
+        setReply(await api.requestReply(connId, { ...body, timeout: draft.timeout, expect }));
       } else {
         await api.publish(connId, body);
       }
@@ -362,6 +364,62 @@ export function RequestForm({ draft, onChange, onSend, busy, canSend, connId, on
           </div>
         </div>
       </div>
+
+      {/* With an expectation the template is a test: every reply has to
+          satisfy the expression, and the p95 has to stay under the bound.
+          The same template runs from a terminal with `nats-explorer run`. */}
+      {draft.mode === 'request' && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+          <span className="section-title">Expect</span>
+          <Input
+            mono
+            inputSize="sm"
+            className="w-72"
+            value={draft.expectExpr}
+            onChange={e => patch({ expectExpr: e.target.value })}
+            placeholder='payload.status == "ok"'
+            aria-label="Expected reply"
+            title="CEL over the reply: payload, subject, headers, size. Empty checks nothing."
+            spellCheck={false}
+          />
+          <label className="flex items-center gap-1.5">
+            {repeated ? 'p95 under' : 'reply under'}
+            <Input
+              inputSize="sm"
+              type="number"
+              min={0}
+              step={10}
+              className="w-20"
+              value={draft.expectMaxLatencyMs || ''}
+              onChange={e => patch({ expectMaxLatencyMs: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
+              aria-label="Latency bound"
+              placeholder="any"
+            />
+            ms
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** How a run or a reply did against its expectation, in a line. */
+function VerdictLine({ verdict }: { verdict: Verdict }) {
+  return (
+    <div
+      className={cn(
+        'text-xs rounded border px-3 py-1.5 flex flex-col gap-0.5',
+        verdict.passed ? 'border-ok/30 bg-ok/5 text-ok' : 'border-danger/30 bg-danger/5 text-danger',
+      )}
+    >
+      <span className="font-medium">
+        {verdict.passed ? 'Passed' : 'Failed'}: {verdict.failed} of {verdict.checked} {verdict.checked === 1 ? 'check' : 'checks'} failed
+      </span>
+      {verdict.reasons?.map(r => (
+        <span key={r} className="font-mono text-fg/80">
+          {r}
+        </span>
+      ))}
     </div>
   );
 }
@@ -370,7 +428,9 @@ export function RequestResult({ error, run, reply }: { error: string | null; run
   return (
     <>
       {error && <div className="text-sm text-danger font-mono rounded border border-danger/30 bg-danger/5 px-3 py-2">{error}</div>}
+      {run?.verdict && (run.verdict.reasons?.length || !run.verdict.passed || run.mode === 'request') ? <VerdictLine verdict={run.verdict} /> : null}
       {run && <RunSummary run={run} />}
+      {reply?.verdict && <VerdictLine verdict={reply.verdict} />}
       {reply && (
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-3 text-xs text-muted">

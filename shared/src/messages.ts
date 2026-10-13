@@ -190,8 +190,25 @@ export interface PublishInput {
   payloadType?: 'binary';
 }
 
+/** What a request or a run has to live up to; with it a template is a test. */
+export interface Expectation {
+  /** CEL over the reply: payload, subject, headers, size */
+  expr?: string;
+  /** the p95 of a run, or the one reply of a request, must stay under this */
+  maxLatencyMs?: number;
+}
+
+/** How a request or a run did against its expectation. */
+export interface Verdict {
+  passed: boolean;
+  checked: number;
+  failed: number;
+  reasons?: string[];
+}
+
 export interface RequestInput extends PublishInput {
   timeout?: number;
+  expect?: Expectation;
 }
 
 export interface RequestReply {
@@ -202,6 +219,8 @@ export interface RequestReply {
   size: number;
   durationMs: number;
   headers?: Record<string, string[]>;
+  /** set when the request carried an expectation */
+  verdict?: Verdict;
 }
 
 /** Repeated publish/request. Subject, payload and header values may use {{i}}, {{ts}}, {{uuid}}, {{rand:MIN-MAX}}. */
@@ -211,6 +230,7 @@ export interface RunInput extends PublishInput {
   concurrency?: number;
   intervalMs?: number;
   timeout?: number;
+  expect?: Expectation;
 }
 
 export interface RunReply {
@@ -243,4 +263,6 @@ export interface RunResult {
   errorSamples: { i: number; error: string }[];
   errorCounts: Record<string, number>;
   stopped: boolean;
+  /** how the run did: every error, every refused reply, a p95 over the bound */
+  verdict?: Verdict;
 }

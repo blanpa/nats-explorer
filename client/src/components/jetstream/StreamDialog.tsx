@@ -383,7 +383,6 @@ export default function StreamDialog({ connId, existing, duplicate, onClose, onS
             </Button>
           </div>
           {sources.map((s, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: rows have no identity of their own while they are typed
             <div key={i} className="grid grid-cols-[1fr_1fr_100px_auto] gap-2 items-center">
               <Input mono value={s.name} onChange={e => setSource(i, { name: e.target.value })} placeholder="stream" aria-label={`Source ${i + 1} stream`} />
               <Input
