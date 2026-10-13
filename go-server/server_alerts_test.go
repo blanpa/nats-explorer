@@ -74,6 +74,25 @@ func TestServerAlerts(t *testing.T) {
 		t.Fatalf("active = %+v", active.Active)
 	}
 
+	// Seen: it stays, marked, until it resolves; the mark can be taken back.
+	if st := api.do("POST", "/api/alerts/ack", map[string]interface{}{"key": active.Active[0].Key}, &active); st != 200 {
+		t.Fatalf("ack: %d", st)
+	}
+	if len(active.Active) != 1 || active.Active[0].AckedAt == 0 {
+		t.Fatalf("acked = %+v", active.Active)
+	}
+	// A fresh variable: decoding into the old slice would keep the fields
+	// the answer leaves out, and an ack time of zero is left out.
+	var unacked struct {
+		Active []alerts.Alert `json:"active"`
+	}
+	if st := api.do("POST", "/api/alerts/ack", map[string]interface{}{"key": active.Active[0].Key, "acked": false}, &unacked); st != 200 || unacked.Active[0].AckedAt != 0 {
+		t.Fatalf("unack: %d %+v", st, unacked.Active)
+	}
+	if st := api.do("POST", "/api/alerts/ack", map[string]interface{}{"key": "nope"}, nil); st != 404 {
+		t.Fatalf("ack of nothing: %d", st)
+	}
+
 	// Testing the rule against the recorded history finds the same message.
 	var test struct {
 		Sampled int `json:"sampled"`
@@ -152,4 +171,73 @@ func waitForAlert(t *testing.T, ws *websocket.Conn, state string) map[string]int
 	}
 	t.Fatalf("no alert in state %s within deadline", state)
 	return nil
+}
+
+// Maintenance windows are stored with the settings and mute what they
+// cover: the alert is active and logged, but says so, and the toast-raising
+// event carries the same flag.
+func TestServerAlertMaintenance(t *testing.T) {
+	ns := startNATS(t)
+	dir := t.TempDir()
+	store, err := settings.Open(dir, settings.NewSecretStore(dir, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := newTestServer(t, serverConfig{settings: store})
+	api := &apiClient{t: t, base: srv.URL}
+	if st := api.do("POST", "/api/connect", map[string]interface{}{
+		"id": "c1", "name": "C1", "servers": []string{ns.ClientURL()}, "authMethod": "none", "subscriptions": []string{"mw.>"},
+	}, nil); st != 200 {
+		t.Fatalf("connect: %d", st)
+	}
+	defer api.do("POST", "/api/disconnect-all", nil, nil)
+
+	now := time.Now().UnixMilli()
+	windows := []alerts.Maintenance{{ID: "m1", Name: "line 1 rebuild", From: now - 1000, To: now + 3600_000, Patterns: []string{"mw.line1.>"}}}
+	var got struct {
+		Windows []alerts.Maintenance `json:"windows"`
+	}
+	if st := api.do("PUT", "/api/alerts/maintenance", windows, &got); st != 200 || len(got.Windows) != 1 || got.Windows[0].Name != "line 1 rebuild" {
+		t.Fatalf("put maintenance: %d %+v", st, got.Windows)
+	}
+	if st := api.do("PUT", "/api/alerts/maintenance", []alerts.Maintenance{{ID: "m2", From: 5, To: 1}}, nil); st != 400 {
+		t.Fatalf("a window that ends before it starts was accepted: %d", st)
+	}
+	entries, _ := store.All()
+	if _, ok := entries[maintenanceKey]; !ok {
+		t.Fatal("maintenance windows not written to the settings")
+	}
+
+	rule := alerts.Rule{ID: "r1", Name: "any", Pattern: "mw.>", Expr: "true", Enabled: true}
+	if st := api.do("PUT", "/api/alerts/rules/r1", rule, nil); st != 200 {
+		t.Fatalf("put rule: %d", st)
+	}
+	ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http")+"/ws", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+	readEvent(t, ws, "connections")
+	if st := api.do("POST", "/api/publish?connId=c1", map[string]interface{}{"subject": "mw.line1.oven", "payload": `1`}, nil); st != 200 {
+		t.Fatalf("publish: %d", st)
+	}
+	ev := waitForAlert(t, ws, "firing")
+	if ev["muted"] != true {
+		t.Fatalf("an alert inside the window is not muted: %v", ev)
+	}
+	var active struct {
+		Active []alerts.Alert `json:"active"`
+	}
+	api.do("GET", "/api/alerts", nil, &active)
+	if len(active.Active) != 1 || !active.Active[0].Muted {
+		t.Fatalf("active = %+v", active.Active)
+	}
+	// Outside the window's patterns nothing is muted.
+	if st := api.do("POST", "/api/publish?connId=c1", map[string]interface{}{"subject": "mw.line2.oven", "payload": `1`}, nil); st != 200 {
+		t.Fatalf("publish: %d", st)
+	}
+	ev = waitForAlert(t, ws, "firing")
+	if ev["muted"] == true {
+		t.Fatalf("an alert outside the window is muted: %v", ev)
+	}
 }

@@ -1,8 +1,18 @@
 /** Severity of an alert rule, worst last. */
 export type AlertSeverity = 'info' | 'warning' | 'critical';
 
-/** State of one alert: an expression holds, a subject fell silent, or it is over. */
-export type AlertState = 'firing' | 'stale' | 'resolved';
+/**
+ * State of one alert: an expression holds, a subject fell silent, too few
+ * or too many messages in the window, an aggregate out of range, a value
+ * that has not changed, or it is over.
+ */
+export type AlertState = 'firing' | 'stale' | 'rate' | 'level' | 'stuck' | 'resolved';
+
+/** Shape of the webhook POST: plain JSON, or what Slack or Teams expect. */
+export type WebhookFormat = 'json' | 'slack' | 'teams';
+
+/** Reduction of a field over the window. */
+export type AlertAgg = 'avg' | 'min' | 'max';
 
 /** One alert definition, kept with the other settings under ne.alerts.v1. */
 export interface AlertRule {
@@ -21,9 +31,41 @@ export interface AlertRule {
    */
   staleAuto?: boolean;
   severity: AlertSeverity;
-  /** optional URL that receives a JSON POST on every state change */
+  /** optional URL that receives a POST on every state change */
   webhook?: string;
+  /** shape of that POST; json when absent */
+  webhookFormat?: WebhookFormat;
+  /** recipients, comma separated; the server needs SMTP_HOST for them */
+  email?: string;
   enabled: boolean;
+  /** seconds the window conditions count over; 0 or absent means none */
+  window?: number;
+  /** fires when fewer messages than this arrived in the window */
+  minCount?: number;
+  /** fires when more messages than this arrived in the window */
+  maxCount?: number;
+  /** dotted path into the payload for the aggregate and the unchanged check */
+  field?: string;
+  /** how the field is reduced over the window; avg when absent */
+  agg?: AlertAgg;
+  /** the aggregate above this fires */
+  above?: number;
+  /** the aggregate below this fires */
+  below?: number;
+  /** seconds the field, or the payload, may be reported again without changing */
+  unchangedFor?: number;
+  /** unix ms; until then changes are logged but not sent, and not toasted */
+  mutedUntil?: number;
+}
+
+/** A planned window in which alerts are logged but not sent. */
+export interface MaintenanceWindow {
+  id: string;
+  name: string;
+  from: number;
+  to: number;
+  /** subject patterns it covers; none means every subject */
+  patterns?: string[];
 }
 
 /** One condition that is currently true: a rule on a subject of a connection. */
@@ -41,6 +83,11 @@ export interface Alert {
   preview?: string;
   /** time of that message */
   at?: number;
+  /** the rule or a maintenance window keeps it out of the channels */
+  muted?: boolean;
+  /** someone has seen it; it stays until it resolves but no longer counts as new */
+  ackedAt?: number;
+  ackedBy?: string;
 }
 
 /** One state change, newest first in the log. */
@@ -53,7 +100,10 @@ export interface AlertEvent {
   state: AlertState;
   severity: AlertSeverity;
   preview?: string;
+  /** what went wrong sending it, webhook or email */
   webhookError?: string;
+  /** logged, but not sent */
+  muted?: boolean;
 }
 
 /** Answer of POST /api/alerts/rules/{id}/test. */

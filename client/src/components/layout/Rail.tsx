@@ -17,7 +17,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { MODULES, useStore, type Module } from '../../store';
-import { useAlerts, worstSeverity } from '../../store/alerts';
+import { unattended, useAlerts, worstSeverity } from '../../store/alerts';
 import { Tooltip } from '../ui/misc';
 import { cn } from '../../lib/utils';
 
@@ -38,8 +38,9 @@ const ICONS: Record<Module, LucideIcon> = {
 
 export default function Rail() {
   const module = useStore(s => s.module);
-  // The alerts entry carries the count, so a firing rule is visible from every module.
-  const active = useAlerts(s => s.active);
+  // The alerts entry carries the count, so a firing rule is visible from
+  // every module -- the ones nobody has seen yet, and not the muted ones.
+  const active = unattended(useAlerts(s => s.active));
   const setModule = useStore(s => s.setModule);
   const theme = useStore(s => s.theme);
   const toggleTheme = useStore(s => s.toggleTheme);

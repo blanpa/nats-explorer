@@ -94,6 +94,7 @@ cd nats-explorer && ./nats-explorer
 | `HISTORY_FTS` | `1` | `0` drops the full-text index of the persistent history: the writer becomes several times faster and a search scans instead of using the index. Also a setting in the UI |
 | `HISTORY_FILTER` | – | A CEL expression over the same variables as a payload filter; only messages it accepts are written to disk. The one setting that lowers the write rate itself instead of making the writer faster. Also a setting in the UI |
 | `HISTORY_QUEUE_BYTES` | `67108864` | How much of a burst the writer buffers before it drops from the disk copy. Also a setting in the UI |
+| `SMTP_HOST` | – | Mail server for alert rules with recipients. `SMTP_PORT` defaults to `587` (`465` is TLS from the first byte, STARTTLS is used where offered), `SMTP_USER` and `SMTP_PASS` are optional, `SMTP_FROM` defaults to the user |
 | `HISTORY_MAX_MB` | – | Caps the database: once the stored messages take more, the oldest are deleted before their retention is up, checked once a minute. `0` or unset is no cap. The one answer to `HISTORY_RETENTION=0` that does not end with a full disk. Also a setting in the UI |
 | `ROLLUP_RETENTION` | `2160h` | With a persistent history: how long the minute aggregates behind long-range charts are kept (90 days by default; they are far smaller than the messages) |
 | `HISTORY_MB` | `256` | Memory budget for the recorded message history the UI pulls from (all connections together; the process gets a soft memory limit of twice that plus 128 MB) |

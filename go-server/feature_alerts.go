@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
 	"nats-explorer/internal/alerts"
+	"nats-explorer/internal/auth"
 	"nats-explorer/internal/filter"
 	"nats-explorer/internal/message"
 )
@@ -22,8 +24,27 @@ type alertsEvent struct {
 	Events []alerts.Event `json:"events,omitempty"`
 }
 
-// alertsKey is where the rules live in the settings store.
-const alertsKey = "ne.alerts.v1"
+// alertsKey is where the rules live in the settings store, maintenanceKey
+// where the maintenance windows do.
+const (
+	alertsKey      = "ne.alerts.v1"
+	maintenanceKey = "ne.alerts.maintenance.v1"
+)
+
+// smtpFromEnv reads the mail server an alert rule with recipients needs.
+// SMTP_HOST switches it on; SMTP_PORT defaults to 587, SMTP_FROM to the
+// user, and SMTP_USER with SMTP_PASS are optional for a relay that needs
+// none.
+func smtpFromEnv() alerts.SMTP {
+	s := alerts.SMTP{Host: os.Getenv("SMTP_HOST"), User: os.Getenv("SMTP_USER"), Pass: os.Getenv("SMTP_PASS"), From: os.Getenv("SMTP_FROM")}
+	if p, err := strconv.Atoi(os.Getenv("SMTP_PORT")); err == nil && p > 0 {
+		s.Port = p
+	}
+	if s.From == "" {
+		s.From = s.User
+	}
+	return s
+}
 
 const (
 	alertsTestLimit   = 200
@@ -44,6 +65,11 @@ func init() {
 			}
 			if d.settings != nil {
 				loadAlertRules(d, engine)
+				loadMaintenance(d, engine)
+			}
+			if mail := smtpFromEnv(); mail.Host != "" {
+				engine.Mail = mail.Mailer()
+				log.Printf("Alert emails go through %s", mail.Host)
 			}
 			d.onRecord(engine.Observe)
 			engine.Start()
@@ -128,6 +154,46 @@ func init() {
 					return
 				}
 				w.WriteHeader(http.StatusNoContent)
+			})
+
+			// Seen: the alert stays until it resolves, but stops counting as
+			// new. The key travels in the body, because it holds the subject.
+			r.Post("/alerts/ack", func(w http.ResponseWriter, req *http.Request) {
+				var body struct {
+					Key   string `json:"key"`
+					Acked *bool  `json:"acked"`
+				}
+				if err := decodeJSON(w, req, &body); err != nil {
+					return
+				}
+				acked := body.Acked == nil || *body.Acked
+				by := auth.FromContext(req.Context()).Name
+				if !engine.Ack(body.Key, by, acked) {
+					featureError(w, http.StatusNotFound, "no such alert")
+					return
+				}
+				engine.Flush()
+				featureJSON(w, map[string]interface{}{"active": engine.Active()})
+			})
+
+			// Maintenance windows: planned silence for a line that is down
+			// on purpose. The whole list is replaced, as the rules are.
+			r.Get("/alerts/maintenance", func(w http.ResponseWriter, req *http.Request) {
+				featureJSON(w, map[string]interface{}{"windows": engine.Maintenance()})
+			})
+			r.Put("/alerts/maintenance", func(w http.ResponseWriter, req *http.Request) {
+				var body []alerts.Maintenance
+				if err := json.NewDecoder(http.MaxBytesReader(w, req.Body, 1<<20)).Decode(&body); err != nil {
+					featureError(w, http.StatusBadRequest, "invalid JSON body")
+					return
+				}
+				if err := engine.SetMaintenance(body); err != nil {
+					featureError(w, http.StatusBadRequest, err.Error())
+					return
+				}
+				saveJSON(d, maintenanceKey, engine.Maintenance())
+				engine.Flush()
+				featureJSON(w, map[string]interface{}{"windows": engine.Maintenance()})
 			})
 
 			// Try a rule against what is already recorded, so an expression
@@ -228,15 +294,32 @@ func loadAlertRules(d *deps, engine *alerts.Engine) {
 	}
 }
 
-func saveAlertRules(d *deps, rules []alerts.Rule) {
+func saveAlertRules(d *deps, rules []alerts.Rule) { saveJSON(d, alertsKey, rules) }
+
+func saveJSON(d *deps, key string, v any) {
 	if d.settings == nil {
 		return
 	}
-	raw, err := json.Marshal(rules)
+	raw, err := json.Marshal(v)
 	if err != nil {
 		return
 	}
-	if err := d.settings.Set(alertsKey, raw); err != nil {
-		log.Printf("alerts: cannot save rules: %v", err)
+	if err := d.settings.Set(key, raw); err != nil {
+		log.Printf("alerts: cannot save %s: %v", key, err)
+	}
+}
+
+func loadMaintenance(d *deps, engine *alerts.Engine) {
+	raw, ok := d.settings.Get(maintenanceKey)
+	if !ok {
+		return
+	}
+	var list []alerts.Maintenance
+	if err := json.Unmarshal(raw, &list); err != nil {
+		log.Printf("alerts: saved maintenance windows unreadable: %v", err)
+		return
+	}
+	if err := engine.SetMaintenance(list); err != nil {
+		log.Printf("alerts: saved maintenance windows rejected: %v", err)
 	}
 }

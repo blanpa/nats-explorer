@@ -158,11 +158,21 @@ The list is empty for exactly one reason, and it says so: nothing is subscribed.
 
 <img src="{{ '/screenshots/alerts-dark.png' | relative_url }}" alt="The Alerts module: what is firing, the rules behind it and the log" loading="lazy">
 
-A rule watches a subject pattern for a condition: an expression that holds, a subject that stopped sending, or both. It can be written from the Alerts module, or straight from the subject it is about -- the overflow menu of a subject opens the dialog with the pattern and the name already filled in, so only the condition is left to say. The backend evaluates the rules on the message path, so they keep working while no browser is open, and an optional webhook receives a JSON POST on every state change.
+A rule watches a subject pattern for a condition. Five kinds, because the questions a plant asks are not all the same question:
+
+- **An expression that holds** for a message, in CEL -- `payload.temp > 80`, `!valid` against a pinned schema.
+- **A silence**: a subject that stopped sending, with a timeout or with the rhythm learned from the subject itself (below).
+- **A count over a window**: fewer than ten messages in the last minute, more than a thousand in the last five. A single message cannot say that too few arrived; the engine's clock can.
+- **A threshold over a window**: the average, minimum or maximum of a field over the last five minutes above or below a value. One reading over 80 is a spike, five minutes over 80 is a problem, and a rule on the reading alone cannot tell them apart.
+- **A value that stopped changing**: the field, or the whole payload, reported again and again without moving for ten minutes. A sensor that is stuck sends on time, which no other condition can tell from one that is fine.
+
+A rule can be written from the Alerts module, or straight from the subject it is about -- the overflow menu of a subject opens the dialog with the pattern and the name already filled in, so only the condition is left to say. The backend evaluates the rules on the message path, so they keep working while no browser is open. The window conditions cost the same whether a subject sends once an hour or a thousand times a second: sixty buckets per subject and rule, whatever the window.
 
 A silence can be watched with a timeout -- "report this subject after 60 seconds" -- or by **learning each subject's own rhythm**. One timeout cannot be right for two thousand subjects sending at a dozen rates: set it for the meter and a sensor can die for a minute unnoticed; set it for the sensor and the meter alerts every hour. With the learned threshold the engine keeps the last sixteen gaps per subject and reports it after ten times the usual one -- the upper quartile rather than the average, because a subject that sends a burst every minute has many tiny gaps and a few big ones. A subject that has not sent at least eight times has shown no rhythm and is never reported, and the timeout stays useful next to it as a floor.
 
-The Alerts module lists what is firing right now, the rules with the number of subjects each one matches, and a log of state changes. A rule can be tried against the recorded messages before it is saved, which answers "how many of my messages would this match" without waiting. The rail badge counts the active alerts from every module, and a new warning or critical alert raises a toast.
+**Where it goes.** A webhook receives a POST on every state change -- as plain JSON, or in the shape a Slack or a Microsoft Teams incoming webhook expects, so neither needs an adapter in front of it. Recipients listed on the rule get an email through the `SMTP_*` settings of the server; without them the log says so instead of failing quietly. A rule can be **muted** for a quarter of an hour or a day: its changes stay in the log and out of the channels and the toasts. A **maintenance window** does the same for a planned time and a set of subject patterns -- a rebuild, a firmware update, a line that is down on purpose -- and what is still true when it ends is sent then, because the window was there to hold the alerts back, not to lose them.
+
+The Alerts module lists what is firing right now, the rules with the number of subjects each one matches, the maintenance windows, and a log of state changes. An active alert can be **marked as seen**: it stays until it resolves, carries who saw it, and no longer counts on the rail badge, which counts the alerts nobody has seen yet and that are not muted. A rule can be tried against the recorded messages before it is saved, which answers "how many of my messages would this match" without waiting. A new warning or critical alert raises a toast, unless it is muted.
 
 ## Message detail
 

@@ -208,7 +208,7 @@ export function startFeed(): () => void {
     wsClient.on('alerts', e => {
       useAlerts.getState().apply(e.active, e.events);
       for (const ev of e.events ?? []) {
-        if (ev.state === 'resolved' || ev.severity === 'info') continue;
+        if (ev.state === 'resolved' || ev.severity === 'info' || ev.muted) continue;
         const notify = ev.severity === 'critical' ? toast.error : toast.warning;
         notify(ev.ruleName || 'Alert', describeEvent(ev));
       }
