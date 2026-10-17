@@ -4,6 +4,14 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-17
+
+A release about arriving whole. The server binary carries its UI, so it
+runs from wherever it is unpacked, or not unpacked, to; the desktop app
+carries all of it, including what the Avro and Protobuf decoders load; and
+the Windows installer leaves the app where Windows lists installed apps.
+The Helm chart learns the NATS cluster it is installed next to.
+
 ### Added
 - **The Helm chart knows the NATS cluster next to it** (chart 0.2.0). Installed beside a cluster from the official NATS chart, the explorer lists that cluster as a ready-made connection, with its monitoring endpoint and, if given, the system account for the cluster view, and connects to it at start. More connections and `ne.*` settings can be seeded, the UI token is generated when none is given and kept on upgrades, and `helm test` checks the service. Example values for a three-node JetStream cluster with a system account are in `deploy/helm/nats-explorer/examples/nats-cluster/`; CI lints and renders the chart.
 
@@ -13,7 +21,7 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 - **The Windows installer lists the app under Installed apps** for the user who installed it. It wrote the entry to HKLM, which a per-user install without elevation cannot write; the uninstaller also removes an entry an older installer left there.
 
 ### Changed
-- **Helm chart defaults** (upgrading from chart 0.1.0): `auth.mode` is now `token` instead of `none`, `nats.enabled` is on, the image defaults to 0.6.0, and the pod runs with a `RuntimeDefault` seccomp profile and its own ServiceAccount. With a seeded connection the server keeps the settings in `STORAGE_DIR` (an `emptyDir` without persistence), so connections are shared by everyone using the installation. Set `nats.enabled=false` and `auth.mode=none` for the old behaviour. Resource names, the auth secret and the volume stay the same.
+- **Helm chart defaults** (upgrading from chart 0.1.0): `auth.mode` is now `token` instead of `none`, `nats.enabled` is on, the image defaults to 0.6.1, and the pod runs with a `RuntimeDefault` seccomp profile and its own ServiceAccount. With a seeded connection the server keeps the settings in `STORAGE_DIR` (an `emptyDir` without persistence), so connections are shared by everyone using the installation. Set `nats.enabled=false` and `auth.mode=none` for the old behaviour. Resource names, the auth secret and the volume stay the same.
 
 ## [0.6.0] - 2026-10-13
 
@@ -275,6 +283,7 @@ The first release that ships as an installable desktop application. Everything b
 
 Initial web UI: subject tree, message detail, JetStream, Key-Value, Object Store, services, monitoring, multi-connection, Docker and cross-compiled server binaries.
 
+[0.6.1]: https://github.com/blanpa/nats-explorer/releases/tag/v0.6.1
 [0.6.0]: https://github.com/blanpa/nats-explorer/releases/tag/v0.6.0
 [0.5.0]: https://github.com/blanpa/nats-explorer/releases/tag/v0.5.0
 [0.4.0]: https://github.com/blanpa/nats-explorer/releases/tag/v0.4.0
