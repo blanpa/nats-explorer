@@ -29,6 +29,8 @@ nav_order: 3
 - Large subject spaces cost what is on screen, not what the server sees: see [Performance](#performance)
 - Two subscriptions that overlap -- `uns.>` next to `uns.acme.>` -- are marked "doubled": NATS delivers one copy per subscription, so every message below the narrower pattern arrives twice, the rates and counts double, and nothing else says why
 
+<img src="{{ '/screenshots/palette-dark.png' | relative_url }}" alt="The command palette: modules, connections, subjects, streams and keys a few letters away" loading="lazy">
+
 ## State
 
 <img src="{{ '/screenshots/state-dark.png' | relative_url }}" alt="The State module: the newest message of every sensor with its fields in columns and its age" loading="lazy">
@@ -39,6 +41,8 @@ The age is why the table exists: a value is only as good as the moment it arrive
 
 ## Following a message
 
+<img src="{{ '/screenshots/trace-dark.png' | relative_url }}" alt="An order followed through orders.created, orders.paid and orders.shipped, with the gap between each" loading="lazy">
+
 A request and its reply, an order and its shipment, a saga across five services: the messages belong together and live on different subjects, and what ties them is a value inside them. "Follow this message…" in the overflow menu offers the values that could be it, searches the recorded history for the chosen one across every subject, and lists the hits in time order with the gap between each.
 
 The candidates come best first: the trace id of a W3C `traceparent` header where the producers propagate one -- the id rather than the whole header, because every message of a trace carries that id while the span id after it belongs to this message alone -- then the `Nats-Msg-Id`, then the fields whose name reads like an id, then other strings, because a guess is what that is.
@@ -47,17 +51,23 @@ The gap is the point: a chain that reads `+12 ms`, `+8 ms`, `+4.2 s` says where 
 
 ## Time between two subjects
 
+<img src="{{ '/screenshots/step-latency-dark.png' | relative_url }}" alt="The time from orders.created to orders.shipped: the pairs, how many never arrived, the percentiles and the histogram" loading="lazy">
+
 A service's request/reply latency is measured everywhere; the hop between two published messages is measured nowhere, and it is the one the business asks about. "Time to another subject…" in the overflow menu of a subject names the second subject, offers the fields both sides carry (id-like first) and pairs the messages by that value: p50, p95, p99, the spread as a histogram and the twenty slowest with both timestamps.
 
 The headline is not the median. It is how many of the first messages never produced a second one -- "36 pairs, 4 never arrived" says something no latency number can. A second message belongs to the newest first message before it, so an id reused a day later pairs with its own run; a message on the far subject with nothing before it is counted apart.
 
 ## What matches a subject
 
+<img src="{{ '/screenshots/match-dark.png' | relative_url }}" alt="What matches one sensor subject: the subscription, the stream that stores it and the alert rules that watch it" loading="lazy">
+
 The overflow menu of a subject asks the question a wildcard makes hard: what would one concrete message on it actually run into? The answer is one dialog -- the connection's subscriptions that cover it, the streams that store it and through which of their own patterns, the consumers that would see it and how many filter it out, the alert rules that watch it, and the pinned schema that judges it. The subject can be edited in place, so it answers for one that has never been sent.
 
 `*` covers one token and `>` the rest; stream subjects overlap; a consumer filter one level too deep is invisible until nothing arrives. `GET /api/match?subject=` answers the JetStream half for scripts.
 
 ## Narrow windows
+
+<img src="{{ '/screenshots/narrow-dark.png' | relative_url }}" alt="The explorer on a phone: the detail of a subject, with a way back to the list" width="390" loading="lazy">
 
 Below 768 pixels -- a phone, a tablet at the line, a split screen -- the list and the detail take turns: choosing a subject, a stream or a bucket shows its detail, and "Back to the list" shows the list again. Headers put their buttons on a second line rather than pushing the name out, and the module rail scrolls.
 
@@ -76,6 +86,8 @@ The star in the subject header keeps a subject, with an optional name, group and
 The eraser in the subject header forgets the recorded messages of that subject. On a branch it takes everything below it as well, and the confirmation says which of the two is about to happen. The rest of the recorded history stays. Both the memory and the persistent copy are cleared, so a time range does not bring the messages back, and the subject leaves the tree until it sends again. The eraser in the Subjects pane header clears everything at once, after a confirmation: every recorded message of every connection, in memory and on disk, and the subject tree with them. A tree row that says three thousand messages with nothing behind it says less than an empty tree; subjects come back as they send again.
 
 ## Payload filter
+
+<img src="{{ '/screenshots/payload-filter-dark.png' | relative_url }}" alt="A payload filter: only the sensors whose latest reading is over 20 degrees stay in the tree" loading="lazy">
 
 The filter icon next to the subject filter opens an expression field. The expression is written in [CEL](https://cel.dev/) and the server evaluates it against the last message of every subject, so only matching subjects stay in the tree, and the same expression narrows the message list, the history search, time ranges and chart series.
 
@@ -181,6 +193,8 @@ The Alerts module lists what is firing right now, the rules with the number of s
 
 ## Message detail
 
+<img src="{{ '/screenshots/diff-dark.png' | relative_url }}" alt="The diff of a message to the one before it, under the payload" loading="lazy">
+
 - JSON, raw, hex and base64 views; a payload that is XML or HTML is offered as itself, indented by its tags and never rendered -- a payload is someone else's text, and this window is not the place to run it
 - History of the last messages; **diff to the previous message**, or against a message held with "Compare to this": "what changed just now" is one question, "what changed since it was still working" is the other, and that message is rarely the one before
 - **The same payload again** is marked ×2, ×3 in the lists. A repeated `Nats-Msg-Id` is already called out, and it catches what NATS knows about; a retry storm looks different -- the identical payload seconds later with a fresh id, doubling counters while the rows differ by their timestamp alone. A subject whose payload practically never changes is left alone, because that is a level rather than a retry
@@ -239,7 +253,13 @@ Once a schema is pinned, every message in the history rail and in a branch list 
 - A number in an opened message charts that field over the last 500 to 50 000 messages of the stream, for the row's subject or across all subjects, read and downsampled by the backend (`GET /api/streams/{name}/series`)
 - **JetStream domains**: a connection can carry a `jsDomain` or API prefix (leaf nodes behind a hub and vice versa), and the JetStream, KV and Object Store panes have a domain switch for ad-hoc changes
 
+<img src="{{ '/screenshots/relations-light.png' | relative_url }}" alt="How the streams hang together: a mirror, an archive sourcing from two streams, and the consumers of each" loading="lazy">
+
+<img src="{{ '/screenshots/beside-light.png' | relative_url }}" alt="Two streams side by side, each with its own tabs" loading="lazy">
+
 ### Consumers and replication
+
+<img src="{{ '/screenshots/consumers-light.png' | relative_url }}" alt="A consumer with its lag, what it has delivered and the message it is waiting for" loading="lazy">
 
 A consumer row carries its lag, the distance between the stream head and what the consumer has delivered, with a warning arrow when the backlog grew over the last samples. Opening a row shows pending and ack-pending over time, sampled on every refresh of the list, and says in words where the backlog is going: "3 400 pending, catching up at 40/s -- empty in about 1 m 25 s", or "growing by 12/s -- not catching up at this rate". A least-squares line through the samples gives both numbers; under four samples it says what it is waiting for rather than inventing a rate from one poll.
 
@@ -262,12 +282,16 @@ A stream that mirrors or sources from another says so, with the lag and the time
 
 ## Object Store
 
+<img src="{{ '/screenshots/objectstore-dark.png' | relative_url }}" alt="An object store with its objects, their sizes, chunks and digests" loading="lazy">
+
 - Stores with size and chunk count; objects with description, digest and modification time
 - Drag & drop or file upload (streamed), direct download, delete objects and stores
 - The upload shows its progress per file -- the bytes sent, the share, which file of how many -- and can be cancelled; once a file is sent the server still writes its chunks, which the bar says. Every file goes up as raw bytes whatever its type, so a `.json` file is stored as itself
 - Objects ticked and deleted many at once, with what failed named; a store sealed, after a confirmation, takes no more uploads
 
 ## Services
+
+<img src="{{ '/screenshots/services-dark.png' | relative_url }}" alt="A micro service with its endpoint, request count and processing time" loading="lazy">
 
 - Discover NATS micro services (`$SRV.INFO`, `STATS`, `PING`), see endpoints, request counts, errors and processing time
 

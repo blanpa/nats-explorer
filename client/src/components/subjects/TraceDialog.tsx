@@ -31,6 +31,10 @@ export default function TraceDialog({ message, onClose }: { message: NatsMessage
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const revealSubject = useStore(s => s.revealSubject);
+  // The chain of the connection this message came in on: a second
+  // connection to the same server records the same messages, and those
+  // would stand in the chain twice, 0 µs apart.
+  const connId = useStore(s => s.activeConnId) ?? undefined;
 
   useEffect(() => {
     const q = value.trim();
@@ -39,14 +43,14 @@ export default function TraceDialog({ message, onClose }: { message: NatsMessage
     setBusy(true);
     // No subject: across every recorded subject, which is the point.
     api
-      .searchHistory('', q, { limit: LIMIT })
+      .searchHistory('', q, { limit: LIMIT, connId })
       .then(r => live && (setHits(r.messages), setError(null)))
       .catch(e => live && (setError(errorMessage(e)), setHits(null)))
       .finally(() => live && setBusy(false));
     return () => {
       live = false;
     };
-  }, [value]);
+  }, [value, connId]);
 
   const steps = traceSteps(hits ?? []);
   const span = steps.length > 1 ? steps[steps.length - 1].message.timestamp - steps[0].message.timestamp : 0;

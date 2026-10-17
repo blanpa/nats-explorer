@@ -45,7 +45,11 @@ async function seed(nc) {
   ]) {
     await jsm.streams.add({ name, subjects, description, storage: 'file', max_msgs: 100000 }).catch(() => {});
   }
-  await jsm.consumers.add('ORDERS', { durable_name: 'billing', ack_policy: 'explicit', filter_subject: 'orders.paid' }).catch(() => {});
+  // A long ack wait: one message stays unacknowledged for the consumer
+  // shot instead of being redelivered after thirty seconds.
+  await jsm.consumers
+    .add('ORDERS', { durable_name: 'billing', ack_policy: 'explicit', filter_subject: 'orders.paid', ack_wait: 600_000_000_000 })
+    .catch(() => {});
 
   const kv = await js.views.kv('app-config', { history: 5 }).catch(() => js.views.kv('app-config'));
   for (const v of ['0.9.0', '1.0.0', '1.1.0']) await kv.put('release.version', jc.encode({ version: v, rollout: v === '1.1.0' ? 'canary' : 'stable' }));
@@ -73,7 +77,9 @@ async function seed(nc) {
       nc.publish('orders.created', jc.encode({ id, total: Number((80 + Math.random() * 500).toFixed(2)), items: 1 + (i % 5), currency: 'EUR' }));
       await sleep(60);
       nc.publish('orders.paid', jc.encode({ id, method: i % 8 === 0 ? 'card' : 'invoice' }));
-      await sleep(90);
+      // Shipping takes a varying while, most of it short and some of it
+      // not, so the latency histogram has a shape and a tail.
+      await sleep(30 + Math.random() ** 2 * 600);
       nc.publish('orders.shipped', jc.encode({ id, carrier: 'dhl' }));
     }
     await sleep(280);
@@ -107,16 +113,54 @@ async function makeAdvisories(nc) {
   await jsm.streams.delete('RETRIES').catch(() => {});
 }
 
-/** A service to send requests at, so a run has latencies to report. */
-function responder(nc) {
-  const sub = nc.subscribe('services.echo');
-  (async () => {
-    for await (const m of sub) {
+/**
+ * A micro service to send requests at, so a run has latencies to report and
+ * the Services module has something to discover.
+ */
+async function echoService(nc) {
+  const svc = await nc.services.add({ name: 'echo', version: '1.4.2', description: 'Answers what it is asked, after a moment' });
+  svc.addEndpoint('echo', {
+    subject: 'services.echo',
+    handler: async (err, m) => {
+      if (err) return;
       await sleep(3 + Math.random() * 18);
       m.respond(jc.encode({ ok: true, at: new Date().toISOString() }));
-    }
-  })();
-  return sub;
+    },
+  });
+  return svc;
+}
+
+/**
+ * More JetStream, made after the Events shot so that log stays readable:
+ * streams that copy from others for the relations graph, a consumer that
+ * is stuck on a message, and an object store with something in it.
+ */
+async function seedMore(nc) {
+  const jsm = await nc.jetstreamManager();
+  const js = nc.jetstream();
+  await jsm.streams
+    .add({
+      name: 'ARCHIVE',
+      description: 'Everything worth keeping for a year',
+      storage: 'file',
+      max_age: 365 * 24 * 3600 * 1e9,
+      sources: [{ name: 'ORDERS' }, { name: 'SENSORS', filter_subject: 'sensors.*.server-room.>' }],
+    })
+    .catch(() => {});
+  await jsm.streams.add({ name: 'ORDERS_MIRROR', description: 'A copy of ORDERS for the reporting site', storage: 'file', mirror: { name: 'ORDERS' } }).catch(() => {});
+  await jsm.consumers.add('ARCHIVE', { durable_name: 'reporting', ack_policy: 'explicit' }).catch(() => {});
+  // billing takes three messages and acknowledges two: the third is what
+  // the consumer is then waiting for.
+  const billing = await js.consumers.get('ORDERS', 'billing');
+  let n = 0;
+  for await (const m of await billing.fetch({ max_messages: 3, expires: 2000 })) {
+    if (n++ < 2) m.ack();
+  }
+  const os = await js.views.os('firmware', { description: 'Firmware images for the gateways' });
+  const bytes = size => Uint8Array.from({ length: size }, (_, i) => (i * 7919 + 13) & 0xff);
+  await os.putBlob({ name: 'gateway-1.4.2.bin', description: 'Current release' }, bytes(1_480_000));
+  await os.putBlob({ name: 'gateway-1.4.1.bin', description: 'Previous release' }, bytes(1_462_000));
+  await os.putBlob({ name: 'release-notes.md' }, new TextEncoder().encode('# 1.4.2\n\n- Reconnects after a broker restart\n- Reports the battery level\n'));
 }
 
 async function shot(page, name) {
@@ -130,7 +174,7 @@ const settle = (page, ms = 1200) => page.waitForTimeout(ms);
 async function main() {
   mkdirSync(OUT, { recursive: true });
   const nc = await connect({ servers: NATS });
-  const sub = responder(nc);
+  const svc = await echoService(nc);
 
   // The second connection exists so the switcher has something to switch
   // between. Every shot below is of the connection that sees everything;
@@ -255,6 +299,7 @@ async function main() {
   await page.waitForSelector('text=Stream RETRIES was deleted', { timeout: 10000 }).catch(() => {});
   await settle(page, 1500);
   await shot(page, 'events-dark');
+  await seedMore(nc);
 
   // --- Key-Value --------------------------------------------------------
   await page.getByRole('button', { name: 'Key-Value' }).click();
@@ -307,6 +352,124 @@ async function main() {
   await settle(page, 1200);
   await shot(page, 'connections-dark');
   await page.keyboard.press('Escape');
+  await settle(page, 500);
+
+  // --- Command palette ---------------------------------------------------
+  await page.getByRole('button', { name: 'Command palette' }).click();
+  await page.getByLabel('Search commands').fill('ord');
+  await settle(page, 2500);
+  await shot(page, 'palette-dark');
+  await page.keyboard.press('Escape');
+  await settle(page, 500);
+
+  // --- Payload filter: the tree narrowed by an expression ---------------
+  await page.getByPlaceholder('Filter subjects…').fill('');
+  await page.getByRole('button', { name: /^Payload filter/ }).click();
+  const expr = page.getByLabel('Payload filter expression');
+  await expr.fill('payload.celsius > 20');
+  await settle(page, 3000);
+  await shot(page, 'payload-filter-dark');
+  await expr.fill('');
+  await page.getByRole('button', { name: /^Payload filter/ }).click();
+  await settle(page, 1500);
+
+  // --- Diff to the previous message --------------------------------------
+  await page.getByPlaceholder('Filter subjects…').fill('temperature');
+  await settle(page);
+  await page.getByRole('treeitem').filter({ hasText: 'temperature' }).last().click();
+  await settle(page);
+  await page.getByRole('button', { name: 'Diff to previous' }).click();
+  await settle(page, 1500);
+  await shot(page, 'diff-dark');
+  await page.getByRole('button', { name: 'History', exact: true }).click();
+  await settle(page, 500);
+
+  // --- What matches this subject -----------------------------------------
+  const more = () => page.getByRole('button', { name: /^More for / }).click();
+  await more();
+  await page.getByRole('menuitem', { name: /What matches this subject/ }).click();
+  await page
+    .getByRole('dialog')
+    .getByText('SENSORS', { exact: true })
+    .first()
+    .waitFor({ timeout: 10000 })
+    .catch(() => {});
+  await settle(page, 1500);
+  await shot(page, 'match-dark');
+  await page.keyboard.press('Escape');
+  await settle(page, 500);
+
+  // --- Following a message: an order across three subjects --------------
+  await page.getByPlaceholder('Filter subjects…').fill('orders');
+  await settle(page);
+  await page.getByRole('treeitem').filter({ hasText: 'paid' }).last().click();
+  await settle(page);
+  await more();
+  await page.getByRole('menuitem', { name: /Follow this message/ }).click();
+  await page
+    .getByRole('dialog')
+    .getByText(/from first to last/)
+    .waitFor({ timeout: 10000 })
+    .catch(() => {});
+  await settle(page, 1500);
+  await shot(page, 'trace-dark');
+  await page.keyboard.press('Escape');
+  await settle(page, 500);
+
+  // --- Time between two subjects -----------------------------------------
+  // Two orders that were never shipped, so the headline has something to say.
+  for (const id of ['ORD-1021', 'ORD-1022']) {
+    nc.publish('orders.created', jc.encode({ id, total: 129.9, items: 2, currency: 'EUR' }));
+  }
+  await nc.flush();
+  await sleep(1000);
+  await page.getByRole('treeitem').filter({ hasText: 'created' }).last().click();
+  await settle(page);
+  await more();
+  await page.getByRole('menuitem', { name: /Time to another subject/ }).click();
+  await page.getByLabel('Target subject').fill('orders.shipped');
+  // The field both sides carry is offered once the messages are in; the
+  // first one, the id, is picked by itself.
+  await page.getByRole('button', { name: 'Measure' }).click();
+  await page
+    .getByRole('dialog')
+    .getByText('p95', { exact: true })
+    .waitFor({ timeout: 10000 })
+    .catch(() => {});
+  await settle(page, 1500);
+  await shot(page, 'step-latency-dark');
+  await page.keyboard.press('Escape');
+  await settle(page, 500);
+
+  // --- Object Store ------------------------------------------------------
+  await page.getByRole('button', { name: 'Object Store' }).click();
+  await settle(page);
+  await page.locator('.list-row').filter({ hasText: 'firmware' }).first().click();
+  await settle(page, 1500);
+  await shot(page, 'objectstore-dark');
+
+  // --- Services: the echo service after the request run ------------------
+  await page.getByRole('button', { name: 'Services' }).click();
+  await settle(page, 2500);
+  // A row is an instance, named by its id; the service name heads the group.
+  await page.locator('.list-row').filter({ hasText: /endpoints/ }).first().click();
+  await settle(page, 1500);
+  await shot(page, 'services-dark');
+
+  // --- A narrow window: the list and the detail take turns ---------------
+  const phone = await browser.newContext({ viewport: { width: 390, height: 780 }, deviceScaleFactor: 2, colorScheme: 'dark' });
+  await phone.addInitScript(() => window.localStorage.setItem('ne.theme', '"dark"'));
+  const small = await phone.newPage();
+  await small.goto(NE);
+  await small.waitForSelector('text=Subjects', { timeout: 20000 });
+  await settle(small, 2000);
+  await useLocal(small).catch(() => {});
+  await small.getByPlaceholder('Filter subjects…').fill('server-room');
+  await settle(small);
+  await small.getByRole('treeitem').filter({ hasText: 'temperature' }).last().click();
+  await settle(small, 2500);
+  await shot(small, 'narrow-dark');
+  await phone.close();
 
   // --- JetStream, in the light theme ------------------------------------
   const light = await openPage('light');
@@ -316,8 +479,32 @@ async function main() {
   await settle(light, 1800);
   await shot(light, 'jetstream-light');
 
+  // --- Consumers: what one is waiting for --------------------------------
+  await light.getByRole('tab', { name: /Consumers/ }).click();
+  await settle(light);
+  await light.locator('tbody tr').filter({ hasText: 'billing' }).first().click();
+  // The backlog forecast needs a few samples, one per refresh of the list.
+  for (let i = 0; i < 5; i++) {
+    await settle(light, 1200);
+    await light.getByRole('button', { name: 'Refresh' }).last().click().catch(() => {});
+  }
+  await settle(light, 2000);
+  await shot(light, 'consumers-light');
+
+  // --- Relations: how the streams hang together -------------------------
+  await light.getByRole('button', { name: 'How the streams hang together' }).click();
+  await settle(light, 2500);
+  await shot(light, 'relations-light');
+
+  // --- Side by side ------------------------------------------------------
+  await light.locator('.list-row').filter({ hasText: 'ORDERS' }).first().click();
+  await settle(light);
+  await light.locator('.list-row').filter({ hasText: 'SENSORS' }).first().click({ modifiers: ['Control'] });
+  await settle(light, 2000);
+  await shot(light, 'beside-light');
+
   await browser.close();
-  sub.unsubscribe();
+  await svc.stop();
   await nc.drain();
 }
 

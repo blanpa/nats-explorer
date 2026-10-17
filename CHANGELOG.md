@@ -4,6 +4,9 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+### Fixed
+- **"Follow this message" stays on its connection.** A second connection to the same server records the same messages, and the chain listed each of them twice, 0 µs apart.
+
 ## [0.6.1] - 2026-10-17
 
 A release about arriving whole. The server binary carries its UI, so it
