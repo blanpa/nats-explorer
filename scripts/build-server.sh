@@ -12,6 +12,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="${VERSION:-$(git -C "$ROOT" describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo 0.0.0)}"
 VERSION="${VERSION#v}"
+# Non-release builds (a branch name from workflow_dispatch, "dev", …) get a
+# version that is safe in a file name: 0.0.0-<name>.<short sha>.
+if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+  VERSION="0.0.0-$(echo "$VERSION" | tr -c 'A-Za-z0-9.\n' '.' | sed 's/^\.*//;s/\.*$//').$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo 0)"
+fi
 # Stamped so the "source" link in the UI points at the commit this was built
 # from, which is what the AGPL asks a network deployment to offer.
 COMMIT="${COMMIT:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo "")}"
