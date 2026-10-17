@@ -168,7 +168,7 @@ export default function MonitoringDashboard() {
                     <StatTile
                       label="API calls"
                       value={formatNumber(jsz.api?.total ?? 0)}
-                      sub={`${formatNumber(jsz.api?.errors ?? 0)} errors`}
+                      sub={`${formatNumber(jsz.api?.errors ?? 0)} ${jsz.api?.errors === 1 ? 'error' : 'errors'}`}
                       tone={(jsz.api?.errors ?? 0) > 0 ? 'warn' : undefined}
                     />
                   </StatStrip>

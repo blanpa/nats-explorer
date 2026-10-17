@@ -133,8 +133,8 @@ async function main() {
   const sub = responder(nc);
 
   // The second connection exists so the switcher has something to switch
-  // between; it is created first, because the newest one is the active one
-  // and every shot below is of the connection that sees everything.
+  // between. Every shot below is of the connection that sees everything;
+  // which one the UI starts on is not that, so each page switches to it.
   await api('POST', '/connect', { id: 'staging', name: 'Staging', servers: [NATS], authMethod: 'none', subscriptions: ['orders.>'], color: '#f2607a' }).catch(
     () => {},
   );
@@ -173,6 +173,15 @@ async function main() {
   // The theme follows the operating system on a first visit, and the machine
   // taking these is not the subject: the file names say which one is meant,
   // so each page is opened with the one it is named after.
+  const useLocal = async p => {
+    await p
+      .getByRole('button', { name: /Switch connection/ })
+      .first()
+      .click();
+    await settle(p, 800);
+    await p.getByRole('menuitem', { name: /Local/ }).first().click();
+    await settle(p, 1200);
+  };
   const openPage = async theme => {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, colorScheme: theme });
     await ctx.addInitScript(t => window.localStorage.setItem('ne.theme', `"${t}"`), theme);
@@ -180,6 +189,7 @@ async function main() {
     await p.goto(NE);
     await p.waitForSelector('text=Subjects', { timeout: 20000 });
     await settle(p, 2500);
+    await useLocal(p);
     return p;
   };
   const page = await openPage('dark');
@@ -205,10 +215,21 @@ async function main() {
   await shot(page, 'subjects-dark');
 
   // --- Monitoring: the health band, the overview, the curves ------------
+  // Traffic while the samples are taken, or every curve is a flat line. On a
+  // subject nothing subscribes to, so it shows in the server's counters and
+  // nowhere else.
+  let tick = 0;
+  const traffic = setInterval(() => {
+    tick++;
+    for (let i = 0; i < 4 + Math.round(6 * (1 + Math.sin(tick / 6))); i++) {
+      nc.publish('load.background', jc.encode({ n: tick, at: Date.now() }));
+    }
+  }, 200);
   await page.getByRole('button', { name: 'Monitoring' }).click();
   // The curves need a second sample before they are curves.
-  await settle(page, 12000);
+  await settle(page, 22000);
   await shot(page, 'monitoring-dark');
+  clearInterval(traffic);
 
   // --- Alerts -----------------------------------------------------------
   // One reading over the threshold just before the shot: a rule that is
@@ -221,19 +242,6 @@ async function main() {
   await shot(page, 'alerts-dark');
 
   // --- State: what the plant is doing right now -------------------------
-  // Both views read the active connection, and the active one is whichever
-  // the backend lists first. Pick the one that sees everything.
-  await page
-    .getByRole('button', { name: /Switch connection/ })
-    .first()
-    .click();
-  await settle(page, 800);
-  await page
-    .getByRole('menuitem', { name: /Local/ })
-    .first()
-    .click()
-    .catch(() => {});
-  await settle(page, 1200);
   await page.getByRole('button', { name: 'State' }).click();
   await settle(page);
   await page.getByLabel('Root subject').fill('sensors');
@@ -243,7 +251,9 @@ async function main() {
   // --- Events: what the servers reported ---------------------------------
   await makeAdvisories(nc);
   await page.getByRole('button', { name: 'Events' }).click();
-  await settle(page, 2500);
+  // The deletion is the last advisory and the one that arrives last.
+  await page.waitForSelector('text=Stream RETRIES was deleted', { timeout: 10000 }).catch(() => {});
+  await settle(page, 1500);
   await shot(page, 'events-dark');
 
   // --- Key-Value --------------------------------------------------------
@@ -279,7 +289,9 @@ async function main() {
   // where the replies landed only exist afterwards.
   // With a repeat count the button says how many, not "send".
   await page.getByRole('button', { name: /^Run 400/ }).click();
-  await page.waitForSelector('text=/p95/', { timeout: 60000 }).catch(() => {});
+  // Not "p95": the expectation field next to the button says that before
+  // the run has started.
+  await page.waitForSelector('text=First replies', { timeout: 60000 });
   await settle(page, 2000);
   await shot(page, 'requests-dark');
 

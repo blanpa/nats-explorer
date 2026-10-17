@@ -115,8 +115,12 @@ export default function EventsView() {
       </PaneHeader>
 
       <div className="flex items-center gap-3 px-3 py-1.5 text-xs border-b border-line">
-        <span className="text-danger">{counts.error} errors</span>
-        <span className="text-warn">{counts.warn} warnings</span>
+        <span className="text-danger">
+          {counts.error} {counts.error === 1 ? 'error' : 'errors'}
+        </span>
+        <span className="text-warn">
+          {counts.warn} {counts.warn === 1 ? 'warning' : 'warnings'}
+        </span>
         <span className="text-muted">{counts.info} other</span>
         <span className="ml-auto text-faint font-mono">{watching.length ? `watching ${watching.map(r => `${r}.>`).join(', ')}` : 'nothing watched'}</span>
       </div>
