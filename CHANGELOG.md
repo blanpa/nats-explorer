@@ -4,6 +4,12 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+### Added
+- **The Helm chart knows the NATS cluster next to it** (chart 0.2.0). Installed beside a cluster from the official NATS chart, the explorer lists that cluster as a ready-made connection, with its monitoring endpoint and, if given, the system account for the cluster view, and connects to it at start. More connections and `ne.*` settings can be seeded, the UI token is generated when none is given and kept on upgrades, and `helm test` checks the service. Example values for a three-node JetStream cluster with a system account are in `deploy/helm/nats-explorer/examples/nats-cluster/`; CI lints and renders the chart.
+
+### Changed
+- **Helm chart defaults** (upgrading from chart 0.1.0): `auth.mode` is now `token` instead of `none`, `nats.enabled` is on, the image defaults to 0.6.0, and the pod runs with a `RuntimeDefault` seccomp profile and its own ServiceAccount. With a seeded connection the server keeps the settings in `STORAGE_DIR` (an `emptyDir` without persistence), so connections are shared by everyone using the installation. Set `nats.enabled=false` and `auth.mode=none` for the old behaviour. Resource names, the auth secret and the volume stay the same.
+
 ## [0.6.0] - 2026-10-13
 
 A release about reaching further and seeing more of what is there. Alerts

@@ -1,0 +1,39 @@
+# NATS Explorer next to the cluster from nats.values.yaml:
+#
+#   helm install explorer ../.. -n messaging -f explorer.values.yaml
+#
+# The connection "NATS cluster" is preconfigured; servers and the monitoring
+# URL are derived from nats.serviceName ("nats") and the release namespace.
+nats:
+  name: NATS cluster
+  auth:
+    method: userpass
+    user: explorer
+    password: change-me-explorer
+  # unlocks the cluster module: all three nodes, JetStream meta leader and
+  # replica placement
+  systemAccount:
+    method: userpass
+    user: sys
+    password: change-me-sys
+  systemTopics:
+    js: true
+    srv: true
+
+# Keep request templates, connections made in the UI and the history
+persistence:
+  enabled: true
+  size: 5Gi
+config:
+  persistHistory: true
+
+# Publish the UI (needs an ingress controller; the UI token stays required)
+# ingress:
+#   enabled: true
+#   className: nginx
+#   host: nats-explorer.example.com
+#   annotations:
+#     cert-manager.io/cluster-issuer: letsencrypt
+#   tls:
+#     - secretName: nats-explorer-tls
+#       hosts: [nats-explorer.example.com]

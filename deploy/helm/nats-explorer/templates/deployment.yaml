@@ -1,102 +1,178 @@
+{{- $fileStorage := include "nats-explorer.fileStorage" . }}
+{{- $seed := include "nats-explorer.seedEnabled" . }}
+{{- $base := include "nats-explorer.basePath" . }}
+{{- $data := .Values.persistence.mountPath }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "nats-explorer.fullname" . }}
   labels: {{- include "nats-explorer.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: 1
   strategy:
     # The history lives in the pod: a second one alongside it would answer
-    # browsers with a different half of the traffic.
+    # browsers with a different half of the traffic. Recreate also frees a
+    # ReadWriteOnce volume before the new pod wants it.
     type: Recreate
   selector:
     matchLabels: {{- include "nats-explorer.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      labels: {{- include "nats-explorer.selectorLabels" . | nindent 8 }}
-      {{- with .Values.podAnnotations }}
-      annotations: {{- toYaml . | nindent 8 }}
-      {{- end }}
+      labels:
+        {{- include "nats-explorer.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/auth: {{ .Values.auth | toJson | sha256sum }}
+        {{- if $seed }}
+        checksum/seed: {{ include (print $.Template.BasePath "/secret-seed.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
+      serviceAccountName: {{ include "nats-explorer.serviceAccountName" . }}
+      automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if $seed }}
+      initContainers:
+        # Writes the seeded connections the way the server stores settings
+        # (settings.json plus secrets.json), unless a volume already has some.
+        - name: seed-settings
+          image: {{ include "nats-explorer.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              if [ "$SEED_OVERWRITE" = "true" ] || [ ! -s "$DATA/settings.json" ]; then
+                cp /seed/settings.json "$DATA/settings.json"
+                cp /seed/secrets.json "$DATA/secrets.json"
+                chmod 600 "$DATA/settings.json" "$DATA/secrets.json"
+                echo "settings seeded from the chart"
+              else
+                echo "keeping the stored settings (seed.overwrite=false)"
+              fi
+          env:
+            - name: DATA
+              value: {{ $data | quote }}
+            - name: SEED_OVERWRITE
+              value: {{ .Values.seed.overwrite | quote }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ $data }}
+            - name: seed
+              mountPath: /seed
+              readOnly: true
+      {{- end }}
       containers:
         - name: nats-explorer
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "nats-explorer.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
           ports:
             - name: http
               containerPort: 3002
+              protocol: TCP
           env:
             - name: PORT
               value: "3002"
             - name: HISTORY_MB
               value: {{ .Values.config.historyMb | quote }}
-            {{- $base := include "nats-explorer.basePath" . }}
             {{- if $base }}
             - name: BASE_PATH
               value: {{ $base | quote }}
             {{- end }}
-            {{- if .Values.persistence.enabled }}
+            {{- if $fileStorage }}
             - name: STORAGE_DIR
-              value: {{ .Values.persistence.mountPath | quote }}
-            {{- if .Values.config.persistHistory }}
+              value: {{ $data | quote }}
+            # No system keyring in a container: credentials go to secrets.json.
+            - name: NO_KEYRING
+              value: "1"
+            {{- end }}
+            {{- if and .Values.persistence.enabled .Values.config.persistHistory }}
             - name: HISTORY_DB
-              value: {{ printf "%s/history.db" .Values.persistence.mountPath | quote }}
+              value: {{ printf "%s/history.db" $data | quote }}
             - name: HISTORY_RETENTION
               value: {{ .Values.config.historyRetention | quote }}
-            {{- end }}
             {{- end }}
             {{- if eq .Values.auth.mode "token" }}
             - name: AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.auth.secretName | default (printf "%s-auth" (include "nats-explorer.fullname" .)) }}
-                  key: token
+                  name: {{ include "nats-explorer.authSecretName" . }}
+                  key: {{ include "nats-explorer.authSecretKey" . }}
             {{- else if eq .Values.auth.mode "users" }}
             - name: AUTH_USERS
               value: /auth/users
+            {{- else if ne .Values.auth.mode "none" }}
+            {{- fail (printf "auth.mode must be one of token, users, none (got %q)" .Values.auth.mode) }}
             {{- end }}
             {{- range $k, $v := .Values.config.extraEnv }}
             - name: {{ $k }}
               value: {{ $v | quote }}
             {{- end }}
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           volumeMounts:
-            # The image needs a writable temp dir with a read-only root.
+            # Writable temp dir with a read-only root (object store uploads
+            # may spill to disk).
             - name: tmp
               mountPath: /tmp
-            {{- if .Values.persistence.enabled }}
+            {{- if $fileStorage }}
             - name: data
-              mountPath: {{ .Values.persistence.mountPath }}
+              mountPath: {{ $data }}
             {{- end }}
             {{- if eq .Values.auth.mode "users" }}
             - name: auth
               mountPath: /auth
               readOnly: true
             {{- end }}
+          # /api/app needs no token
+          startupProbe:
+            httpGet:
+              path: {{ printf "%s/api/app" $base }}
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
           readinessProbe:
             httpGet:
-              path: {{ printf "%s/api/app" (include "nats-explorer.basePath" .) }}
+              path: {{ printf "%s/api/app" $base }}
               port: http
-            initialDelaySeconds: 2
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: {{ printf "%s/api/app" (include "nats-explorer.basePath" .) }}
+              path: {{ printf "%s/api/app" $base }}
               port: http
-            initialDelaySeconds: 10
             periodSeconds: 30
           resources: {{- toYaml .Values.resources | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir: {}
-        {{- if .Values.persistence.enabled }}
+        {{- if $fileStorage }}
         - name: data
+          {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:
-            claimName: {{ include "nats-explorer.fullname" . }}
+            claimName: {{ .Values.persistence.existingClaim | default (include "nats-explorer.fullname" .) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
+        {{- if $seed }}
+        - name: seed
+          secret:
+            secretName: {{ include "nats-explorer.fullname" . }}-seed
         {{- end }}
         {{- if eq .Values.auth.mode "users" }}
         - name: auth

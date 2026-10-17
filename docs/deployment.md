@@ -153,33 +153,55 @@ the prefix.
 
 ## Kubernetes (Helm)
 
-The chart in `deploy/helm/nats-explorer` installs the server with an optional
-volume and ingress:
+The chart in `deploy/helm/nats-explorer` installs the server next to a NATS
+cluster deployed with the [official NATS chart](https://github.com/nats-io/k8s)
+and lists that cluster as a ready-made connection: servers, monitoring
+endpoint and, if given, the system account for the cluster view. The example
+values in `examples/nats-cluster/` fit together: a three-node JetStream
+cluster with an application account and the system account.
 
 ```bash
-helm install nats-explorer ./deploy/helm/nats-explorer \
-  --set persistence.enabled=true \
-  --set config.persistHistory=true \
-  --set ingress.enabled=true \
-  --set ingress.host=nats-explorer.example.com
+helm repo add nats https://nats-io.github.io/k8s/helm/charts/
+helm install nats nats/nats -n messaging --create-namespace \
+  -f deploy/helm/nats-explorer/examples/nats-cluster/nats.values.yaml
+helm install explorer ./deploy/helm/nats-explorer -n messaging \
+  -f deploy/helm/nats-explorer/examples/nats-cluster/explorer.values.yaml
+kubectl -n messaging port-forward svc/explorer-nats-explorer 3002:3002
 ```
+
+Change the example passwords first. The command that `helm install` prints
+reads the UI token, which is generated when `auth.token` is empty. Without a
+NATS cluster beside it, `--set nats.enabled=false` installs the explorer on
+its own.
 
 The ingress path becomes `BASE_PATH`, so `--set ingress.path=/nats` serves it
 under a subpath of an existing host without a rewrite annotation. Connections
-and the recorded history need `persistence.enabled`; without it both live in
-the pod and the browser and are gone on restart.
+added in the UI and the recorded history need `persistence.enabled`; without
+it both are gone on restart, and the seeded connections are written anew.
 
 **One replica.** Each pod subscribes to NATS itself and records what it sees,
 so two pods would answer browsers with different halves of the history. The
-chart defaults to one and warns when told otherwise.
+chart always runs one.
+
+**Shared settings.** With a seeded connection the server keeps the settings
+in `STORAGE_DIR`, not in each browser: everyone using the installation sees
+the same connections and can use their credentials.
 
 | Value | Default | What it does |
 |:-- |:-- |:-- |
+| `nats.enabled` | `true` | Seed the connection to the NATS chart's service `nats.serviceName` |
+| `nats.auth.*`, `nats.systemAccount.*` | `none` | Credentials of the application and the system account |
+| `extraConnections`, `seed.extraSettings` | empty | More connections and `ne.*` settings to seed |
+| `seed.overwrite` | `false` | With persistence, replace the stored settings on every start |
 | `persistence.enabled` | `false` | A volume for `STORAGE_DIR`: connections, templates, preferences |
 | `config.persistHistory` | `false` | The SQLite copy of the history on that volume |
 | `config.historyMb` | `256` | Memory budget for the recorded history |
 | `ingress.path` | `/` | Anything else is passed as `BASE_PATH` |
-| `auth.mode` | `none` | `token` (from `auth.token` or `auth.secretName`) or `users` (`auth.usersSecretName`) |
+| `auth.mode` | `token` | `token` (`auth.token`, `auth.secretName` or generated), `users` (`auth.usersSecretName`) or `none` |
+| `env` | `[]` | More variables, e.g. the `OIDC_*` ones from a secret |
+
+The [chart README](https://github.com/blanpa/nats-explorer/tree/main/deploy/helm/nats-explorer)
+lists every value.
 
 ---
 

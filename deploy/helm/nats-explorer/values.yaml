@@ -1,8 +1,13 @@
-# One replica on purpose. The explorer keeps the recorded messages in its own
-# memory and, with persistence on, in a SQLite file beside it; two pods would
-# each see half the traffic and answer a browser with half a history. Scale
-# the NATS cluster, not this.
-replicaCount: 1
+# Out of the box the chart expects a NATS cluster installed with the official
+# chart (https://github.com/nats-io/k8s, `helm install nats nats/nats`) in the
+# same namespace and offers it as a ready-made connection in the UI. See
+# examples/nats-cluster/ for a matching NATS setup with a system account.
+#
+# There is deliberately no replicaCount. The explorer keeps its NATS
+# connections and the recorded messages in its own process and, with
+# persistence on, in a SQLite file beside it; two pods would each see half
+# the traffic and answer a browser with half a history. Scale the NATS
+# cluster, not this.
 
 image:
   repository: ghcr.io/blanpa/nats-explorer
@@ -14,13 +19,160 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
+# --- Access to the UI --------------------------------------------------------
+
+auth:
+  # "token", "users" or "none". Single sign-on is set with OIDC_* variables
+  # in `env` (see docs/deployment.md).
+  mode: token
+  # With mode "token": taken from an existing secret when secretName is set,
+  # otherwise the chart creates one from this value. Left empty, a random
+  # token is generated on install and kept on upgrades; the command printed
+  # by `helm install` reads it.
+  token: ""
+  secretName: ""
+  secretKey: token
+  # With mode "users": a secret holding a "users" key with
+  # name:role:bcrypt-hash lines.
+  usersSecretName: ""
+
+# --- Preconfigured connection to NATS ------------------------------------------
+
+# A connection to the in-cluster NATS deployment that appears in the
+# connection list of the UI. Everything is derived from `serviceName`, so with
+# the official chart installed as release "nats" nothing has to be changed.
+nats:
+  enabled: true
+  # Display name in the UI
+  name: NATS cluster
+  # Stable id of the connection (letters, digits, '-', '_')
+  id: nats-cluster
+  # Connect when the server starts, so the history records from the start
+  # and not only once a browser opened the connection.
+  autoConnect: true
+  # Service name of the NATS chart: the release name when it contains "nats"
+  # (release "nats" -> service "nats"), otherwise "<release>-nats".
+  serviceName: nats
+  # Namespace of the NATS release; defaults to the namespace of this release
+  namespace: ""
+  clusterDomain: cluster.local
+  port: 4222
+  # Explicit server URLs; when empty: nats://<serviceName>.<namespace>.svc.<clusterDomain>:<port>
+  servers: []
+  # HTTP monitoring endpoint (varz, connz, jsz, ...). When empty it points at
+  # the first pod through the headless service:
+  #   http://<serviceName>-0.<serviceName>-headless.<namespace>.svc.<clusterDomain>:<monitorPort>
+  # Pinning one pod keeps the rate charts stable; the cluster module sees all
+  # nodes through the system account anyway.
+  monitoringUrl: ""
+  monitorPort: 8222
+  # Subjects the subject tree subscribes to
+  subscriptions: [">"]
+  # Also subscribe to the system subjects ($SYS.>, $JS.>, $KV.>, $SRV.>)
+  systemTopics:
+    sys: false
+    js: false
+    kv: false
+    srv: false
+  # JetStream domain or API prefix (leaf nodes, hub/spoke setups)
+  jsDomain: ""
+  jsApiPrefix: ""
+
+  # Credentials of the application account. method: none | token | userpass | nkey | jwt
+  auth:
+    method: none
+    token: ""
+    user: ""
+    password: ""
+    nkeySeed: ""
+    # Content of a .creds file: --set-file nats.auth.creds=./app.creds
+    creds: ""
+
+  # Credentials of the system account ($SYS). They unlock the cluster module
+  # (all nodes, JetStream meta cluster, stream placement) and the cluster-wide
+  # server list. Without them the UI shows the connected node only.
+  systemAccount:
+    method: none
+    token: ""
+    user: ""
+    password: ""
+    nkeySeed: ""
+    creds: ""
+
+  tls:
+    enabled: false
+    # PEM contents (--set-file nats.tls.ca=./ca.crt ...)
+    ca: ""
+    cert: ""
+    key: ""
+    insecureSkipVerify: false
+
+# More connections, in the format the UI stores them (see
+# shared/src/connection.ts). Credentials in here end up in the seed Secret
+# like the ones above.
+#   - id: staging
+#     name: Staging
+#     servers: ["nats://nats.staging.svc.cluster.local:4222"]
+#     authMethod: userpass
+#     user: explorer
+#     pass: secret
+extraConnections: []
+
+# With preconfigured connections (or persistence) the server keeps the UI
+# settings in STORAGE_DIR instead of each browser: everyone using this
+# installation shares connections, credentials and request templates. That is
+# what makes the preconfigured connection show up, and it also means that
+# anyone who may use the UI can read the stored credentials.
+seed:
+  # Replace the stored settings with the seed on every pod start. Only needed
+  # with persistence: without it the storage is an emptyDir and is seeded on
+  # every start anyway. Overwriting drops connections and request templates
+  # added in the UI.
+  overwrite: false
+  # Further `ne.*` settings to seed, e.g. exported request templates
+  extraSettings: {}
+
+# --- The explorer itself -----------------------------------------------------
+
+# See docs/installation.md for the full list.
+config:
+  # In-memory budget for the recorded history, MB.
+  historyMb: 256
+  # Keep a SQLite copy of the history. Needs persistence.enabled.
+  persistHistory: false
+  historyRetention: 72h
+  # Extra environment as name: value, e.g. SOURCE_URL or ROLLUP_RETENTION.
+  extraEnv: {}
+
+# Extra environment as a list, for values from secrets, e.g.
+#   - name: OIDC_CLIENT_SECRET
+#     valueFrom: {secretKeyRef: {name: oidc, key: secret}}
+env: []
+
+# Where connections, templates and the recorded history live. Without it the
+# seeded connections are rewritten on every start, connections added in the
+# UI and the history are gone on restart.
+persistence:
+  enabled: false
+  size: 5Gi
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  existingClaim: ""
+  annotations: {}
+  mountPath: /data
+
+# --- Kubernetes plumbing -----------------------------------------------------
+
 service:
   type: ClusterIP
   port: 3002
+  annotations: {}
 
 ingress:
   enabled: false
   className: ""
+  # The websocket is pinged every 54 s, so the usual 60 s proxy timeouts are
+  # enough.
   annotations: {}
   host: nats-explorer.example.com
   # The path the explorer is served under. Anything but "/" is passed to the
@@ -32,54 +184,37 @@ ingress:
   #    hosts:
   #      - nats-explorer.example.com
 
-# Where connections, templates and the recorded history live. Without it the
-# UI keeps its state in the browser and the history is gone on restart.
-persistence:
-  enabled: false
-  size: 5Gi
-  storageClass: ""
-  accessMode: ReadWriteOnce
-  mountPath: /data
-
-# Settings of the explorer itself. See docs/installation.md for the full list.
-config:
-  # In-memory budget for the recorded history, MB.
-  historyMb: 256
-  # Keep a SQLite copy of the history. Needs persistence.enabled.
-  persistHistory: false
-  historyRetention: 72h
-  # Extra environment, e.g. SOURCE_URL or ROLLUP_RETENTION.
-  extraEnv: {}
-
-auth:
-  # "none", "token" or "users".
-  mode: none
-  # With mode "token": taken from an existing secret when secretName is set,
-  # otherwise the chart creates one from this value.
-  token: ""
-  secretName: ""
-  # With mode "users": a secret holding a "users" key with
-  # name:role:bcrypt-hash lines.
-  usersSecretName: ""
-
-resources:
-  requests:
-    cpu: 100m
-    memory: 256Mi
-  limits:
-    memory: 1Gi
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
 
 podAnnotations: {}
+podLabels: {}
+
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 65532
+  runAsGroup: 65532
   fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
 securityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
   capabilities:
     drop: [ALL]
 
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    # The subject tree and the history grow with traffic; raise this (and
+    # config.historyMb) for busy clusters.
+    memory: 1Gi
+
 nodeSelector: {}
 tolerations: []
 affinity: {}
+priorityClassName: ""

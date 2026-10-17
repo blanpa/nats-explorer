@@ -1,0 +1,37 @@
+# Values for the official NATS chart (https://github.com/nats-io/k8s):
+# a three-node cluster with JetStream, an application account and the system
+# account that NATS Explorer needs for its cluster view.
+#
+#   helm repo add nats https://nats-io.github.io/k8s/helm/charts/
+#   helm install nats nats/nats -n messaging --create-namespace -f nats.values.yaml
+#
+# Replace the passwords. To keep them out of this file, put them in a Secret,
+# expose them through container.env and write `<< $SYS_PASSWORD >>` here (see
+# the NATS chart's README on environment variables in config.merge).
+config:
+  cluster:
+    enabled: true
+    replicas: 3
+  jetstream:
+    enabled: true
+    fileStore:
+      pvc:
+        size: 10Gi
+  monitor:
+    # http://<pod>.nats-headless:8222, used by the monitoring view
+    enabled: true
+  merge:
+    system_account: SYS
+    accounts:
+      SYS:
+        users:
+          - user: sys
+            password: change-me-sys
+      APP:
+        jetstream: enabled
+        users:
+          - user: app
+            password: change-me-app
+          # the account NATS Explorer browses
+          - user: explorer
+            password: change-me-explorer

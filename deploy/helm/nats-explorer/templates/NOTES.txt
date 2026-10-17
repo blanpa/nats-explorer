@@ -1,4 +1,4 @@
-{{ .Chart.Name }} {{ .Chart.AppVersion }} is starting.
+{{ .Chart.Name }} {{ .Values.image.tag | default .Chart.AppVersion }} is starting.
 
 {{- if .Values.ingress.enabled }}
 Open it at http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.host }}{{ .Values.ingress.path }}
@@ -10,15 +10,36 @@ No ingress. Reach it with a port-forward:
 then open http://localhost:3002
 {{- end }}
 
+{{- if eq .Values.auth.mode "token" }}
+
+The UI asks for the access token once per browser tab:
+
+  kubectl --namespace {{ .Release.Namespace }} get secret {{ include "nats-explorer.authSecretName" . }} -o jsonpath='{.data.{{ include "nats-explorer.authSecretKey" . }}}' | base64 -d; echo
+{{- else if eq .Values.auth.mode "none" }}
+
+WARNING: auth.mode is "none". Anyone who reaches the service can use the
+NATS connections, and with them their credentials.
+{{- end }}
+
+{{- if .Values.nats.enabled }}
+{{- $n := include "nats-explorer.natsConnection" . | fromJson }}
+
+Preconfigured connection "{{ .Values.nats.name }}"{{ if .Values.nats.autoConnect }}, connected at start{{ end }}:
+  servers:    {{ join ", " $n.servers }}
+  monitoring: {{ $n.monitoringUrl }}
+{{- if eq .Values.nats.systemAccount.method "none" }}
+  No system account configured: the cluster module shows the connected node
+  only. Set nats.systemAccount.* to see every node of the cluster.
+{{- end }}
+{{- end }}
+
 {{- if not .Values.persistence.enabled }}
 
-Connections and the recorded history live in the pod and in the browser:
-a restart loses them. Set persistence.enabled=true (and
+Connections added in the UI and the recorded history live in the pod: a
+restart loses them. Set persistence.enabled=true (and
 config.persistHistory=true for the history on disk) to keep them.
-{{- end }}
-{{- if gt (int .Values.replicaCount) 1 }}
+{{- else if and (include "nats-explorer.seedEnabled" .) (not .Values.seed.overwrite) }}
 
-WARNING: replicaCount is {{ .Values.replicaCount }}. Each pod records only
-the traffic of its own NATS connection, so browsers get a different half of
-the history depending on which pod answers. Run one.
+Persistence is on: the seed is written only to an empty volume. Later changes
+to the connection values need seed.overwrite=true (drops UI-made changes).
 {{- end }}

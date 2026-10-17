@@ -1,10 +1,12 @@
 apiVersion: v2
 name: nats-explorer
-description: A NATS management tool and message explorer, served by a single Go binary
+description: A NATS management tool and message explorer, served by a single Go binary and preconfigured for a NATS cluster in the same Kubernetes cluster
 type: application
-# version is the chart's, appVersion the image tag the release workflow sets.
-version: 0.1.0
-appVersion: "0.3.0"
+# version is the chart's (bump on every chart change), appVersion the image
+# tag it deploys by default.
+version: 0.2.0
+appVersion: "0.6.0"
+kubeVersion: ">=1.23.0-0"
 home: https://blanpa.github.io/nats-explorer/
 sources:
   - https://github.com/blanpa/nats-explorer
@@ -12,3 +14,8 @@ keywords:
   - nats
   - jetstream
   - messaging
+maintainers:
+  - name: blanpa
+    url: https://github.com/blanpa
+annotations:
+  artifacthub.io/license: Apache-2.0
