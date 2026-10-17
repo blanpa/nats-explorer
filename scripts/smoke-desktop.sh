@@ -33,6 +33,16 @@ curl -fsS "http://127.0.0.1:$PORT/" | grep -qi '<div id="root"' || { echo "UI no
 code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "http://127.0.0.1:$PORT/ws")
 [ "$code" = 101 ] || { echo "websocket upgrade returned $code" >&2; exit 1; }
 echo "API, UI and websocket OK"
+# Every built asset has to come back as itself, not as the index the server
+# falls back to: go:embed without "all:" silently left out files starting with "_".
+if [ -d client/dist/assets ]; then
+  missing=0
+  for f in client/dist/assets/*; do
+    cmp -s "$f" <(curl -fsS "http://127.0.0.1:$PORT/assets/$(basename "$f")") || { echo "not served: assets/$(basename "$f")" >&2; missing=1; }
+  done
+  [ "$missing" = 0 ] || exit 1
+  echo "all $(ls client/dist/assets | wc -l) assets served"
+fi
 # File-backed settings: a value written now must survive a restart of the app.
 if curl -fsS "http://127.0.0.1:$PORT/api/app" | grep -q '"storage":"file"'; then
   curl -fsS -X PUT -H 'Content-Type: application/json' -d '{"smoke":true}' "http://127.0.0.1:$PORT/api/settings/ne.smoke" >/dev/null

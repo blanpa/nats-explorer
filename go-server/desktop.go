@@ -21,7 +21,10 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 )
 
-//go:embed frontend/dist
+// "all:" keeps files whose names start with "_", which Vite emits
+// (__vite-browser-external-*.js, imported by the decoders).
+//
+//go:embed all:frontend/dist
 var embeddedAssets embed.FS
 
 func main() {

@@ -38,24 +38,7 @@ func main() {
 		port = "3002"
 	}
 
-	publicPath := os.Getenv("PUBLIC_PATH")
-	if publicPath == "" {
-		// Release archives ship the UI as public/ next to the binary; a source
-		// checkout has it in client/dist.
-		exe, _ := os.Executable()
-		for _, candidate := range []string{filepath.Join(filepath.Dir(exe), "public"), filepath.Join(filepath.Dir(exe), "..", "client", "dist")} {
-			if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-				publicPath = candidate
-				break
-			}
-		}
-	}
-
-	var staticFS fs.FS
-	if info, err := os.Stat(publicPath); err == nil && info.IsDir() {
-		staticFS = os.DirFS(publicPath)
-		log.Printf("Serving static files from %s", publicPath)
-	}
+	staticFS := uiFS(os.Getenv("PUBLIC_PATH"))
 
 	authToken := os.Getenv("AUTH_TOKEN")
 	if authToken != "" {
@@ -197,6 +180,36 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
+}
+
+// uiFS finds the UI: PUBLIC_PATH when set, else the copy built into release
+// binaries, else public/ next to the binary or client/dist in a checkout.
+func uiFS(publicPath string) fs.FS {
+	isDir := func(p string) bool {
+		info, err := os.Stat(p)
+		return err == nil && info.IsDir()
+	}
+	if publicPath != "" {
+		if isDir(publicPath) {
+			log.Printf("Serving static files from %s", publicPath)
+			return os.DirFS(publicPath)
+		}
+		log.Printf("PUBLIC_PATH %s is not a directory, ignored", publicPath)
+	}
+	if ui := embeddedUI(); ui != nil {
+		log.Printf("Serving the built-in UI")
+		return ui
+	}
+	exe, _ := os.Executable()
+	for _, candidate := range []string{filepath.Join(filepath.Dir(exe), "public"), filepath.Join(filepath.Dir(exe), "..", "client", "dist")} {
+		if isDir(candidate) {
+			log.Printf("Serving static files from %s", candidate)
+			return os.DirFS(candidate)
+		}
+	}
+	// Without this a browser gets a bare 404 and nobody knows why.
+	log.Printf("No UI found: this binary was built without it and there is no public/ next to it; set PUBLIC_PATH to the UI files. Only the API is served.")
+	return nil
 }
 
 // hashPassword prints a users-file hash for `nats-explorer hash-password

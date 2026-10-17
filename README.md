@@ -50,7 +50,7 @@ The installers are not code-signed, so Windows and macOS ask once before running
 
 ### Server and Docker
 
-One binary that serves the web UI on `http://localhost:3002`, with the UI bundled as `public/` next to it.
+One binary that serves the web UI on `http://localhost:3002`, with the UI built in.
 
 | Target | Download |
 |---|---|

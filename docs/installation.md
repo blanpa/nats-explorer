@@ -56,7 +56,7 @@ Open `http://localhost:3002` and add your server in the connection dialog. In th
 
 ## Server binary
 
-One binary plus the UI as `public/` next to it, found automatically.
+One binary with the UI built in; it needs no other file.
 
 | Target | Download |
 |:-- |:-- |
@@ -81,7 +81,7 @@ cd nats-explorer && ./nats-explorer
 | Variable | Default | Description |
 |:-- |:-- |:-- |
 | `PORT` | `3002` | HTTP port of the web UI and API |
-| `PUBLIC_PATH` | auto | UI files; defaults to `public/` next to the binary or `client/dist` in a checkout |
+| `PUBLIC_PATH` | built in | Serve the UI from this folder instead of the copy built into the binary. Binaries built without it (`go run`) look for `public/` next to them or `client/dist` in a checkout |
 | `AUTH_TOKEN` | unset | When set, every API and websocket call needs this token. The UI asks for it once; the backend answers with a session cookie that lasts a day |
 | `OIDC_ISSUER` | unset | Single sign-on: the issuer URL of an OpenID Connect provider (Keycloak, Entra ID, Okta, Google, Authentik). Needs `OIDC_CLIENT_ID` and, for a confidential client, `OIDC_CLIENT_SECRET`; the callback is `<base>/api/oidc/callback`, or `OIDC_REDIRECT_URL`. `OIDC_ROLE_CLAIM` (default `groups`) is read for `OIDC_ADMIN_VALUES`, which make an admin, and `OIDC_ALLOWED_VALUES`, which, when set, are required to get in at all; `OIDC_CONNECTIONS_CLAIM` names a claim that narrows the connections a user sees |
 | `AUTH_USERS` | unset | Path of a users file (`name:role:bcrypt-hash` per line, roles `admin` and `viewer`). The UI asks for a login; viewers see everything but cannot publish or change anything. `nats-explorer hash-password` prints a hash |

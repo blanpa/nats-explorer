@@ -77,6 +77,36 @@ OutFile "..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe" # Name of the inst
 InstallDir "$LOCALAPPDATA\Programs\${INFO_PRODUCTNAME}" # per-user, no admin rights needed
 ShowInstDetails show # This will always show the installation details.
 
+# wails.writeUninstaller registers the app under HKLM, which a per-user
+# install without elevation cannot write: the app was missing from
+# "Installed apps". SHELL_CONTEXT is HKCU here (wails.setShellContext).
+!macro writeUninstaller
+    WriteUninstaller "$INSTDIR\uninstall.exe"
+
+    WriteRegStr SHELL_CONTEXT "${UNINST_KEY}" "Publisher" "${INFO_COMPANYNAME}"
+    WriteRegStr SHELL_CONTEXT "${UNINST_KEY}" "DisplayName" "${INFO_PRODUCTNAME}"
+    WriteRegStr SHELL_CONTEXT "${UNINST_KEY}" "DisplayVersion" "${INFO_PRODUCTVERSION}"
+    WriteRegStr SHELL_CONTEXT "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\${PRODUCT_EXECUTABLE}"
+    WriteRegStr SHELL_CONTEXT "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
+    WriteRegStr SHELL_CONTEXT "${UNINST_KEY}" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
+    WriteRegStr SHELL_CONTEXT "${UNINST_KEY}" "QuietUninstallString" "$\"$INSTDIR\uninstall.exe$\" /S"
+    WriteRegDWORD SHELL_CONTEXT "${UNINST_KEY}" "NoModify" 1
+    WriteRegDWORD SHELL_CONTEXT "${UNINST_KEY}" "NoRepair" 1
+
+    ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
+    IntFmt $0 "0x%08X" $0
+    WriteRegDWORD SHELL_CONTEXT "${UNINST_KEY}" "EstimatedSize" "$0"
+!macroend
+
+!macro deleteUninstaller
+    Delete "$INSTDIR\uninstall.exe"
+
+    DeleteRegKey SHELL_CONTEXT "${UNINST_KEY}"
+    # Installers up to 0.6.0 wrote the key to HKLM when run elevated.
+    SetRegView 64
+    DeleteRegKey HKLM "${UNINST_KEY}"
+!macroend
+
 Function .onInit
    !insertmacro wails.checkArchitecture
 FunctionEnd
@@ -96,7 +126,7 @@ Section
     !insertmacro wails.associateFiles
     !insertmacro wails.associateCustomProtocols
 
-    !insertmacro wails.writeUninstaller
+    !insertmacro writeUninstaller
 SectionEnd
 
 Section "uninstall"
@@ -112,5 +142,5 @@ Section "uninstall"
     !insertmacro wails.unassociateFiles
     !insertmacro wails.unassociateCustomProtocols
 
-    !insertmacro wails.deleteUninstaller
+    !insertmacro deleteUninstaller
 SectionEnd

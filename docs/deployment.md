@@ -54,7 +54,7 @@ docker run -d -p 3002:3002 -e AUTH_TOKEN=change-me ghcr.io/blanpa/nats-explorer:
 
 ## Server binary
 
-Download `nats-explorer-server-<version>-<os>-<arch>` from [Releases](https://github.com/blanpa/nats-explorer/releases); the UI is bundled as `public/` next to the binary.
+Download `nats-explorer-server-<version>-<os>-<arch>` from [Releases](https://github.com/blanpa/nats-explorer/releases); the UI is built into the binary, which needs no other file.
 
 ### systemd
 

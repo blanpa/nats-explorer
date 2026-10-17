@@ -16,6 +16,10 @@ if (-not $exeItem) { throw "no application binary found in $target" }
 $exe = $exeItem.FullName
 $uninst = Get-ChildItem $target -Filter 'uninstall*.exe' | Select-Object -First 1
 if (-not $uninst) { throw 'uninstaller missing' }
+# A per-user install registers under HKCU; HKLM is not writable without elevation.
+$uninstKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\NATS ExplorerNATS Explorer'
+if (-not (Test-Path $uninstKey)) { throw "not listed under installed apps: $uninstKey missing" }
+Write-Host "Registered as $((Get-ItemProperty $uninstKey).DisplayName) $((Get-ItemProperty $uninstKey).DisplayVersion)"
 Write-Host 'Launching installed app'
 $app = Start-Process -FilePath $exe -PassThru
 # The app writes nothing to stdout when started from PowerShell; find its API port via listening sockets.
@@ -38,4 +42,5 @@ $u = Start-Process -FilePath $uninst.FullName -ArgumentList '/S' -Wait -PassThru
 if ($u.ExitCode -ne 0) { throw "uninstaller exit code $($u.ExitCode)" }
 Start-Sleep -Seconds 2
 if (Test-Path $exe) { throw 'binary still present after uninstall' }
+if (Test-Path $uninstKey) { throw 'installed-apps entry still present after uninstall' }
 Write-Host 'Windows smoke test passed'

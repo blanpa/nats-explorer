@@ -27,7 +27,9 @@ COPY go-server/go.mod go-server/go.sum ./
 RUN go mod download
 
 COPY go-server/ ./
-RUN CGO_ENABLED=0 go build -o nats-explorer .
+# The UI is built into the binary (embedui), so the image needs no copy of it.
+COPY --from=client-builder /app/client/dist ./frontend/dist
+RUN CGO_ENABLED=0 go build -tags embedui -o nats-explorer .
 
 # Stage 3: Production
 FROM alpine:3.20
@@ -35,10 +37,8 @@ FROM alpine:3.20
 WORKDIR /app
 
 COPY --from=go-builder /app/nats-explorer .
-COPY --from=client-builder /app/client/dist ./client/dist
 
 ENV PORT=3002
-ENV PUBLIC_PATH=/app/client/dist
 
 EXPOSE 3002
 

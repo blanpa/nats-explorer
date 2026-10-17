@@ -7,6 +7,11 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 ### Added
 - **The Helm chart knows the NATS cluster next to it** (chart 0.2.0). Installed beside a cluster from the official NATS chart, the explorer lists that cluster as a ready-made connection, with its monitoring endpoint and, if given, the system account for the cluster view, and connects to it at start. More connections and `ne.*` settings can be seeded, the UI token is generated when none is given and kept on upgrades, and `helm test` checks the service. Example values for a three-node JetStream cluster with a system account are in `deploy/helm/nats-explorer/examples/nats-cluster/`; CI lints and renders the chart.
 
+### Fixed
+- **The server binary carries its UI.** Release archives shipped the UI as `public/` next to the binary; started without it, for instance straight out of the zip in Windows Explorer, the server answered every page with a bare 404. The UI is now built into the binary, the archives hold only the binary and a README, and the Docker image no longer copies the UI separately. `PUBLIC_PATH` still serves it from a folder instead, and a build without the UI says so at start.
+- **The desktop app embeds every file of the UI.** Files whose names start with `_` were left out, among them a module the Avro and Protobuf decoders load.
+- **The Windows installer lists the app under Installed apps** for the user who installed it. It wrote the entry to HKLM, which a per-user install without elevation cannot write; the uninstaller also removes an entry an older installer left there.
+
 ### Changed
 - **Helm chart defaults** (upgrading from chart 0.1.0): `auth.mode` is now `token` instead of `none`, `nats.enabled` is on, the image defaults to 0.6.0, and the pod runs with a `RuntimeDefault` seccomp profile and its own ServiceAccount. With a seeded connection the server keeps the settings in `STORAGE_DIR` (an `emptyDir` without persistence), so connections are shared by everyone using the installation. Set `nats.enabled=false` and `auth.mode=none` for the old behaviour. Resource names, the auth secret and the volume stay the same.
 

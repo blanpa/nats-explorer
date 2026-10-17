@@ -148,6 +148,21 @@ jobs:
           cache-dependency-path: go-server/go.sum
       - name: Build and package
         run: VERSION=${{ github.ref_name }} scripts/build-server.sh ${{ matrix.goos }}/${{ matrix.goarch }}
+      # The binary has to serve the UI on its own, with no public/ next to it.
+      - name: Smoke test the binary alone
+        if: matrix.name == 'linux-x64'
+        run: |
+          mkdir -p "$RUNNER_TEMP/alone"
+          tar -xzf dist/server/*.tar.gz -C "$RUNNER_TEMP/alone" --strip-components=1
+          ls "$RUNNER_TEMP/alone"
+          cp "$RUNNER_TEMP/alone/nats-explorer" "$RUNNER_TEMP/nats-explorer"
+          cd "$RUNNER_TEMP" && PORT=3099 ./nats-explorer > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:3099/ -o index.html && break; sleep 0.5; done
+          cat "$RUNNER_TEMP/server.log"
+          grep -q 'id="root"' index.html
+          for f in client/dist/assets/*; do
+            cmp -s "$f" <(curl -fsS "http://127.0.0.1:3099/assets/$(basename "$f")") || { echo "not served: $f"; exit 1; }
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: server-${{ matrix.name }}

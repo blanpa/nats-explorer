@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the headless server for one or all platforms and packages it the way
-# the release workflow ships it (binary + public/ UI + README.txt).
+# the release workflow ships it (binary with the UI built in + README.txt).
 #
 #   scripts/build-server.sh                 # all five platforms
 #   scripts/build-server.sh linux/amd64     # one platform (GOOS/GOARCH)
@@ -18,10 +18,15 @@ COMMIT="${COMMIT:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo ""
 LDFLAGS="-s -w -X main.version=$VERSION -X main.commit=$COMMIT"
 OUT="$ROOT/dist/server"
 [ -d "$ROOT/client/dist" ] || { echo "client/dist missing: run bun run --filter client build first" >&2; exit 1; }
+# The UI is embedded (-tags embedui) from go-server/frontend/dist, the same
+# place the desktop build embeds it from.
+rm -rf "$ROOT/go-server/frontend/dist"
+mkdir -p "$ROOT/go-server/frontend"
+cp -r "$ROOT/client/dist" "$ROOT/go-server/frontend/dist"
 
 if [ "${1:-}" = current ]; then
-  (cd "$ROOT/go-server" && CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS" -o "$ROOT/dist/nats-explorer" .)
-  echo "built dist/nats-explorer (serves client/dist)"
+  (cd "$ROOT/go-server" && CGO_ENABLED=0 go build -trimpath -tags embedui -ldflags "$LDFLAGS" -o "$ROOT/dist/nats-explorer" .)
+  echo "built dist/nats-explorer (UI built in)"
   exit 0
 fi
 
@@ -37,12 +42,13 @@ for t in $targets; do
   ext=""; [ "$goos" = windows ] && ext=.exe
   pkg="nats-explorer-server-$VERSION-$name"
   rm -rf "$OUT/$pkg"; mkdir -p "$OUT/$pkg"
-  (cd "$ROOT/go-server" && CGO_ENABLED=0 GOOS=$goos GOARCH=$goarch go build -trimpath -ldflags "$LDFLAGS" -o "$OUT/$pkg/nats-explorer$ext" .)
-  cp -r "$ROOT/client/dist" "$OUT/$pkg/public"
+  (cd "$ROOT/go-server" && CGO_ENABLED=0 GOOS=$goos GOARCH=$goarch go build -trimpath -tags embedui -ldflags "$LDFLAGS" -o "$OUT/$pkg/nats-explorer$ext" .)
   cat > "$OUT/$pkg/README.txt" <<TXT
 NATS Explorer $VERSION, server build for $name.
-Run the binary; it serves the UI on http://localhost:3002 from the public/ folder next to it.
-Environment: PORT (default 3002), PUBLIC_PATH, AUTH_TOKEN (optional API token),
+Run the binary; it serves the UI on http://localhost:3002. The UI is built in,
+the binary needs no other file and can be copied anywhere on its own.
+Environment: PORT (default 3002), PUBLIC_PATH (serve the UI from a folder instead),
+AUTH_TOKEN (optional API token),
 STORAGE_DIR (keep connections and templates on the server), NO_KEYRING.
 TXT
   if [ "$goos" = windows ]; then
