@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { RefreshCw, Server } from 'lucide-react';
 import ClusterOverview from './ClusterOverview';
+import ConnectionLog, { ConnectionLinks } from './ConnectionLog';
 import TopologyView from './TopologyView';
 import type { ConnectionStatus, ServerInfo } from 'shared';
 import { api } from '../../lib/api';
@@ -123,6 +124,9 @@ function ServerCard({ conn }: { conn: ConnectionStatus }) {
           )}
         </div>
       )}
+      {/* Kept while disconnected too: that is when they are read. */}
+      <ConnectionLinks conn={conn} />
+      <ConnectionLog conn={conn} />
     </div>
   );
 }

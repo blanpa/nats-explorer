@@ -169,6 +169,8 @@ func exportBundle(w http.ResponseWriter, r *http.Request, d *deps) {
 	writeJSONEntry(zw, "server.json", server)
 	writeJSONEntry(zw, "streams.json", bundleStreams(r.Context(), d, connID))
 	writeJSONEntry(zw, "kv.json", bundleKV(r.Context(), d, connID))
+	// The connection log answers "it keeps disconnecting" before anyone asks.
+	writeJSONEntry(zw, "connection-log.json", d.store.Log(connID))
 }
 
 // bundleMessages reads the range from the database when there is one, and

@@ -51,12 +51,14 @@ export default function StatusBar() {
 
   // The uptime has to move on its own: on a quiet connection nothing else
   // would re-render the bar, and a duration that stands still is worse than
-  // none. Five seconds is fine for a figure that counts in minutes.
+  // none. Five seconds is fine for a figure that counts in minutes; the
+  // countdown of a paused live feed goes by the second.
   const [, tick] = useState(0);
+  const pausing = !!active?.livePausedUntil && active.livePausedUntil > Date.now();
   useEffect(() => {
-    const t = setInterval(() => tick(n => n + 1), 5000);
+    const t = setInterval(() => tick(n => n + 1), pausing ? 1000 : 5000);
     return () => clearInterval(t);
-  }, []);
+  }, [pausing]);
 
   let throttled = 0;
   let received = 0;
@@ -84,7 +86,7 @@ export default function StatusBar() {
           {active.name} · {active.server?.replace(/^nats:\/\//, '')}
           {active.connectedAt && (
             <span
-              title={`Connected since ${new Date(active.connectedAt).toLocaleString()}${active.reconnects ? `, ${active.reconnects} reconnect${active.reconnects === 1 ? '' : 's'}` : ''}`}
+              title={`Connected since ${new Date(active.connectedAt).toLocaleString()}${active.links?.length ? `, over ${active.links.length} NATS connection${active.links.length === 1 ? '' : 's'} (${active.links.map(l => l.name).join(', ')})` : ''}${active.reconnects ? `, ${active.reconnects} reconnect${active.reconnects === 1 ? '' : 's'}` : ''}${active.liveReconnects ? `; the subscriptions' connection reconnected ${active.liveReconnects}×` : ''}${active.liveError ? `; the subscriptions share this connection, the server refused a second one: ${active.liveError}` : ''}${active.lastDrop ? `; last lost ${new Date(active.lastDrop.at).toLocaleString()}${active.lastDrop.live ? ' (subscriptions)' : ''}: ${active.lastDrop.reason}` : ''}`}
             >
               {' '}
               · up {formatUptime(Date.now() - active.connectedAt)}
@@ -94,6 +96,38 @@ export default function StatusBar() {
         </span>
       )}
       <span className="flex-1" />
+      {/* The server closing the connection for reading too slowly looks like
+          a flaky network from here; it is the subscriptions, and it repeats
+          until they change. */}
+      {/* Only the feed is gone meanwhile: streams, KV and requests run on the
+          other connection. */}
+      {active?.livePausedUntil && active.livePausedUntil > Date.now() ? (
+        // A pause, not a failure: coming straight back would only fill the
+        // server's buffer for the explorer again.
+        <span
+          className="text-warn whitespace-nowrap shrink-0"
+          title={`The connection the subscriptions run on dropped ${active.liveFlaps ?? 1}× in a row within a minute of connecting. It waits before it tries again, so the server does not hold a full buffer for the explorer each time. Streams, KV and requests are unaffected.`}
+        >
+          live feed resumes in {Math.max(1, Math.ceil((active.livePausedUntil - Date.now()) / 1000))} s
+        </span>
+      ) : (
+        active?.liveReconnecting && (
+          <span
+            className="text-warn whitespace-nowrap shrink-0"
+            title="The connection the subscriptions run on was lost and is being reconnected. Streams, KV and requests are unaffected."
+          >
+            live feed reconnecting…
+          </span>
+        )
+      )}
+      {active?.slowConsumerDrops ? (
+        <span
+          className="font-mono tabular-nums text-warn whitespace-nowrap shrink-0"
+          title={`The NATS server closed the connection of the subscriptions ${active.slowConsumerDrops}× as a slow consumer${active.lastDrop?.slowConsumer ? `, last at ${new Date(active.lastDrop.at).toLocaleString()} (${active.lastDrop.reason})` : ''}: the subscriptions match more data than reaches the explorer in time, over this network or on this host. Messages are lost until it is reconnected; streams, KV and requests run on a connection of their own and stay up. Narrower subscription patterns (instead of >), or an explorer closer to the server, keep it up.`}
+        >
+          {active.slowConsumerDrops}× slow consumer
+        </span>
+      ) : null}
       {connectedCount > 0 && (
         <span className="flex items-center gap-4 shrink-0 whitespace-nowrap">
           <span className="font-mono tabular-nums" title="Subjects seen">
@@ -132,7 +166,7 @@ export default function StatusBar() {
           {throttled > 0 && (
             <span
               className="font-mono tabular-nums text-warn"
-              title="Messages of the selected subject that did not fit the live feed (at most 50 msg/s per subject and 2000 msg/s per tab). They are counted and kept in the history."
+              title="Messages of the selected subject that did not fit the live feed (at most 50 msg/s per subject, and 2000 msg/s or 2 MB/s per tab). They are counted and kept in the history."
             >
               {formatNumber(throttled)} throttled
             </span>

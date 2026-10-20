@@ -2,8 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"time"
+
+	"github.com/nats-io/nats.go"
 
 	"nats-explorer/internal/connection"
 	"nats-explorer/internal/settings"
@@ -53,10 +56,26 @@ func autoConnectSaved(store *settings.Store, connect func(cfg connection.Config)
 			}
 		}
 		started := time.Now()
-		if err := connect(cfg); err != nil {
+		err := connect(cfg)
+		// The explorer may start before NATS does, in a pod or a compose
+		// file: a server that is not there yet is waited for. One that
+		// answers and says no -- a wrong password, a TLS mismatch -- is
+		// not: retrying would hide the answer behind "reconnecting".
+		if unreachable(err) {
+			log.Printf("auto-connect %q: %v; trying in the background until it answers", cfg.Name, err)
+			cfg.Retry = true
+			err = connect(cfg)
+		}
+		if err != nil {
 			log.Printf("auto-connect %q: %v", cfg.Name, err)
 			continue
 		}
-		log.Printf("auto-connect %q: connected in %s", cfg.Name, time.Since(started).Round(time.Millisecond))
+		log.Printf("auto-connect %q: opened in %s", cfg.Name, time.Since(started).Round(time.Millisecond))
 	}
+}
+
+// unreachable reports whether a connect failed for want of a server rather
+// than because one turned it down.
+func unreachable(err error) bool {
+	return errors.Is(err, nats.ErrNoServers) || errors.Is(err, nats.ErrTimeout)
 }

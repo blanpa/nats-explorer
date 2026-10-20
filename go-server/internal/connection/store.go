@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -43,6 +44,10 @@ type Config struct {
 	JSAPIPrefix string `json:"jsApiPrefix,omitempty"`
 	// SSH, when set, routes the connection through a bastion host.
 	SSH *SSHConfig `json:"ssh,omitempty"`
+	// Retry keeps trying a server that cannot be reached at the first
+	// attempt instead of failing the connect: for connections opened at
+	// start, when the explorer may come up before NATS does.
+	Retry bool `json:"-"`
 	// Optional credentials for the NATS system account ($SYS). They open a
 	// second connection used only for cluster-wide monitoring requests.
 	SysAuthMethod string `json:"sysAuthMethod,omitempty"`
@@ -67,11 +72,31 @@ type Status struct {
 	JSAPIPrefix   string   `json:"jsApiPrefix,omitempty"`
 	// SysAccount is true when a system-account connection is open; SysError
 	// explains why it is not although credentials were given.
-	SysAccount  bool   `json:"sysAccount"`
-	SysError    string `json:"sysError,omitempty"`
-	LastError   string `json:"lastError,omitempty"`
-	Reconnects  uint64 `json:"reconnects"`
-	ConnectedAt int64  `json:"connectedAt,omitempty"`
+	SysAccount bool   `json:"sysAccount"`
+	SysError   string `json:"sysError,omitempty"`
+	LastError  string `json:"lastError,omitempty"`
+	Reconnects uint64 `json:"reconnects"`
+	// LastDrop is the last time the connection was lost, with the server's
+	// reason when it could be asked; SlowConsumerDrops counts the times the
+	// server closed it as a slow consumer.
+	LastDrop          *Drop `json:"lastDrop,omitempty"`
+	SlowConsumerDrops int   `json:"slowConsumerDrops,omitempty"`
+	// The subscriptions have a connection of their own (see Managed.LiveNC):
+	// whether it is reconnecting and how often it did, or why there is
+	// none and they share the API's.
+	LiveReconnecting bool   `json:"liveReconnecting,omitempty"`
+	LiveReconnects   uint64 `json:"liveReconnects,omitempty"`
+	LiveError        string `json:"liveError,omitempty"`
+	// LivePauseMs is how long the live connection still waits before it
+	// tries again after it dropped LiveFlaps times in a row soon after
+	// connecting (live.go). A duration, not a time: the browser's clock
+	// need not agree with the server's.
+	LivePauseMs int64 `json:"livePauseMs,omitempty"`
+	LiveFlaps   int   `json:"liveFlaps,omitempty"`
+	// Links are the NATS connections open for it right now: the API's,
+	// the subscriptions' and the system account's, as far as they exist.
+	Links       []LinkStatus `json:"links,omitempty"`
+	ConnectedAt int64        `json:"connectedAt,omitempty"`
 	// Bundle marks an imported support bundle: recorded messages, no server.
 	Bundle bool `json:"bundle,omitempty"`
 	// SSH says the connection goes through a bastion; SSHHostKey is the
@@ -81,9 +106,19 @@ type Status struct {
 }
 
 type Managed struct {
-	ID          string
-	Config      Config
-	NC          *nats.Conn
+	ID     string
+	Config Config
+	NC     *nats.Conn
+	// LiveNC carries the subscriptions, so a server that drops it as a slow
+	// consumer leaves the API -- streams, KV, requests -- standing. Nil when
+	// the server would not take a second connection, LiveError says why, and
+	// NC carries them then; nil too while nothing is subscribed. Guarded by
+	// liveMu, see live.go.
+	LiveNC      *nats.Conn
+	LiveError   string
+	liveMu      sync.Mutex
+	liveOpts    []nats.Option
+	onLiveMoved func()
 	SysNC       *nats.Conn // system account connection, nil unless configured
 	SysError    string
 	Color       string
@@ -91,41 +126,123 @@ type Managed struct {
 	// tunnel is the SSH session the connection goes through, if any.
 	tunnel *sshDialer
 
+	// policyMu guards the live connection's reconnect policy (live.go);
+	// apiUp is whether the API's connection is connected, for that policy,
+	// which runs under nats.go's lock and cannot ask the connection
+	policyMu sync.Mutex
+	apiUp    atomic.Bool
+
 	mu        sync.Mutex
 	lastError string
+	// lastErrorLink is the link lastError came from
+	lastErrorLink string
+	// what is needed to ask the server why a connection was lost (drop.go)
+	api, live, system link
+	// log is the store's log for this connection ID (log.go); stop ends
+	// the sampling of its rates
+	log               *eventLog
+	stop              chan struct{}
+	lastDrop          *Drop
+	slowConsumerDrops int
 }
 
-func (m *Managed) setError(err error) {
+// setError sets the error the UI shows for a connection, or clears it when
+// err is nil -- an error of the API link is cleared by the API link coming
+// back, one of the live link by either: a live connection that works again
+// must not leave its old error standing while the API never dropped.
+func (m *Managed) setError(link string, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if err != nil {
-		m.lastError = err.Error()
-	} else {
-		m.lastError = ""
+	switch {
+	case err != nil:
+		m.lastError, m.lastErrorLink = err.Error(), link
+	case link == "api" || m.lastErrorLink == link:
+		m.lastError, m.lastErrorLink = "", ""
 	}
+}
+
+// LinkStatus is one of the NATS connections behind a connection.
+type LinkStatus struct {
+	// Name is api, live or system.
+	Name         string `json:"name"`
+	Connected    bool   `json:"connected"`
+	Reconnecting bool   `json:"reconnecting"`
+	Server       string `json:"server,omitempty"`
+	CID          uint64 `json:"cid,omitempty"`
+	// Since is when the current connection was made, in ms.
+	Since      int64  `json:"since,omitempty"`
+	Reconnects uint64 `json:"reconnects"`
+}
+
+// links describes the NATS connections that exist for m, in the order
+// they are made.
+func (m *Managed) links() []LinkStatus {
+	var out []LinkStatus
+	live, _ := m.liveConn()
+	for _, c := range []struct {
+		l  *link
+		nc *nats.Conn
+	}{{&m.api, m.NC}, {&m.system, m.SysNC}, {&m.live, live}} {
+		if c.nc == nil || c.nc.IsClosed() {
+			continue
+		}
+		ls := LinkStatus{Name: c.l.name, Connected: c.nc.IsConnected(), Reconnecting: c.nc.IsReconnecting(), Reconnects: c.nc.Stats().Reconnects}
+		m.mu.Lock()
+		if ls.Connected {
+			ls.Server, ls.CID = c.l.url, c.l.cid
+			if !c.l.since.IsZero() {
+				ls.Since = c.l.since.UnixMilli()
+			}
+		}
+		m.mu.Unlock()
+		out = append(out, ls)
+	}
+	return out
 }
 
 func (m *Managed) status() Status {
 	m.mu.Lock()
 	lastErr := m.lastError
+	var drop *Drop
+	if m.lastDrop != nil {
+		d := *m.lastDrop
+		drop = &d
+	}
+	slowDrops := m.slowConsumerDrops
+	connectedAt := m.ConnectedAt
 	m.mu.Unlock()
+	m.policyMu.Lock()
+	flaps, pausedUntil := m.live.flaps, m.live.pausedUntil
+	m.policyMu.Unlock()
+	live, liveErr := m.liveConn()
 
 	nc := m.NC
 	st := Status{
-		ID:            m.ID,
-		Name:          m.Config.Name,
-		Color:         m.Color,
-		Servers:       m.Config.Servers,
-		Subscriptions: m.Config.Subscriptions,
-		JSDomain:      m.Config.JSDomain,
-		JSAPIPrefix:   m.Config.JSAPIPrefix,
-		SysAccount:    m.SysNC != nil && m.SysNC.IsConnected(),
-		SysError:      m.SysError,
-		LastError:     lastErr,
+		ID:                m.ID,
+		Name:              m.Config.Name,
+		Color:             m.Color,
+		Servers:           m.Config.Servers,
+		Subscriptions:     m.Config.Subscriptions,
+		JSDomain:          m.Config.JSDomain,
+		JSAPIPrefix:       m.Config.JSAPIPrefix,
+		SysAccount:        m.SysNC != nil && m.SysNC.IsConnected(),
+		SysError:          m.SysError,
+		LastError:         lastErr,
+		LastDrop:          drop,
+		SlowConsumerDrops: slowDrops,
+		LiveError:         liveErr,
+		Links:             m.links(),
+	}
+	if left := time.Until(pausedUntil); left > 0 {
+		st.LivePauseMs, st.LiveFlaps = max(left.Milliseconds(), 1), flaps
 	}
 	if m.tunnel != nil {
 		st.SSH = true
 		st.SSHHostKey = m.tunnel.HostKeySeen()
+	}
+	if live != nil {
+		st.LiveReconnecting = live.IsReconnecting()
+		st.LiveReconnects = live.Stats().Reconnects
 	}
 	if nc == nil {
 		return st
@@ -135,7 +252,11 @@ func (m *Managed) status() Status {
 	st.Reconnects = nc.Stats().Reconnects
 	if st.Connected {
 		st.Server = nc.ConnectedUrl()
-		st.ConnectedAt = m.ConnectedAt.UnixMilli()
+		// Connected a moment before the connect is announced, with Retry:
+		// no time rather than the year one.
+		if !connectedAt.IsZero() {
+			st.ConnectedAt = connectedAt.UnixMilli()
+		}
 	}
 	return st
 }
@@ -144,13 +265,17 @@ type Store struct {
 	mu          sync.RWMutex
 	connections map[string]*Managed
 	// virtual holds imported bundles, which have no NATS connection
-	virtual  map[string]Status
+	virtual map[string]Status
+	// logs outlive the connections they are about; see eventLog
+	logs     map[string]*eventLog
 	colorIdx int
 	onChange func()
+	// onLiveMoved moves a connection's subscriptions to its API connection
+	onLiveMoved func(connID string)
 }
 
 func NewStore() *Store {
-	return &Store{connections: make(map[string]*Managed), virtual: make(map[string]Status)}
+	return &Store{connections: make(map[string]*Managed), virtual: make(map[string]Status), logs: make(map[string]*eventLog)}
 }
 
 // SetOnChange registers a callback fired whenever a connection is added,
@@ -165,26 +290,38 @@ func (s *Store) notify() {
 	}
 }
 
-func buildOptions(cfg Config, managed *Managed, notify func()) ([]nats.Option, error) {
+// commonOptions are what every NATS connection of the explorer gets.
+//
+// A connection that died without a word -- a VPN or a firewall dropping it
+// silently -- is noticed by the pings: one every 20 s, and two unanswered
+// make it stale, so the UI says "reconnecting" after about a minute, not
+// after the four to six minutes of nats.go's defaults.
+func commonOptions(cfg Config, name string) []nats.Option {
 	opts := []nats.Option{
-		nats.Name("nats-explorer"),
+		nats.Name(name),
 		nats.Timeout(5 * time.Second),
 		nats.MaxReconnects(-1),
-		nats.ReconnectWait(2 * time.Second),
-		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
-			managed.setError(err)
-			notify()
-		}),
-		nats.ReconnectHandler(func(_ *nats.Conn) {
-			managed.setError(nil)
-			notify()
-		}),
-		nats.ClosedHandler(func(_ *nats.Conn) {
-			notify()
-		}),
-		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
-			managed.setError(err)
-		}),
+		nats.ReconnectWait(reconnectWait),
+		nats.PingInterval(20 * time.Second),
+		nats.MaxPingsOutstanding(2),
+	}
+	if cfg.Retry {
+		opts = append(opts, nats.RetryOnFailedConnect(true))
+	}
+	return opts
+}
+
+// buildOptions makes the options of the API connection or of the
+// subscriptions' one (l.name "live"). A lost live connection is reported as
+// a drop, not as the connection's error: the API is still there.
+func buildOptions(cfg Config, managed *Managed, l *link, notify func()) ([]nats.Option, error) {
+	name := "nats-explorer"
+	if l.name == "live" {
+		name = "nats-explorer (live)"
+	}
+	opts := append(commonOptions(cfg, name), managed.handlers(l, notify)...)
+	if l.name == "live" {
+		opts = append(opts, nats.ReconnectToServer(managed.nextLiveServer))
 	}
 
 	authOpts, err := authOptions(cfg.AuthMethod, cfg.Token, cfg.User, cfg.Pass, cfg.NKeySeed, cfg.Creds)
@@ -259,8 +396,8 @@ func authOptions(method, token, user, pass, nkeySeed, creds string) ([]nats.Opti
 }
 
 // buildSysOptions dials the same servers with the system-account credentials.
-func buildSysOptions(cfg Config) ([]nats.Option, error) {
-	opts := []nats.Option{nats.Name("nats-explorer (system)"), nats.Timeout(5 * time.Second), nats.MaxReconnects(-1), nats.ReconnectWait(2 * time.Second)}
+func buildSysOptions(cfg Config, managed *Managed, notify func()) ([]nats.Option, error) {
+	opts := append(commonOptions(cfg, "nats-explorer (system)"), managed.handlers(&managed.system, notify)...)
 	authOpts, err := authOptions(cfg.SysAuthMethod, cfg.SysToken, cfg.SysUser, cfg.SysPass, cfg.SysNKeySeed, cfg.SysCreds)
 	if err != nil {
 		return nil, err
@@ -309,26 +446,39 @@ func (s *Store) Connect(cfg Config) (*Managed, error) {
 		s.Disconnect(cfg.ID)
 	}
 
-	managed := &Managed{ID: cfg.ID, Config: cfg}
+	managed := &Managed{ID: cfg.ID, Config: cfg, log: s.logFor(cfg.ID)}
+	managed.api.name, managed.live.name, managed.system.name = "api", "live", "system"
 
-	opts, err := buildOptions(cfg, managed, s.notify)
-	if err != nil {
-		return nil, err
+	// A connect that fails is logged too: it is the first line of most
+	// "it does not connect" reports.
+	failed := func(err error) error {
+		managed.event(&managed.api, "failed", strings.Join(redactURLs(cfg.Servers), ", ")+": "+err.Error())
+		return err
 	}
+	opts, err := buildOptions(cfg, managed, &managed.api, s.notify)
+	if err != nil {
+		return nil, failed(err)
+	}
+	liveOpts, _ := buildOptions(cfg, managed, &managed.live, s.notify)
 	// Inboxes of this connection's own: every reply the explorer waits for,
 	// the JetStream API's included, arrives under one prefix, so a `>`
 	// subscription can tell its own traffic from the network's (see
 	// subscription.Manager). Still under _INBOX, which permissions allow.
-	opts = append(opts, nats.CustomInboxPrefix(nats.NewInbox()))
+	// Both connections share it, so the live one knows the API's replies;
+	// each still answers under a subject of its own below it.
+	inbox := nats.CustomInboxPrefix(nats.NewInbox())
+	opts = append(opts, inbox)
+	liveOpts = append(liveOpts, inbox)
 	// Through a bastion: one SSH session, every dial of the NATS client
 	// through it, the system-account connection included.
 	if cfg.SSH != nil && strings.TrimSpace(cfg.SSH.Host) != "" {
 		tunnel, err := newSSHDialer(*cfg.SSH)
 		if err != nil {
-			return nil, err
+			return nil, failed(err)
 		}
 		managed.tunnel = tunnel
 		opts = append(opts, nats.SetCustomDialer(tunnel))
+		liveOpts = append(liveOpts, nats.SetCustomDialer(tunnel))
 	}
 
 	nc, err := nats.Connect(strings.Join(cfg.Servers, ","), opts...)
@@ -336,27 +486,42 @@ func (s *Store) Connect(cfg Config) (*Managed, error) {
 		if managed.tunnel != nil {
 			managed.tunnel.Close()
 		}
-		return nil, err
+		return nil, failed(err)
+	}
+	// With Retry the server may not be there yet: nats.go keeps trying and
+	// the connect is announced when it gets through.
+	if nc.IsConnected() {
+		managed.announce(&managed.api, nc)
+	}
+	managed.liveOpts = liveOpts
+	managed.onLiveMoved = func() {
+		if s.onLiveMoved != nil {
+			s.onLiveMoved(cfg.ID)
+		}
+		s.notify()
 	}
 
-	// The system-account connection is optional: a failure is reported, not fatal.
+	// The system account's connection and the subscriptions' need only the
+	// API's to be up; they are dialled side by side.
+	var wg sync.WaitGroup
 	if cfg.SysAuthMethod != "" && cfg.SysAuthMethod != "none" {
-		sysOpts, err := buildSysOptions(cfg)
-		if managed.tunnel != nil && err == nil {
-			sysOpts = append(sysOpts, nats.SetCustomDialer(managed.tunnel))
-		}
-		if err != nil {
-			managed.SysError = err.Error()
-		} else if sysNC, err := nats.Connect(strings.Join(cfg.Servers, ","), sysOpts...); err != nil {
-			managed.SysError = err.Error()
-		} else {
-			managed.SysNC = sysNC
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			managed.dialSystem(cfg, s.notify)
+		}()
 	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		managed.openLive()
+	}()
+	wg.Wait()
 
+	managed.stop = make(chan struct{})
+	go managed.sampleRates(managed.stop)
 	s.mu.Lock()
 	managed.NC = nc
-	managed.ConnectedAt = time.Now()
 	managed.Color = colors[s.colorIdx%len(colors)]
 	s.colorIdx++
 	s.connections[cfg.ID] = managed
@@ -364,6 +529,28 @@ func (s *Store) Connect(cfg Config) (*Managed, error) {
 
 	s.notify()
 	return managed, nil
+}
+
+// dialSystem opens the system account's connection. It is optional: a
+// failure is reported, not fatal.
+func (m *Managed) dialSystem(cfg Config, notify func()) {
+	opts, err := buildSysOptions(cfg, m, notify)
+	if err == nil && m.tunnel != nil {
+		opts = append(opts, nats.SetCustomDialer(m.tunnel))
+	}
+	var nc *nats.Conn
+	if err == nil {
+		nc, err = nats.Connect(strings.Join(cfg.Servers, ","), opts...)
+	}
+	if err != nil {
+		m.SysError = err.Error()
+		m.event(&m.system, "failed", m.SysError)
+		return
+	}
+	m.SysNC = nc
+	if nc.IsConnected() {
+		m.announce(&m.system, nc)
+	}
 }
 
 func (s *Store) Disconnect(connID string) error {
@@ -376,6 +563,14 @@ func (s *Store) Disconnect(connID string) error {
 	delete(s.connections, connID)
 	s.mu.Unlock()
 
+	if managed.stop != nil {
+		close(managed.stop)
+	}
+	const why = "closed in the explorer"
+	managed.closeLive(why)
+	managed.mu.Lock()
+	managed.api.closeNote, managed.system.closeNote = why, why
+	managed.mu.Unlock()
 	if managed.NC != nil {
 		managed.NC.Close()
 	}
@@ -431,6 +626,21 @@ func (s *Store) GetNC(connID string) (*nats.Conn, error) {
 		return nil, fmt.Errorf("not connected")
 	}
 	return m.NC, nil
+}
+
+// GetLiveNC returns the connection the subscriptions run on: their own,
+// also while it reconnects (nats.go subscribes again once it is back), or
+// the API's when the server refused one.
+//
+// A connection without one yet -- its subscriptions were all removed and
+// it was released -- gets it opened here.
+func (s *Store) GetLiveNC(connID string) (*nats.Conn, error) {
+	if m, ok := s.Get(connID); ok {
+		if nc := m.openLive(); nc != nil {
+			return nc, nil
+		}
+	}
+	return s.GetNC(connID)
 }
 
 func (s *Store) All() []*Managed {

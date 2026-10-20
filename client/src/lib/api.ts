@@ -4,6 +4,7 @@ import type {
   Topology,
   CliContextList,
   ConnectionConfig,
+  ConnectionEvent,
   ConnectionStatus,
   ConnectResponse,
   ConsumerCreateInput,
@@ -128,6 +129,8 @@ export const api = {
   /** Switch a live connection to new subject patterns; the feed and history start over. */
   setSubscriptions: (connId: string, subscriptions: string[]) =>
     request<{ success: boolean; status: ConnectionStatus }>(`/connections/${enc(connId)}/subscriptions`, { method: 'PUT', ...json({ subscriptions }) }),
+  /** What happened to the connection's NATS connections, oldest first; kept after a disconnect. */
+  connectionLog: (connId: string) => request<ConnectionEvent[]>(`/connections/${enc(connId)}/log`),
   getServerInfo: (connId: string) => request<ServerInfo>(`/server/${enc(connId)}`),
   clusterOverview: (connId: string) => request<ClusterOverview>(`/cluster/${enc(connId)}/overview`),
   /** Routes, gateways and leaf nodes, as every server reports its side of them. */

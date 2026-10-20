@@ -64,6 +64,9 @@ func TestServerRemoveEverySubscription(t *testing.T) {
 	if got := subjectsOf(); len(got) != 0 {
 		t.Fatalf("subscriptions = %v after removing them all, want none", got)
 	}
+	// Nor is a connection held for them: the explorer's API connection
+	// and this test's are left.
+	waitNumClients(t, ns, 2)
 
 	// Nothing arrives any more.
 	for i := 0; i < 5; i++ {
@@ -84,6 +87,7 @@ func TestServerRemoveEverySubscription(t *testing.T) {
 	if got := subjectsOf(); len(got) != 1 || got[0] != "u.later.>" {
 		t.Fatalf("subscriptions = %v, want the one that was added", got)
 	}
+	waitNumClients(t, ns, 3)
 	nc.Publish("u.later.x", []byte(`{"n":9}`))
 	nc.Flush()
 	deadline = time.Now().Add(5 * time.Second)
@@ -98,4 +102,15 @@ func TestServerRemoveEverySubscription(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatal("nothing arrived through the pattern added after unsubscribing")
+}
+
+func waitNumClients(t *testing.T, ns interface{ NumClients() int }, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for ns.NumClients() != n && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := ns.NumClients(); got != n {
+		t.Fatalf("the server sees %d clients, want %d", got, n)
+	}
 }

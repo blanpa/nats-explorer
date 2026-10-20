@@ -62,7 +62,7 @@ func TestClientFeedBudgets(t *testing.T) {
 	// Per-subject cap.
 	got := 0
 	for i := 0; i < MaxMsgsPerSecondPerSubject+5; i++ {
-		if cl.admit("hot.branch.leaf") {
+		if cl.admit("hot.branch.leaf", 100) {
 			got++
 		}
 	}
@@ -73,22 +73,43 @@ func TestClientFeedBudgets(t *testing.T) {
 	// Repeats yield to first messages once half the client budget is used.
 	cl.resetSecond()
 	for i := 0; i < MaxMsgsPerSecondPerClient/2; i++ {
-		cl.admit("hot.branch.repeat")
+		cl.admit("hot.branch.repeat", 100)
 		cl.perSubject["hot.branch.repeat"] = 1 // stay below the per-subject cap
 	}
-	if cl.admit("hot.branch.repeat") {
+	if cl.admit("hot.branch.repeat", 100) {
 		t.Fatal("repeat must be refused above half the client budget")
 	}
-	if !cl.admit("hot.branch.fresh") {
+	if !cl.admit("hot.branch.fresh", 100) {
 		t.Fatal("first message of a subject must still get through")
 	}
 	cl.sent = MaxMsgsPerSecondPerClient
-	if cl.admit("hot.branch.other") {
+	if cl.admit("hot.branch.other", 100) {
 		t.Fatal("exhausted client budget must refuse")
 	}
 	cl.resetSecond()
-	if cl.sent != 0 || len(cl.perSubject) != 0 || !cl.admit("hot.branch.other") {
+	if cl.sent != 0 || len(cl.perSubject) != 0 || !cl.admit("hot.branch.other", 100) {
 		t.Fatal("resetSecond must start the budgets over")
+	}
+
+	// Bytes: the first message of a second fits whatever its size, the
+	// next large one waits, small first messages of other subjects share
+	// what is left of the first half.
+	cl.resetSecond()
+	if !cl.admit("big.a", 3*MaxBytesPerSecondPerClient) {
+		t.Fatal("the first message of a second must fit the byte budget")
+	}
+	if cl.admit("big.b", 1) {
+		t.Fatal("an exhausted byte budget must refuse")
+	}
+	cl.resetSecond()
+	if !cl.admit("big.a", MaxBytesPerSecondPerClient/2) || cl.admit("big.a", 10) {
+		t.Fatal("repeats must yield once half the byte budget is used")
+	}
+	if !cl.admit("big.b", 10) || cl.admit("big.c", MaxBytesPerSecondPerClient/2) {
+		t.Fatal("first messages share the rest of the byte budget, up to the total")
+	}
+	if cl.sentBytes != MaxBytesPerSecondPerClient/2+10 {
+		t.Fatalf("sentBytes = %d", cl.sentBytes)
 	}
 
 	// Changing the focus discards what was batched for the old one.

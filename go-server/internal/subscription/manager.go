@@ -25,9 +25,15 @@ const (
 	// of a subject per second has priority over repeats, so a wide branch
 	// keeps every subject fresh instead of a few hot ones.
 	MaxMsgsPerSecondPerClient = 2000
-	BatchInterval             = 100 * time.Millisecond
-	TreeUpdateInterval        = 500 * time.Millisecond
-	StatsInterval             = time.Second
+	// MaxBytesPerSecondPerClient bounds the same feed in payload bytes: 2000
+	// messages of half a megabyte are a gigabyte a second, which no tab
+	// renders and a slow one answers by stalling the socket until the write
+	// deadline closes it. The first message of a second always fits, so a
+	// subject with large payloads still shows one.
+	MaxBytesPerSecondPerClient = 2 << 20
+	BatchInterval              = 100 * time.Millisecond
+	TreeUpdateInterval         = 500 * time.Millisecond
+	StatsInterval              = time.Second
 	// rateSamples is how many one-second counts the reported rate averages.
 	rateSamples = 3
 	// shardQueue is the hand-off buffer (in batches) between a subscription's
@@ -71,6 +77,7 @@ type client struct {
 	focus      []string
 	batch      []*message.Record
 	sent       int
+	sentBytes  int
 	perSubject map[string]int
 	view       *clientView
 }
@@ -90,22 +97,27 @@ func (c *client) wants(subject string) bool {
 
 // admit decides whether a message joins the client's feed and charges its
 // budgets. Callers hold c.mu.
-func (c *client) admit(subject string) bool {
+func (c *client) admit(subject string, size int) bool {
 	n := c.perSubject[subject]
 	if n >= MaxMsgsPerSecondPerSubject || c.sent >= MaxMsgsPerSecondPerClient {
 		return false
 	}
-	if n > 0 && c.sent >= MaxMsgsPerSecondPerClient/2 {
+	if c.sent > 0 && c.sentBytes+size > MaxBytesPerSecondPerClient {
+		return false
+	}
+	if n > 0 && (c.sent >= MaxMsgsPerSecondPerClient/2 || c.sentBytes >= MaxBytesPerSecondPerClient/2) {
 		return false
 	}
 	c.perSubject[subject] = n + 1
 	c.sent++
+	c.sentBytes += size
 	return true
 }
 
 // resetSecond starts the budgets over. Callers hold c.mu.
 func (c *client) resetSecond() {
 	c.sent = 0
+	c.sentBytes = 0
 	clear(c.perSubject)
 }
 
@@ -496,7 +508,7 @@ func (m *Manager) process(sh *shard, d delivery) {
 			continue
 		}
 		cl.mu.Lock()
-		if cl.admit(rec.Subject) {
+		if cl.admit(rec.Subject, len(rec.Data)) {
 			cl.batch = append(cl.batch, rec)
 		} else {
 			m.totalThrottled.Add(1)

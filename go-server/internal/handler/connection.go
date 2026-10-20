@@ -138,6 +138,12 @@ func (h *ConnectionHandler) DisconnectAll(w http.ResponseWriter, r *http.Request
 	writeJSON(w, map[string]bool{"success": true})
 }
 
+// Log answers the connection log: what happened to the connection's NATS
+// connections, oldest first, also after it was disconnected.
+func (h *ConnectionHandler) Log(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, h.Store.Log(urlParam(r, "connId")))
+}
+
 func (h *ConnectionHandler) ListConnections(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, VisibleStatuses(h.Store, r))
 }

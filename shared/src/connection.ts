@@ -70,6 +70,21 @@ export interface ConnectionStatus {
   sysError?: string;
   lastError?: string;
   reconnects: number;
+  /** the last time the connection was lost; the reason is the server's when it could be asked (system account or monitoring port) */
+  lastDrop?: { at: number; reason: string; slowConsumer?: boolean /** the subscriptions' connection was lost, the API's stayed up */; live?: boolean };
+  /** times the server closed the connection as a slow consumer: the subscriptions match more than reaches the explorer in time */
+  slowConsumerDrops?: number;
+  /** the subscriptions run on a connection of their own; it is reconnecting, it reconnected this often, or why there is none and they share the API's */
+  liveReconnecting?: boolean;
+  liveReconnects?: number;
+  liveError?: string;
+  /** the live connection dropped liveFlaps times in a row soon after connecting and waits this long before it tries again, as the server sent it */
+  livePauseMs?: number;
+  /** livePauseMs turned into a time of the browser's clock when the status arrived (store) */
+  livePausedUntil?: number;
+  liveFlaps?: number;
+  /** the NATS connections open for it right now: API, subscriptions (live), system account */
+  links?: ConnectionLink[];
   /** an imported support bundle: recorded messages, nothing can be sent */
   bundle?: boolean;
   connectedAt?: number;
@@ -151,4 +166,35 @@ export interface CliContextList {
   available: boolean;
   dir?: string;
   contexts: CliContext[];
+}
+
+/**
+ * One thing that happened to one of a connection's NATS connections, from
+ * the connection log (`GET /api/connections/{id}/log`, oldest first).
+ */
+export interface ConnectionEvent {
+  at: number;
+  /** api, live (the subscriptions') or system */
+  link: 'api' | 'live' | 'system';
+  /**
+   * reason is the server's word on a drop, asked after the reconnect;
+   * retrying a failed reconnect attempt (the first, a new error, every 30th);
+   * lameduck the server going down; discovered the cluster's servers learnt
+   */
+  kind: 'connected' | 'disconnected' | 'retrying' | 'reconnected' | 'reason' | 'error' | 'lameduck' | 'discovered' | 'closed' | 'failed';
+  server?: string;
+  cid?: number;
+  detail?: string;
+}
+
+/** One of the NATS connections behind a connection. */
+export interface ConnectionLink {
+  name: 'api' | 'live' | 'system';
+  connected: boolean;
+  reconnecting: boolean;
+  server?: string;
+  cid?: number;
+  /** when the current connection was made */
+  since?: number;
+  reconnects: number;
 }

@@ -273,8 +273,12 @@ export const useStore = create<AppState>((set, get) => ({
   connections: [],
   connectionsLoaded: false,
   activeConnId: null,
-  setConnections: conns => {
+  setConnections: received => {
     const prev = get();
+    // The pause comes as a duration; the browser counts it down on its own
+    // clock, which need not agree with the server's.
+    const now = Date.now();
+    const conns = received.map(c => (c.livePauseMs ? { ...c, livePausedUntil: now + c.livePauseMs } : c));
     const stillThere = conns.some(c => c.id === prev.activeConnId);
     const activeConnId = stillThere ? prev.activeConnId : (conns.find(c => c.connected)?.id ?? conns[0]?.id ?? null);
 

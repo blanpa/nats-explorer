@@ -229,7 +229,7 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 	// startManager subscribes to the connection's patterns and feeds the
 	// browsers; used on connect and whenever the patterns change.
 	startManager := func(connID string, cfg connection.Config) {
-		nc, err := store.GetNC(connID)
+		nc, err := store.GetLiveNC(connID)
 		if err != nil {
 			return
 		}
@@ -246,6 +246,26 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 		addManager(connID, mgr)
 	}
 
+	// A live connection the server keeps refusing is given up; its
+	// subscriptions move to the API connection, patterns and all.
+	store.SetOnLiveMoved(func(connID string) {
+		subMu.RLock()
+		mgr := subManagers[connID]
+		subMu.RUnlock()
+		nc, err := store.GetNC(connID)
+		if mgr == nil || err != nil {
+			log.Printf("moving the subscriptions of %s: %v", connID, err)
+			return
+		}
+		subjects := store.GetStatus(connID).Subscriptions
+		if len(subjects) == 0 {
+			subjects = []string{">"}
+		}
+		if err := mgr.SetSubjects(nc, subjects); err != nil {
+			log.Printf("moving the subscriptions of %s: %v", connID, err)
+		}
+	})
+
 	connHandler := &handler.ConnectionHandler{
 		Store:          store,
 		OnConnected:    startManager,
@@ -256,7 +276,21 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 			subMu.RLock()
 			mgr := subManagers[connID]
 			subMu.RUnlock()
-			nc, err := store.GetNC(connID)
+			// Nothing subscribed needs no connection of its own: the
+			// patterns go, then the live connection; the next pattern
+			// opens it again. Nor a manager started for it: startManager
+			// reads no patterns as the catch-all of a new connection.
+			if len(cfg.Subscriptions) == 0 {
+				if nc, err := store.GetNC(connID); mgr != nil && err == nil {
+					if err := mgr.SetSubjects(nc, nil); err != nil {
+						log.Printf("changing subscriptions of %s: %v", connID, err)
+						stopManager(connID)
+					}
+				}
+				store.ReleaseLive(connID)
+				return
+			}
+			nc, err := store.GetLiveNC(connID)
 			if mgr == nil || err != nil {
 				stopManager(connID)
 				startManager(connID, cfg)
@@ -488,6 +522,7 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 		})
 		r.Get("/connections", connHandler.ListConnections)
 		r.Put("/connections/{connId}/subscriptions", connHandler.SetSubscriptions)
+		r.Get("/connections/{connId}/log", connHandler.Log)
 		r.Get("/status", connHandler.Status)
 		r.Get("/cluster/{connId}", connHandler.ServerInfo)
 		r.Get("/cluster/{connId}/overview", clusterHandler.Overview)

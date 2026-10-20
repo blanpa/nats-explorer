@@ -30,16 +30,16 @@ func TestConnectRejectsMissingServers(t *testing.T) {
 
 func TestBuildOptionsValidatesAuth(t *testing.T) {
 	m := &Managed{}
-	if _, err := buildOptions(Config{AuthMethod: "nkey"}, m, func() {}); err == nil {
+	if _, err := buildOptions(Config{AuthMethod: "nkey"}, m, &m.api, func() {}); err == nil {
 		t.Error("nkey without seed must fail")
 	}
-	if _, err := buildOptions(Config{AuthMethod: "nkey", NKeySeed: "garbage"}, m, func() {}); err == nil {
+	if _, err := buildOptions(Config{AuthMethod: "nkey", NKeySeed: "garbage"}, m, &m.api, func() {}); err == nil {
 		t.Error("invalid nkey seed must fail")
 	}
-	if _, err := buildOptions(Config{AuthMethod: "jwt"}, m, func() {}); err == nil {
+	if _, err := buildOptions(Config{AuthMethod: "jwt"}, m, &m.api, func() {}); err == nil {
 		t.Error("jwt without creds must fail")
 	}
-	if _, err := buildOptions(Config{AuthMethod: "userpass", User: "u", Pass: "p", TLS: true}, m, func() {}); err != nil {
+	if _, err := buildOptions(Config{AuthMethod: "userpass", User: "u", Pass: "p", TLS: true}, m, &m.api, func() {}); err != nil {
 		t.Errorf("userpass+tls should build: %v", err)
 	}
 }
@@ -105,7 +105,7 @@ func TestTLSConfigFromPEM(t *testing.T) {
 		t.Error("broken key must fail")
 	}
 	// buildOptions wires it in and surfaces the error.
-	if _, err := buildOptions(Config{TLS: true, TLSCA: "garbage"}, &Managed{}, func() {}); err == nil {
+	if _, err := buildOptions(Config{TLS: true, TLSCA: "garbage"}, &Managed{}, &link{}, func() {}); err == nil {
 		t.Error("buildOptions must reject a broken CA")
 	}
 }

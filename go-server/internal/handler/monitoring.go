@@ -4,11 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
-	"net/url"
-	"strconv"
-	"strings"
 	"time"
 
 	"nats-explorer/internal/connection"
@@ -23,38 +19,10 @@ var allowedEndpoints = map[string]bool{
 	"jsz": true, "healthz": true, "accountz": true, "gatewayz": true, "leafz": true,
 }
 
-const defaultMonitoringPort = 8222
-
 // monitoringBaseURL derives the HTTP monitoring endpoint from the connection
-// config: an explicit URL wins, then an explicit port, then 8222 on the host
-// of the first server URL.
+// config; see connection.MonitoringBase.
 func monitoringBaseURL(cfg connection.Config) (string, error) {
-	if cfg.MonitoringURL != "" {
-		return strings.TrimRight(cfg.MonitoringURL, "/"), nil
-	}
-	if len(cfg.Servers) == 0 {
-		return "", fmt.Errorf("no server configured")
-	}
-
-	raw := cfg.Servers[0]
-	if !strings.Contains(raw, "://") {
-		raw = "nats://" + raw
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return "", fmt.Errorf("cannot parse server url: %w", err)
-	}
-	host := u.Hostname()
-	if host == "" {
-		return "", fmt.Errorf("cannot determine host from %q", cfg.Servers[0])
-	}
-
-	port := cfg.MonitoringPort
-	if port == 0 {
-		port = defaultMonitoringPort
-	}
-	scheme := "http"
-	return fmt.Sprintf("%s://%s", scheme, net.JoinHostPort(host, strconv.Itoa(port))), nil
+	return connection.MonitoringBase(cfg)
 }
 
 // Snapshot fetches the monitoring endpoints of a connection as raw JSON, for

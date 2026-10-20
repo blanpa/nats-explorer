@@ -119,6 +119,14 @@ function ConnectionSubscriptions({ conn, showName }: { conn: ConnectionStatus; s
           No subscriptions — this connection receives nothing. Add a pattern below, or <code className="font-mono">&gt;</code> for everything.
         </div>
       )}
+      {/* Being dropped as a slow consumer is fixed here, by subscribing to
+          less, so it is said where the patterns are. */}
+      {conn.slowConsumerDrops ? (
+        <div className="px-2 py-1.5 text-xs text-warn" role="status">
+          The server dropped the connection of these patterns {conn.slowConsumerDrops}× as a slow consumer: these patterns match more than reaches the explorer
+          in time. Narrower patterns keep it connected.
+        </div>
+      ) : null}
       {subs.map(pattern => {
         const st = statOf(pattern);
         const topic = SYSTEM_TOPICS.find(t => t.subject === pattern);
@@ -225,8 +233,9 @@ export default function SubscriptionsPanel() {
   const connections = useStore(s => s.connections);
   const stats = useStore(s => s.subscriptionStats);
   const connected = connections.filter(c => c.connected);
-  // Open by itself only when something other than the catch-all is subscribed.
-  const custom = connected.some(c => (c.subscriptions ?? []).join() !== '>');
+  // Open by itself only when something other than the catch-all is
+  // subscribed, or the patterns are what gets the connection dropped.
+  const custom = connected.some(c => (c.subscriptions ?? []).join() !== '>' || c.slowConsumerDrops);
   const [open, setOpen] = useState<boolean | null>(() => readSetting<boolean | null>(OPEN_KEY, null));
   const isOpen = open ?? custom;
   if (connected.length === 0) return null;
