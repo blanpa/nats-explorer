@@ -89,6 +89,18 @@ nats-explorer/
 - TypeScript/React: function components and hooks, Zustand for shared state, Tailwind classes plus the component classes in `index.css`, Radix UI primitives.
 - UI language: figures in strips rather than tiles, plain empty states, destructive actions quiet until hovered, no success toasts.
 
+## Releasing
+
+A tag `vX.Y.Z` on `main` starts `.github/workflows/release.yml`: it builds the desktop packages, the server binaries and the image, then waits in the `release` environment for a maintainer to approve the run. Only the approved job gets the signing key, signs `SHA256SUMS.txt` (`SHA256SUMS.txt.sig`) and publishes the release; the desktop app's update button installs nothing that is not signed with it, so the approval is the point where a human says "this is ours".
+
+Once per repository:
+
+- **Environment** `release` (*Settings → Environments*) with *Required reviewers* (the maintainers) and *Deployment branches and tags* limited to tags `v*`.
+- **Secret** `UPDATE_SIGNING_KEY` in that environment: the Ed25519 private key in PEM, whose public half is `go-server/internal/update/release-key.pem`. Kept offline as well, in a password manager; without it no release can be installed by the desktop app, and a new key reaches the installed copies only with a version that carries it, installed by hand once.
+- **Tag ruleset** (*Settings → Rules*) for `refs/tags/v*`: creation, update and deletion restricted to the maintainers.
+
+The tools of the release are pinned so that nothing changes under the same name: actions to a commit (the comment names the version), bun and NSIS to a version, appimagetool and the AppImage runtime to a checksum in `scripts/fetch-appimagetool.sh`. A newer version is a change of those lines.
+
 ## Commit messages
 
 Conventional commits are welcome (`feat(server): …`, `fix(client): …`, `ci: …`).

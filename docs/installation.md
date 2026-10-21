@@ -18,6 +18,8 @@ NATS Explorer runs as a desktop application, as a Docker container, or as a stan
 | macOS 11+ | [disk image (.dmg)](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-macos-universal.dmg) · [app bundle (.zip)](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-macos-universal.zip) | Intel and Apple Silicon. Drag to *Applications*. Not notarized: right-click → *Open* on first start, or `xattr -dr com.apple.quarantine "/Applications/NATS Explorer.app"`. |
 | Linux | [AppImage](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-linux-x64.AppImage) · [.deb](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-linux-x64.deb) · [.tar.gz](https://github.com/blanpa/nats-explorer/releases/latest/download/nats-explorer-desktop-linux-x64.tar.gz) | AppImage: `chmod +x` and run. Debian/Ubuntu: `sudo apt install ./nats-explorer-desktop-linux-x64.deb`. Needs webkit2gtk 4.1 (Ubuntu 22.04+, Debian 12+, Fedora 37+). |
 
+Later versions need no new download: when one is out, the status bar offers **Update** and then **Restart**, and the app replaces itself with the signed release ([how]({{ site.baseurl }}{% link features.md %}#updates)). Without internet, *Settings → Updates → Install from files…* takes the package with `SHA256SUMS.txt` and `SHA256SUMS.txt.sig`, brought along from another machine. The `.deb` is the exception and is updated with the package manager like any other.
+
 ### Where the desktop app keeps its data
 
 | | Location |
@@ -51,6 +53,40 @@ docker run -d -p 3002:3002 ghcr.io/blanpa/nats-explorer:latest
 ```
 
 Open `http://localhost:3002` and add your server in the connection dialog. In the web UI, connections and templates live in the browser's local storage unless `STORAGE_DIR` is set (see below).
+
+### Image tags
+
+| Tag | What it is |
+|:-- |:-- |
+| `latest` | The newest release |
+| `0.7` | The newest release of 0.7.x: fixes, nothing that changes behaviour on purpose |
+| `0.7.1` | Exactly this release |
+| `main` | The last merge to `main`, unreleased; it shows as `dev` |
+
+From the first release after 0.6.1 on, the image of a release is built and pushed only after a maintainer approved the release, and signed. Checking the signature:
+
+```bash
+cosign verify ghcr.io/blanpa/nats-explorer:0.7.1 \
+  --certificate-identity-regexp '^https://github.com/blanpa/nats-explorer/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+### Updating a container
+
+A container does not update itself: the status bar says when a newer release is out and how to take it, and the new version comes with the image.
+
+```bash
+# Compose (with docker-compose.standalone.yml: the -f option as above)
+docker compose pull && docker compose up -d
+
+# docker run: pull, then start a new container with the same volume
+docker pull ghcr.io/blanpa/nats-explorer:latest
+
+# Helm
+helm upgrade explorer deploy/helm/nats-explorer -n messaging --reuse-values --set image.tag=0.7.1
+```
+
+What lives in the volume stays: the persistent history (`HISTORY_DB`) and, with `STORAGE_DIR`, connections, templates and preferences -- keep `STORAGE_DIR` on the volume (e.g. `/data/settings`), or they go with the old container. Without it they live in each browser and are not touched. In Kubernetes the same holds for `persistence.enabled`. Connections flagged "Connect when the server starts" open again by themselves after the update. Tools such as Renovate keep a pinned tag up to date through pull requests; giving the explorer access to the Docker socket to replace itself is not offered, since that is root on the host.
 
 ---
 

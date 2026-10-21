@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -11,14 +12,18 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing/fstest"
+	"time"
 
 	"nats-explorer/internal/history"
 	"nats-explorer/internal/settings"
+	"nats-explorer/internal/update"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // "all:" keeps files whose names start with "_", which Vite emits
@@ -47,6 +52,24 @@ func main() {
 		log.Fatalf("settings: %v", err)
 	}
 	log.Printf("NATS Explorer %s: settings in %s (secrets: %s)", version, store.Path(), store.SecretsName())
+	// After a restart into another version, what was open opens again.
+	reopen := takeReopen(storeDir, time.Now())
+	if len(reopen) > 0 {
+		log.Printf("NATS Explorer %s: reopening %d connections open before the restart", version, len(reopen))
+	}
+
+	// The update button closes the window through the Wails runtime, which
+	// only hands out its context once the window is up.
+	updater := update.New(version)
+	var wailsCtx atomic.Pointer[context.Context]
+	updater.Restart = func() {
+		if ctx := wailsCtx.Load(); ctx != nil {
+			wailsruntime.Quit(*ctx)
+		}
+	}
+	if s := updater.Status(); !s.Supported {
+		log.Printf("NATS Explorer %s: no in-app update (%s)", version, s.Reason)
+	}
 
 	// The history is persisted next to the settings and on by default: a
 	// desktop app that loses everything it recorded when it is closed is not
@@ -58,6 +81,8 @@ func main() {
 		historyDB:        filepath.Join(storeDir, "history.db"),
 		historyRetention: history.DefaultRetention,
 		historyOn:        true,
+		updater:          updater,
+		reopen:           reopen,
 	})
 	// wails.Run blocks until the window is closed; the server goes with it.
 	defer app.Close()
@@ -97,9 +122,21 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: loaderFS,
 		},
+		OnStartup: func(ctx context.Context) { wailsCtx.Store(&ctx) },
 	})
 	if err != nil {
 		log.Fatal(err)
+	}
+	// After an update the new version starts once this one has closed the
+	// history database and everything else it holds, and opens what was open.
+	if updater.Relaunching() {
+		if err := noteReopen(storeDir, app.openConnections(), time.Now()); err != nil {
+			log.Printf("update: the open connections cannot be noted: %v", err)
+		}
+	}
+	app.Close()
+	if err := updater.Relaunch(); err != nil {
+		log.Printf("update: starting the new version: %v", err)
 	}
 }
 

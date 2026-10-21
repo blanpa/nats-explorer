@@ -29,7 +29,13 @@ RUN go mod download
 COPY go-server/ ./
 # The UI is built into the binary (embedui), so the image needs no copy of it.
 COPY --from=client-builder /app/client/dist ./frontend/dist
-RUN CGO_ENABLED=0 go build -tags embedui -o nats-explorer .
+# Stamped like the release binaries: the status bar names the version, says
+# when a newer release is out, and links the source of this exact commit.
+# A local build stays "dev".
+ARG VERSION=dev
+ARG COMMIT=
+RUN CGO_ENABLED=0 go build -trimpath -tags embedui \
+    -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" -o nats-explorer .
 
 # Stage 3: Production
 FROM alpine:3.20

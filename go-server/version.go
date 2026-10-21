@@ -38,3 +38,25 @@ func sourceURL() string {
 	}
 	return base
 }
+
+// deployment names what runs this server when it is a container, for the
+// hint that a newer release is out: a container is updated through its
+// image, not in place. Empty for a binary started by hand.
+func deployment() string {
+	return deploymentFrom(os.Getenv, func(p string) bool {
+		_, err := os.Stat(p)
+		return err == nil
+	})
+}
+
+func deploymentFrom(getenv func(string) string, exists func(string) bool) string {
+	switch {
+	case getenv("KUBERNETES_SERVICE_HOST") != "":
+		return "kubernetes"
+	case exists("/.dockerenv"):
+		return "docker"
+	case exists("/run/.containerenv"): // podman
+		return "container"
+	}
+	return ""
+}

@@ -362,7 +362,24 @@ The monitoring URL defaults to port 8222 of the first server and can be set per 
 
 ## Updates
 
-Once a day the explorer asks GitHub's release listing whether a newer release exists -- one request, nothing sent but the request -- and shows it as a link in the status bar. The desktop app has no store to tell it, and a server left running for months has nobody looking. The build is never changed by itself, and the setting switches the question off.
+Once a day the explorer asks GitHub's release listing whether a newer release exists -- one request, nothing sent but the request -- and shows it as a link in the status bar. The desktop app has no store to tell it, and a server left running for months has nobody looking. The setting switches the question off.
+
+The desktop app puts the new release in place itself when asked. **Update** beside the link downloads the one file this installation needs and installs it only when the release's `SHA256SUMS.txt` carries the signature of the release key and the file has the checksum listed there; the checksums alone come from the same place as the files, so whoever could swap one could swap both. Then **Restart for v…** closes the window and opens the new version. A restart ends the live views, so it never happens unasked; the app runs on until then, and starts as the new version next time either way.
+
+| Installation | What is replaced |
+|:-- |:-- |
+| Windows, installer or portable zip | The `.exe`; *Installed apps* shows the new version |
+| macOS | The `.app` bundle where it lies. Not a copy macOS runs from *Downloads*: move it to *Applications* first |
+| Linux AppImage | The AppImage file |
+| Linux `.tar.gz` | The binary |
+
+**What stays.** An update replaces the program and nothing else. Saved connections, request templates, preferences, the credentials in the system keyring and the persistent history live in the settings directory (see [Installation]({{ site.baseurl }}{% link installation.md %})) and are there after the restart as they were. The connections that were open open again by themselves -- the saved ones; one that was never saved exists only in the window that closed. Messages that arrive during the few seconds of the restart are not recorded, and with the persistent history switched off what was kept in memory goes with the window, as on any close.
+
+**Going back.** The version an update replaced is kept next to the installation (hidden, one version), and *Settings → Updates → Back to v…* puts it back, for a release that does not work out; the newer one is kept in its stead, so the same button then goes forward again. It runs from the next start or the restart offered there. The data stays where it is: an older version reads what a newer one wrote as far as it knows it.
+
+**Without internet**, *Settings → Updates → Install from files…* takes the release from a stick instead: the package this installation needs -- the settings name it, e.g. `nats-explorer-desktop-<version>-windows-x64.zip`, the `.zip` and not the installer on Windows and on macOS -- together with `SHA256SUMS.txt` and `SHA256SUMS.txt.sig` of the same release, downloaded on another machine. The checks are those of the download: the signature, the checksum and a version newer than the one running. The package is recognised by its checksum, so a copy renamed on the way is fine. Then the same restart.
+
+A `.deb` belongs to the package manager, a folder the user cannot write to belongs to whoever owns it, and a server, a container or a Helm release to whoever runs it: they keep the link, and its tooltip says why. On a server it says how instead: a container through its image (`docker pull`, then recreate it), a pod through `helm upgrade`, a binary by replacing it ([Updating a container]({{ site.baseurl }}{% link installation.md %}#updating-a-container)). 0.6.1 and older have no button and are updated by hand once. The public half of the release key is [`go-server/internal/update/release-key.pem`](https://github.com/blanpa/nats-explorer/blob/main/go-server/internal/update/release-key.pem); `openssl pkeyutl -verify -rawin -pubin -inkey release-key.pem -in SHA256SUMS.txt -sigfile SHA256SUMS.txt.sig` checks a download by hand.
 
 ## Security
 

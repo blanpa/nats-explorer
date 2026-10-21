@@ -145,12 +145,20 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Every merge to main as :main, a development build: it says "dev" and
+      # links its commit. latest is left to the release workflow, so a pull of
+      # latest is always a released, approved and signed image.
+      - id: stamp
+        run: echo "commit=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: go-server/Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository }}:latest
+          tags: ghcr.io/${{ github.repository }}:main
+          build-args: |
+            VERSION=dev
+            COMMIT=${{ steps.stamp.outputs.commit }}
           provenance: false
           cache-from: type=gha
           cache-to: type=gha,mode=max

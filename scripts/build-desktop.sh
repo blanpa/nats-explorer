@@ -93,7 +93,16 @@ CTRL
     cp build/linux/icon-512.png "$APPDIR/usr/share/icons/hicolor/512x512/apps/$BIN.png"
     ln -sf "usr/bin/$BIN" "$APPDIR/AppRun"
     ln -sf "$BIN.png" "$APPDIR/.DirIcon"
-    APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 appimagetool --no-appstream "$APPDIR" "$OUT/nats-explorer-desktop-$VERSION-linux-x64.AppImage"
+    # The pinned runtime from scripts/fetch-appimagetool.sh, when it lies next
+    # to appimagetool; otherwise appimagetool downloads the newest itself.
+    RUNTIME="${APPIMAGE_RUNTIME:-$(dirname "$(command -v appimagetool)")/appimage-runtime-x86_64}"
+    RUNTIME_ARG=()
+    if [ -f "$RUNTIME" ]; then
+      RUNTIME_ARG=(--runtime-file "$RUNTIME")
+    else
+      echo "no pinned AppImage runtime at $RUNTIME: appimagetool downloads one (see scripts/fetch-appimagetool.sh)" >&2
+    fi
+    APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 appimagetool --no-appstream "${RUNTIME_ARG[@]}" "$APPDIR" "$OUT/nats-explorer-desktop-$VERSION-linux-x64.AppImage"
     ;;
   windows)
     # Cross-compiles from Linux too (no CGO on Windows). -nsis needs makensis on PATH.

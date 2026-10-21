@@ -6,12 +6,14 @@ import { type ApiToken, useAuth, useCanWrite } from '../../lib/auth';
 import { useAsync } from '../../lib/useAsync';
 import { formatBytes, formatDateTime, formatNumber, parseGoDuration } from '../../lib/utils';
 import { useStore } from '../../store';
+import { appInfo } from '../../lib/storage';
 import { setUpdateCheckEnabled, updateCheckEnabled } from '../../lib/updateCheck';
 import { Button } from '../ui/Button';
 import { confirm, Dialog } from '../ui/Dialog';
 import { Checkbox, Field, Input, Select } from '../ui/Input';
 import { Badge, ErrorState, Hint, KeyValueGrid, LoadingState, SectionTitle } from '../ui/misc';
 import { toast } from '../ui/Toast';
+import { DesktopUpdate } from './DesktopUpdate';
 
 /** Retentions offered for the persistent history, as Go durations. */
 const RETENTIONS = [
@@ -312,7 +314,11 @@ function DroppedHint({ dropped, fullText, hasFilter, buffered }: { dropped: numb
   );
 }
 
-/** Whether a newer release is looked for once a day; the one request this app makes on its own. */
+/**
+ * Whether a newer release is looked for once a day, the one request this app
+ * makes on its own; and in the desktop app, a release brought along by hand
+ * and the way back to the version before.
+ */
 function UpdatesSection() {
   const [enabled, setEnabled] = useState(updateCheckEnabled());
   return (
@@ -320,13 +326,14 @@ function UpdatesSection() {
       <SectionTitle>Updates</SectionTitle>
       <Checkbox
         label="Look for a newer release once a day"
-        description="One request to GitHub's release listing, nothing sent but the request. A newer release shows as a link in the status bar; this build is never changed by itself."
+        description="One request to GitHub's release listing, nothing sent but the request. A newer release shows as a link in the status bar. The desktop app offers to put it in place there and restarts into it when told to; it never changes itself unasked."
         checked={enabled}
         onChange={e => {
           setUpdateCheckEnabled(e.target.checked);
           setEnabled(e.target.checked);
         }}
       />
+      {appInfo.mode === 'desktop' && <DesktopUpdate />}
     </section>
   );
 }

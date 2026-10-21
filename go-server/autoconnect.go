@@ -24,10 +24,14 @@ type savedConnection struct {
 // systemTopicSubjects mirrors SYSTEM_TOPICS in the client.
 var systemTopicSubjects = map[string]string{"sys": "$SYS.>", "js": "$JS.>", "kv": "$KV.>", "srv": "$SRV.>"}
 
-// autoConnectSaved opens every saved connection flagged "connect at start".
-// It runs in the background so a slow or unreachable server never delays
-// the start of the UI.
-func autoConnectSaved(store *settings.Store, connect func(cfg connection.Config) error) {
+// autoConnectSaved opens every saved connection flagged "connect at start",
+// and those named in reopen. It runs in the background so a slow or
+// unreachable server never delays the start of the UI.
+func autoConnectSaved(store *settings.Store, reopen []string, connect func(cfg connection.Config) error) {
+	again := map[string]bool{}
+	for _, id := range reopen {
+		again[id] = true
+	}
 	entries, err := store.All()
 	if err != nil {
 		log.Printf("auto-connect: cannot read settings: %v", err)
@@ -43,7 +47,7 @@ func autoConnectSaved(store *settings.Store, connect func(cfg connection.Config)
 		return
 	}
 	for _, sc := range saved {
-		if !sc.AutoConnect {
+		if !sc.AutoConnect && !again[sc.ID] {
 			continue
 		}
 		cfg := sc.Config

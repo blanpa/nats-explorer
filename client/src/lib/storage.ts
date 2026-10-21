@@ -19,6 +19,8 @@ export interface AppInfo {
   source?: string;
   /** a SQLite copy of the history exists; time ranges beyond memory can be queried */
   historyDb?: boolean;
+  /** what runs a server in a container, which is updated through its image */
+  deployment?: 'docker' | 'container' | 'kubernetes';
   historyRetention?: string;
 }
 

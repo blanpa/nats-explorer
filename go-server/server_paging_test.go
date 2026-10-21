@@ -117,14 +117,17 @@ func TestServerBranchAndSearchPaging(t *testing.T) {
 		} `json:"branch"`
 		BranchMore bool `json:"branchMore"`
 	}
+	// All of them recorded first: a cursor taken while the rest still
+	// arrives pages through what was there, and the newer ones lie behind it.
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		api.do("GET", "/api/history?connId=b1&subject=deep.node&limit=1&branchLimit=8", nil, &page)
-		if len(page.Branch) == 8 {
+		api.do("GET", fmt.Sprintf("/api/history?connId=b1&subject=deep.node&limit=1&branchLimit=%d", total), nil, &page)
+		if len(page.Branch) == total {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	api.do("GET", "/api/history?connId=b1&subject=deep.node&limit=1&branchLimit=8", nil, &page)
 	if !page.BranchMore {
 		t.Fatalf("a full branch page must say there is more: %+v", page)
 	}

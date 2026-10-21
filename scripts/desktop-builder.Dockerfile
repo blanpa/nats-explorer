@@ -12,7 +12,8 @@ ARG GO_VERSION=1.26.0
 RUN curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz | tar -C /usr/local -xz
 ENV PATH=/usr/local/go/bin:/root/go/bin:$PATH
 RUN go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
-# appimagetool as a plain binary (no FUSE needed with --appimage-extract-and-run)
-RUN curl -fsSL -o /usr/local/bin/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage \
-    && chmod +x /usr/local/bin/appimagetool
+# appimagetool as a plain binary (no FUSE needed with --appimage-extract-and-run),
+# with the AppImage runtime next to it, both pinned and checked.
+COPY fetch-appimagetool.sh /tmp/fetch-appimagetool.sh
+RUN /tmp/fetch-appimagetool.sh /usr/local/bin && rm /tmp/fetch-appimagetool.sh
 WORKDIR /src

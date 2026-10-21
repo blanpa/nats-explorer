@@ -32,3 +32,32 @@ func TestSourceURL(t *testing.T) {
 		})
 	}
 }
+
+func TestDeployment(t *testing.T) {
+	cases := []struct {
+		name  string
+		env   map[string]string
+		files []string
+		want  string
+	}{
+		{"binary", nil, nil, ""},
+		{"docker", nil, []string{"/.dockerenv"}, "docker"},
+		{"podman", nil, []string{"/run/.containerenv"}, "container"},
+		{"kubernetes wins over the runtime's marker", map[string]string{"KUBERNETES_SERVICE_HOST": "10.0.0.1"}, []string{"/.dockerenv"}, "kubernetes"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := deploymentFrom(func(k string) string { return tc.env[k] }, func(p string) bool {
+				for _, f := range tc.files {
+					if f == p {
+						return true
+					}
+				}
+				return false
+			})
+			if got != tc.want {
+				t.Fatalf("deployment = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

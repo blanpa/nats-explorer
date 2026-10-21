@@ -18,6 +18,29 @@ export interface Release {
   url: string;
 }
 
+/**
+ * Where the desktop app's own update stands (GET /api/update). The backend
+ * fetches the newest release itself, checks the signature over its
+ * checksums and puts it in place; a server, a container or a .deb is not
+ * supported and says why.
+ */
+export interface UpdateStatus {
+  supported: boolean;
+  reason?: string;
+  kind?: 'appimage' | 'tarball' | 'windows' | 'macos';
+  state: 'idle' | 'downloading' | 'ready' | 'failed';
+  /** the release being put in place, or in place */
+  version?: string;
+  /** bytes of the download; total is missing while unknown */
+  done?: number;
+  total?: number;
+  error?: string;
+  /** the release file this installation is updated with; "<version>" stands for the version */
+  asset?: string;
+  /** the version the last update replaced, kept to go back to */
+  previous?: string;
+}
+
 export function updateCheckEnabled(): boolean {
   return readSetting(CHECK_KEY, true);
 }

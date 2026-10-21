@@ -1,8 +1,15 @@
 name: Release
 
-# Builds installers for Windows, macOS and Linux, headless server binaries and
-# the Docker image, then publishes everything as a GitHub release.
+# Builds installers for Windows, macOS and Linux and headless server binaries,
+# then -- once a maintainer approved the run -- publishes them as a GitHub
+# release and the Docker image to ghcr.io, both signed.
 # Trigger: push a tag like v0.2.0, or run manually (artifacts only, no release).
+#
+# What runs here ends up in the release and, through the desktop app's update
+# button, on every machine that installs it. So nothing is fetched that could
+# change under the same name: actions are pinned to a commit (the comment names
+# the version), bun, NSIS and cosign to a version, appimagetool and its runtime
+# to a checksum (scripts/fetch-appimagetool.sh).
 
 on:
   push:
@@ -22,16 +29,16 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: '1.4.3'
       - run: bun install --frozen-lockfile
       - run: bun run --filter shared build
       - run: bun run --filter client typecheck
       - run: bun run --filter client test
       - run: bun run --filter client build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: client-dist
           path: client/dist
@@ -40,14 +47,14 @@ jobs:
     needs: frontend
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: client-dist
           path: client/dist
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go-server/go.mod
           cache-dependency-path: go-server/go.sum
@@ -55,8 +62,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libgtk-3-dev libwebkit2gtk-4.1-dev nsis dpkg-dev file
-          curl -fsSL -o /usr/local/bin/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
-          sudo chmod +x /usr/local/bin/appimagetool
+          scripts/fetch-appimagetool.sh "$RUNNER_TEMP/appimage"
+          echo "$RUNNER_TEMP/appimage" >> "$GITHUB_PATH"
       - run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
       - name: Build Linux packages (AppImage, .deb, tar.gz)
         run: VERSION=${{ github.ref_name }} scripts/build-desktop.sh linux
@@ -64,7 +71,7 @@ jobs:
         run: |
           sudo apt-get install -y --no-install-recommends xvfb
           scripts/smoke-desktop.sh go-server/build/bin/nats-explorer
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-linux
           path: dist/desktop/*
@@ -73,18 +80,18 @@ jobs:
     needs: frontend
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: client-dist
           path: client/dist
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go-server/go.mod
           cache-dependency-path: go-server/go.sum
-      - run: choco install nsis -y --no-progress
+      - run: choco install nsis --version=3.13.0 -y --no-progress
       - run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
       - name: Build Windows installer and portable zip
         shell: bash
@@ -94,7 +101,7 @@ jobs:
       - name: Smoke test the installer (silent install, launch, uninstall)
         shell: pwsh
         run: scripts/smoke-windows.ps1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-windows
           path: dist/desktop/*
@@ -103,14 +110,14 @@ jobs:
     needs: frontend
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: client-dist
           path: client/dist
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go-server/go.mod
           cache-dependency-path: go-server/go.sum
@@ -119,7 +126,7 @@ jobs:
         run: VERSION=${{ github.ref_name }} scripts/build-desktop.sh macos
       - name: Smoke test the app bundle
         run: scripts/smoke-desktop.sh "$(find go-server/build/bin -path '*.app/Contents/MacOS/*' -type f | head -1)"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-macos
           path: dist/desktop/*
@@ -137,12 +144,12 @@ jobs:
           - { goos: darwin,  goarch: amd64, name: macos-x64 }
           - { goos: darwin,  goarch: arm64, name: macos-arm64 }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: client-dist
           path: client/dist
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go-server/go.mod
           cache-dependency-path: go-server/go.sum
@@ -163,57 +170,36 @@ jobs:
           for f in client/dist/assets/*; do
             cmp -s "$f" <(curl -fsS "http://127.0.0.1:3099/assets/$(basename "$f")") || { echo "not served: $f"; exit 1; }
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: server-${{ matrix.name }}
           path: dist/server/*
 
-  docker:
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
-      - uses: docker/build-push-action@v6
-        env:
-          DOCKER_BUILD_RECORD_UPLOAD: 'false'
-        with:
-          context: .
-          file: go-server/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          provenance: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [desktop-linux, desktop-windows, desktop-macos, server, docker]
+    needs: [desktop-linux, desktop-windows, desktop-macos, server]
     runs-on: ubuntu-latest
+    # The signing key is a secret of this environment, not of the repository,
+    # and the environment waits for a maintainer to approve the run: a pushed
+    # tag alone publishes nothing -- no release the desktop app installs by
+    # itself, and no image a `docker pull` of latest picks up.
+    environment: release
+    permissions:
+      contents: write
+      packages: write
+      # cosign signs the image with this run's GitHub identity (keyless).
+      id-token: write
     steps:
       # For CHANGELOG.md; the rest of this job only needs the artifacts.
-      - uses: actions/checkout@v4
-      # Only our packages: the docker job also uploads a build-record artifact
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Only our packages: a Docker build uploads a build-record artifact
       # that is not needed here and made the download step fail.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: artifacts
           pattern: desktop-*
           merge-multiple: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: artifacts
           pattern: server-*
@@ -236,12 +222,80 @@ jobs:
           done
           (cd out && sha256sum * > SHA256SUMS.txt)
           ls -la out
+      # The desktop app's update button installs a release only when its
+      # checksums carry this signature: the checksums alone come from the same
+      # place as the files, so whoever could swap one could swap both. The
+      # public half is go-server/internal/update/release-key.pem; checking
+      # against it here fails a release signed with any other key.
+      - name: Sign the checksums
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          if [ -z "$UPDATE_SIGNING_KEY" ]; then
+            echo "::warning::UPDATE_SIGNING_KEY is not set: the release is not signed, and the desktop app will not install it by itself"
+            exit 0
+          fi
+          key="$RUNNER_TEMP/update-signing-key.pem"
+          (umask 077 && printf '%s\n' "$UPDATE_SIGNING_KEY" > "$key")
+          openssl pkeyutl -sign -rawin -inkey "$key" -in out/SHA256SUMS.txt -out out/SHA256SUMS.txt.sig
+          rm -f "$key"
+          openssl pkeyutl -verify -rawin -pubin -inkey go-server/internal/update/release-key.pem -in out/SHA256SUMS.txt -sigfile out/SHA256SUMS.txt.sig
+      # The image is built here, behind the approval, and stamped with the
+      # version and commit like the binaries, so a container names its version
+      # and says when a newer one is out. latest is the newest release only;
+      # a pre-release gets its own version tag and nothing else.
+      - id: stamp
+        run: echo "commit=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+      - id: image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: 'false'
+        with:
+          context: .
+          file: go-server/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ steps.stamp.outputs.commit }}
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # Signed by digest, which every tag of this release points at. Anyone
+      # can check it (docs/installation.md): the certificate names this
+      # workflow and the tag it ran for.
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v3.0.6'
+      - name: Sign the image
+        env:
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: cosign sign --yes "ghcr.io/${GITHUB_REPOSITORY}@${DIGEST}"
       # The changelog entry of this version becomes the release body; the
       # generated notes (commits, contributors, compare link) follow it.
       - name: Release notes from the changelog
         run: scripts/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
-      - uses: softprops/action-gh-release@v2
+      # A tag with a suffix (v0.7.0-rc.1) is a pre-release: GitHub then keeps
+      # it out of releases/latest, which the desktop app's update asks, so a
+      # candidate reaches only those who install it on purpose.
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
+          prerelease: ${{ contains(github.ref_name, '-') }}
           body_path: ${{ runner.temp }}/notes.md
           generate_release_notes: true
           files: out/*

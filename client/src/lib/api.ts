@@ -43,6 +43,7 @@ import type {
 } from 'shared';
 import { type ApiToken, type AuthInfo, useAuth } from './auth';
 import { serverUrl } from './basePath';
+import type { UpdateStatus } from './updateCheck';
 import { useStore } from '../store';
 
 const BASE_URL = serverUrl('/api');
@@ -246,6 +247,21 @@ export const api = {
 
   /** The nats CLI's contexts on the machine the backend runs on, as connections. */
   listContexts: () => request<CliContextList>('/contexts'),
+
+  // Updating the desktop app in place
+  getUpdate: () => request<UpdateStatus>('/update'),
+  /** Fetches the newest release, checks its signature and puts it in place; it runs from the next start. */
+  startUpdate: () => request<UpdateStatus>('/update', { method: 'POST' }),
+  /** A release brought along, for a machine without internet: the package, SHA256SUMS.txt and its .sig. */
+  installUpdateFiles: (files: File[]) => {
+    const form = new FormData();
+    for (const f of files) form.append('files', f);
+    return request<UpdateStatus>('/update/file', { method: 'POST', body: form });
+  },
+  /** The version the last update replaced, back in place; it runs from the next start. */
+  rollbackUpdate: () => request<UpdateStatus>('/update/rollback', { method: 'POST' }),
+  /** Closes the app and starts the version that was put in place. */
+  restartForUpdate: () => request<{ ok: boolean }>('/update/restart', { method: 'POST' }),
 
   // Personal API tokens, for the scripts and the scrapers.
   listTokens: () => request<{ tokens: ApiToken[]; supported: boolean }>('/tokens'),

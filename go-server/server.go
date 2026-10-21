@@ -24,6 +24,7 @@ import (
 	"nats-explorer/internal/message"
 	"nats-explorer/internal/settings"
 	"nats-explorer/internal/subscription"
+	"nats-explorer/internal/update"
 	"nats-explorer/internal/ws"
 )
 
@@ -95,9 +96,15 @@ type serverConfig struct {
 	oidc *auth.OIDCConfig
 	// open the saved connections flagged for it when the server starts
 	autoConnect bool
+	// reopen names saved connections to open at start besides the flagged
+	// ones: those the desktop app had open when it restarted for an update.
+	reopen []string
 	// basePath mounts everything under a prefix ("/nats"), for a reverse
 	// proxy that does not strip it. Empty serves from the root.
 	basePath string
+	// updater replaces the desktop app with the newest release; nil for a
+	// server, which is updated by whoever runs it.
+	updater *update.Updater
 }
 
 // createServer builds the chi router with the REST API, the websocket feed
@@ -111,6 +118,8 @@ type appServer struct {
 	http.Handler
 	once  sync.Once
 	close func()
+	// openConnections lists the ids of the connections open right now.
+	openConnections func() []string
 }
 
 // Close stops everything the server started. Safe to call more than once.
@@ -445,6 +454,10 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 		writeMetrics(w, store.AllStatuses(), managers, hub.ClientCount(), tee.DB())
 	})
 	// What kind of installation this is, so the UI knows where state lives.
+	runsIn := ""
+	if cfg.mode != "desktop" {
+		runsIn = deployment()
+	}
 	r.Get("/api/app", func(w http.ResponseWriter, req *http.Request) {
 		// `source` is the AGPL offer of source for what is running here; a
 		// modified build points SOURCE_URL at its own repository.
@@ -454,6 +467,9 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 		info := map[string]interface{}{"mode": cfg.mode, "storage": "browser", "version": version, "commit": commit, "source": sourceURL(), "historyDb": db != nil}
 		if db != nil {
 			info["historyRetention"] = db.Retention().String()
+		}
+		if runsIn != "" {
+			info["deployment"] = runsIn
 		}
 		if cfg.settings != nil {
 			info["storage"] = "file"
@@ -625,7 +641,7 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 
 	// Saved connections open after the features attached their hooks.
 	if cfg.settings != nil && cfg.autoConnect {
-		go autoConnectSaved(cfg.settings, func(c connection.Config) error {
+		go autoConnectSaved(cfg.settings, cfg.reopen, func(c connection.Config) error {
 			if _, err := store.Connect(c); err != nil {
 				return err
 			}
@@ -669,7 +685,14 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 	}
 
 	handler := mountUnder(r, cfg.basePath)
-	return &appServer{Handler: handler, close: func() {
+	openConnections := func() []string {
+		var ids []string
+		for _, m := range store.All() {
+			ids = append(ids, m.ID)
+		}
+		return ids
+	}
+	return &appServer{Handler: handler, openConnections: openConnections, close: func() {
 		subMu.Lock()
 		managers := subManagers
 		subManagers = make(map[string]*subscription.Manager)
