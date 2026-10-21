@@ -275,8 +275,13 @@ func (m *Managed) retried(l *link, err error) (int, bool) {
 
 // announce logs the first connect of a link, once: right after the dial,
 // or -- for a connection that keeps trying to reach its server from the
-// start -- when nats.go reports it connected.
+// start -- when nats.go reports it connected. nats.go reports every first
+// connect on a goroutine of its own, so both can come at once; the second
+// waits until the first has written it down, and a connect has been logged
+// by the time it returns, before anything that comes after it.
 func (m *Managed) announce(l *link, nc *nats.Conn) {
+	l.announceMu.Lock()
+	defer l.announceMu.Unlock()
 	m.mu.Lock()
 	if l.announced {
 		m.mu.Unlock()

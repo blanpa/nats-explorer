@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -89,6 +90,8 @@ type link struct {
 	retryErr string
 	// announced: its first connect is logged (announce)
 	announced bool
+	// announceMu makes a second announce wait for the first to be logged
+	announceMu sync.Mutex
 	// closeNote says why the explorer closed it, for the log
 	closeNote string
 
