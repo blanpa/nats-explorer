@@ -40,6 +40,7 @@ Connect to `nats://localhost:4230` in the connection dialog.
 | `bun run test:e2e` | Playwright suite, one file per module in `e2e/` with shared helpers in `support.ts` against `http://localhost:3002` (`NE_URL`, `NATS_URL`, `PW_CHROME`) |
 | `scripts/build-desktop.sh` with `linux`, `windows` or `macos` | Desktop packages for one platform (`--docker` runs Linux and Windows in the builder image) |
 | `scripts/smoke-desktop.sh <binary>` | Launches a desktop build headless and checks API, UI, websocket and settings persistence |
+| `scripts/test-update.sh` | The desktop app's in-app update end to end in the builder image: an old and a new Linux build with a test key, a fake GitHub, update, restart, going back, installing from files, and the releases it has to refuse |
 | `bun run --filter e2e screenshots` | Retakes the screenshots of the README and this site from a known dataset, against an explorer of its own (`NE_URL`, `NATS_URL`, `PW_CHROME`) |
 
 ---
@@ -100,6 +101,8 @@ Once per repository:
 - **Tag ruleset** (*Settings → Rules*) for `refs/tags/v*`: creation, update and deletion restricted to the maintainers.
 
 The tools of the release are pinned so that nothing changes under the same name: actions to a commit (the comment names the version), bun and NSIS to a version, appimagetool and the AppImage runtime to a checksum in `scripts/fetch-appimagetool.sh`. A newer version is a change of those lines.
+
+Before a tag, `scripts/test-update.sh` puts the update through its paces with real packages: an AppImage and a tarball replace themselves, restart and go back, and a release that is unsigned, signed with another key or changed after signing is refused. It signs with a key of its own, never with the release key.
 
 ## Commit messages
 
