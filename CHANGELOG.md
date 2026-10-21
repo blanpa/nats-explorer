@@ -4,6 +4,16 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-21
+
+A release about staying current. The desktop app updates itself from
+releases signed with a key only an approved release job holds, and goes
+back when one does not work out; a container knows its version and says
+how to take the next one; and `latest` is a release again, signed.
+Underneath, the live feed runs on a connection of its own that backs off
+instead of hammering the server, and every connection keeps a log of what
+happened to it.
+
 ### Added
 - **Connection log.** Every connection keeps the last 200 things that happened to its NATS connections -- API, subscriptions and system account: connects with server name, version, cluster, TLS and round trip; drops with uptime, what was received and the rate just before; failed reconnect attempts and how long an outage lasted; the server's reason for a drop with what it sent and how many messages never arrived; lame duck mode, discovered cluster servers, asynchronous errors, failed connects and the close, each with server and client ID. Cluster → Connections shows it per connection, above it the NATS connections the explorer holds for that connection right now (API, live, system) with state, client ID and uptime, also after a disconnect, and downloads it as a `.log` file; `GET /api/connections/{id}/log` answers it, the support bundle carries it as `connection-log.json`, and the server writes the same lines to its output.
 
@@ -303,6 +313,7 @@ The first release that ships as an installable desktop application. Everything b
 
 Initial web UI: subject tree, message detail, JetStream, Key-Value, Object Store, services, monitoring, multi-connection, Docker and cross-compiled server binaries.
 
+[0.7.0]: https://github.com/blanpa/nats-explorer/releases/tag/v0.7.0
 [0.6.1]: https://github.com/blanpa/nats-explorer/releases/tag/v0.6.1
 [0.6.0]: https://github.com/blanpa/nats-explorer/releases/tag/v0.6.0
 [0.5.0]: https://github.com/blanpa/nats-explorer/releases/tag/v0.5.0
