@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	cel.dev/cel-go v0.32.0
 	github.com/coreos/go-oidc/v3 v3.21.0
-	github.com/go-chi/chi/v5 v5.2.5
+	github.com/go-chi/chi/v5 v5.4.0
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/gorilla/websocket v1.5.3
 	github.com/nats-io/nats-server/v2 v2.14.6
