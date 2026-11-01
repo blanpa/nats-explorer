@@ -11,7 +11,7 @@ require (
 	github.com/nats-io/nats-server/v2 v2.14.6
 	github.com/nats-io/nats.go v1.53.1
 	github.com/vmihailenco/msgpack/v5 v5.4.1
-	github.com/wailsapp/wails/v2 v2.11.0
+	github.com/wailsapp/wails/v2 v2.13.0
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/crypto v0.55.0
 	golang.org/x/oauth2 v0.37.0
@@ -21,6 +21,7 @@ require (
 
 require (
 	cel.dev/expr v0.25.1 // indirect
+	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect
 	github.com/antithesishq/antithesis-sdk-go v0.7.2-default-no-op // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
