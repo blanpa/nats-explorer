@@ -1,10 +1,12 @@
+import { appInfo } from './storage';
 import { readSetting, writeSetting } from './utils';
 
 /**
  * Once a day, whether a newer release exists. The desktop app has no store
  * to tell it, and a server left running for months has nobody looking.
  * One request to GitHub's release listing, nothing sent but the request,
- * and a switch in the settings for whoever would rather not.
+ * and a switch in the settings for whoever would rather not. An installation
+ * from Flathub or the Microsoft Store is updated by the store and never asks.
  */
 
 export const RELEASES_URL = 'https://github.com/blanpa/nats-explorer/releases';
@@ -39,6 +41,18 @@ export interface UpdateStatus {
   asset?: string;
   /** the version the last update replaced, kept to go back to */
   previous?: string;
+}
+
+/** The store that updates this installation, when it came from one. */
+export function updatesFrom(): string | null {
+  switch (appInfo.distribution) {
+    case 'flatpak':
+      return 'Flathub';
+    case 'msix':
+      return 'the Microsoft Store';
+    default:
+      return null;
+  }
 }
 
 export function updateCheckEnabled(): boolean {
@@ -78,7 +92,7 @@ interface Cached {
  * The answer is cached for a day, so a tab reloaded all afternoon asks once.
  */
 export async function checkForUpdate(current: string, fetchFn: typeof fetch = fetch, now = Date.now()): Promise<Release | null> {
-  if (!current || current === 'dev' || !updateCheckEnabled()) return null;
+  if (!current || current === 'dev' || updatesFrom() || !updateCheckEnabled()) return null;
   let cached: Cached | null = null;
   try {
     cached = JSON.parse(localStorage.getItem(CACHE_KEY) ?? 'null');

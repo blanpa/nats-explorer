@@ -15,6 +15,11 @@
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSHumanReadableCopyright</key><string>{{.Info.Copyright}}</string>
+  <!-- macOS 15 and later ask before an app reaches hosts on the local
+       network; this is the text of that prompt. A NATS server on the LAN is
+       unreachable when the answer is no. -->
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>NATS Explorer connects to the NATS servers and monitoring endpoints you add, which can be on your local network.</string>
   <!-- The window loads the embedded API over http://127.0.0.1:<port>. -->
   <key>NSAppTransportSecurity</key>
   <dict>

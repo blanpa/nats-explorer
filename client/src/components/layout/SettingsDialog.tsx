@@ -7,7 +7,7 @@ import { useAsync } from '../../lib/useAsync';
 import { formatBytes, formatDateTime, formatNumber, parseGoDuration } from '../../lib/utils';
 import { useStore } from '../../store';
 import { appInfo } from '../../lib/storage';
-import { setUpdateCheckEnabled, updateCheckEnabled } from '../../lib/updateCheck';
+import { setUpdateCheckEnabled, updateCheckEnabled, updatesFrom } from '../../lib/updateCheck';
 import { Button } from '../ui/Button';
 import { confirm, Dialog } from '../ui/Dialog';
 import { Checkbox, Field, Input, Select } from '../ui/Input';
@@ -321,6 +321,15 @@ function DroppedHint({ dropped, fullText, hasFilter, buffered }: { dropped: numb
  */
 function UpdatesSection() {
   const [enabled, setEnabled] = useState(updateCheckEnabled());
+  const store = updatesFrom();
+  if (store) {
+    return (
+      <section className="flex flex-col gap-3">
+        <SectionTitle>Updates</SectionTitle>
+        <p className="text-muted">Installed from {store}, which also brings the updates.</p>
+      </section>
+    );
+  }
   return (
     <section className="flex flex-col gap-3">
       <SectionTitle>Updates</SectionTitle>

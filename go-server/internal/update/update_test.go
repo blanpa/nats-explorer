@@ -60,6 +60,8 @@ func TestDetect(t *testing.T) {
 		{"tarball", "linux", "amd64", "/home/u/bin/nats-explorer", none,
 			Tarball, "/home/u/bin/nats-explorer", "nats-explorer-desktop-0.7.0-linux-x64.tar.gz", ""},
 		{".deb", "linux", "amd64", "/usr/bin/nats-explorer", none, "", "", "", "package manager"},
+		{"Flatpak", "linux", "amd64", "/app/bin/nats-explorer", env(map[string]string{"FLATPAK_ID": "io.github.blanpa.nats-explorer"}), "", "", "", "Flathub"},
+		{"Microsoft Store", "windows", "amd64", `C:\Program Files\WindowsApps\blanpa.NATSExplorer_0.7.0.0_x64__abc\nats-explorer.exe`, none, "", "", "", "Microsoft Store"},
 		{"linux arm", "linux", "arm64", "/home/u/bin/nats-explorer", none, "", "", "", "no desktop build"},
 		{"windows", "windows", "amd64", `C:\Users\u\AppData\Local\Programs\NATS Explorer\NATS Explorer.exe`, none,
 			Windows, `C:\Users\u\AppData\Local\Programs\NATS Explorer\NATS Explorer.exe`, "nats-explorer-desktop-0.7.0-windows-x64.zip", ""},

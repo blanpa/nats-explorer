@@ -23,6 +23,7 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/linux"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -123,6 +124,12 @@ func main() {
 			Assets: loaderFS,
 		},
 		OnStartup: func(ctx context.Context) { wailsCtx.Store(&ctx) },
+		// The window class the desktop entries name in StartupWMClass, so the
+		// dock shows the app's icon also when the binary is started under
+		// another name (the Flatpak's desktop file is named after its app ID).
+		Linux: &linux.Options{
+			ProgramName: "nats-explorer",
+		},
 	})
 	if err != nil {
 		log.Fatal(err)

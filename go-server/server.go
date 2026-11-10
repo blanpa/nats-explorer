@@ -471,6 +471,10 @@ func createServer(staticFS fs.FS, cfg serverConfig) *appServer {
 		if runsIn != "" {
 			info["deployment"] = runsIn
 		}
+		// Installed by a store, which also brings the updates.
+		if d := distribution(); d != "" {
+			info["distribution"] = d
+		}
 		if cfg.settings != nil {
 			info["storage"] = "file"
 			info["configDir"] = cfg.settings.Dir()

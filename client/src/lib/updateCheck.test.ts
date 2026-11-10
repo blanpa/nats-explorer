@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { checkForUpdate, isNewer, setUpdateCheckEnabled } from './updateCheck';
+import { appInfo } from './storage';
+import { checkForUpdate, isNewer, setUpdateCheckEnabled, updatesFrom } from './updateCheck';
 
 const release = (tag: string) =>
   vi.fn(async () => ({
@@ -11,6 +12,7 @@ const release = (tag: string) =>
 beforeEach(() => {
   localStorage.clear();
   setUpdateCheckEnabled(true);
+  appInfo.distribution = undefined;
 });
 
 describe('isNewer', () => {
@@ -24,6 +26,17 @@ describe('isNewer', () => {
 });
 
 describe('checkForUpdate', () => {
+  it('leaves an installation from a store to the store', async () => {
+    const f = release('v9.0.0');
+    appInfo.distribution = 'flatpak';
+    expect(updatesFrom()).toBe('Flathub');
+    expect(await checkForUpdate('0.5.0', f)).toBeNull();
+    appInfo.distribution = 'msix';
+    expect(updatesFrom()).toBe('the Microsoft Store');
+    expect(await checkForUpdate('0.5.0', f)).toBeNull();
+    expect(f).not.toHaveBeenCalled();
+  });
+
   it('names a newer release and keeps quiet about the one running', async () => {
     expect(await checkForUpdate('0.5.0', release('v0.6.0'))).toEqual({ version: '0.6.0', url: 'https://github.com/blanpa/nats-explorer/releases/tag/v0.6.0' });
     localStorage.clear();

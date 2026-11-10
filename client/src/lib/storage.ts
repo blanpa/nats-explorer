@@ -22,6 +22,8 @@ export interface AppInfo {
   /** what runs a server in a container, which is updated through its image */
   deployment?: 'docker' | 'container' | 'kubernetes';
   historyRetention?: string;
+  /** installed from Flathub or the Microsoft Store, which bring the updates */
+  distribution?: 'flatpak' | 'msix';
 }
 
 export const appInfo: AppInfo = { mode: 'server', storage: 'browser', version: 'dev' };

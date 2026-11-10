@@ -5,5 +5,6 @@ Comment=Explore NATS subjects, JetStream, Key-Value, Object Store and monitoring
 Exec=nats-explorer
 Icon=nats-explorer
 Terminal=false
-Categories=Development;Network;
+StartupWMClass=nats-explorer
+Categories=Development;
 Keywords=NATS;JetStream;messaging;MQTT;

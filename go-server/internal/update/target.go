@@ -76,8 +76,17 @@ func Detect(goos, goarch, exe string, getenv func(string) string) (Target, error
 		if exe == "/usr/bin/nats-explorer" {
 			return Target{}, errors.New("installed from the .deb package: the package manager updates it")
 		}
+		// A Flatpak runs from the read-only /app of its sandbox.
+		if getenv("FLATPAK_ID") != "" {
+			return Target{}, errors.New("installed as a Flatpak: Flathub and the software centre update it")
+		}
 		return Target{Kind: Tarball, Path: exe, asset: "nats-explorer-desktop-%s-linux-x64.tar.gz", member: "nats-explorer"}, nil
 	case "windows":
+		// An MSIX package is unpacked below WindowsApps, which only the
+		// system writes to.
+		if strings.Contains(strings.ToLower(exe), `\windowsapps\`) {
+			return Target{}, errors.New("installed from the Microsoft Store: the Store updates it")
+		}
 		return Target{Kind: Windows, Path: exe, asset: "nats-explorer-desktop-%s-windows-x64.zip", member: "nats-explorer.exe"}, nil
 	case "darwin":
 		bundle := appBundle(exe)
