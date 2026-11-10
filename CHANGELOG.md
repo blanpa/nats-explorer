@@ -4,6 +4,15 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-10
+
+A release for the stores. The desktop app is now packaged for Flathub and
+the Microsoft Store as part of every release -- the Flatpak built from
+source the way Flathub builds it, the MSIX installed and started on
+Windows -- and an installation from a store leaves its updates to the
+store instead of replacing itself. A privacy page says what the app
+connects to and what it keeps.
+
 ### Added
 - **Flathub and Microsoft Store packages.** The release builds a Flatpak the way Flathub does -- from source, without network access, on the GNOME 51 runtime -- and smoke-tests it in the sandbox, and it packs an MSIX for the Microsoft Store, which it installs, starts and removes again on the Windows runner. Once the channels are set up, every tag also opens the update pull requests on Flathub and winget; `packaging/README.md` has the one-time steps. The AppStream metadata (`io.github.blanpa.nats-explorer.metainfo.xml`) describes the app for software centres, and a [privacy page](https://blanpa.github.io/nats-explorer/privacy.html) says what the app connects to and keeps.
 - **macOS asks with a reason before the app reaches the local network.** macOS 15 and later ask before an app talks to hosts on the LAN; the prompt now says that NATS Explorer connects to the servers you add.
@@ -320,6 +329,7 @@ The first release that ships as an installable desktop application. Everything b
 
 Initial web UI: subject tree, message detail, JetStream, Key-Value, Object Store, services, monitoring, multi-connection, Docker and cross-compiled server binaries.
 
+[0.7.1]: https://github.com/blanpa/nats-explorer/releases/tag/v0.7.1
 [0.7.0]: https://github.com/blanpa/nats-explorer/releases/tag/v0.7.0
 [0.6.1]: https://github.com/blanpa/nats-explorer/releases/tag/v0.6.1
 [0.6.0]: https://github.com/blanpa/nats-explorer/releases/tag/v0.6.0
