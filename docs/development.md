@@ -41,6 +41,8 @@ Connect to `nats://localhost:4230` in the connection dialog.
 | `scripts/build-desktop.sh` with `linux`, `windows` or `macos` | Desktop packages for one platform (`--docker` runs Linux and Windows in the builder image) |
 | `scripts/smoke-desktop.sh <binary>` | Launches a desktop build headless and checks API, UI, websocket and settings persistence |
 | `scripts/test-update.sh` | The desktop app's in-app update end to end in the builder image: an old and a new Linux build with a test key, a fake GitHub, update, restart, going back, installing from files, and the releases it has to refuse |
+| `scripts/flatpak.sh build` | Flatpak of the working tree, built offline in Flathub's builder image (Docker) and smoke-tested in the sandbox; `scripts/flatpak.sh flathub <tag>` writes the files for the Flathub repository |
+| `scripts/build-msix.ps1` / `scripts/smoke-msix.ps1` | Microsoft Store package from the Windows build, and its install-and-launch test (Windows, elevated) |
 | `bun run --filter e2e screenshots` | Retakes the screenshots of the README and this site from a known dataset, against an explorer of its own (`NE_URL`, `NATS_URL`, `PW_CHROME`) |
 
 ---

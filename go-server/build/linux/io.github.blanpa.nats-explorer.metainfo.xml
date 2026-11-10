@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata: what software centres (GNOME Software, KDE Discover,
+     Flathub) show about the app. The release list is extended by every
+     release commit; scripts/check-packaging.sh (CI) fails when the newest
+     changelog version is missing here. -->
+<component type="desktop-application">
+  <id>io.github.blanpa.nats-explorer</id>
+  <name>NATS Explorer</name>
+  <summary>Browse and manage NATS servers, JetStream and Key-Value stores</summary>
+  <developer id="io.github.blanpa">
+    <name>blanpa</name>
+  </developer>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-or-later</project_license>
+
+  <description>
+    <p>
+      NATS Explorer shows what goes on in a NATS system. Subjects appear as a
+      live tree with the history, a value chart and the decoded payload of each
+      one, and the messages stay available after the window is closed.
+    </p>
+    <ul>
+      <li>JetStream streams and consumers: create, edit, purge, browse messages and follow delivery</li>
+      <li>Key-Value buckets with revisions and Object Stores with uploads and downloads</li>
+      <li>Requests that can be saved, repeated and measured, with latency percentiles</li>
+      <li>Micro services, server and cluster monitoring, leaf nodes and gateways</li>
+      <li>Alerts for subjects that go quiet or carry unexpected values</li>
+      <li>Payloads decoded as JSON, MessagePack, Protobuf or Avro</li>
+    </ul>
+    <p>
+      Connections support user and password, tokens, NKeys, credential files,
+      mutual TLS and SSH bastions. Passwords are kept in the system keyring.
+    </p>
+    <p>
+      NATS is a trademark of the Linux Foundation. This application is not
+      affiliated with or endorsed by the NATS project.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.github.blanpa.nats-explorer.desktop</launchable>
+  <provides>
+    <binary>nats-explorer</binary>
+  </provides>
+
+  <url type="homepage">https://blanpa.github.io/nats-explorer/</url>
+  <url type="bugtracker">https://github.com/blanpa/nats-explorer/issues</url>
+  <url type="vcs-browser">https://github.com/blanpa/nats-explorer</url>
+  <url type="help">https://blanpa.github.io/nats-explorer/features.html</url>
+  <url type="donation">https://github.com/sponsors/blanpa</url>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#a9d1ff</color>
+    <color type="primary" scheme_preference="dark">#1b3a5c</color>
+  </branding>
+
+  <keywords>
+    <keyword>NATS</keyword>
+    <keyword>JetStream</keyword>
+    <keyword>messaging</keyword>
+    <keyword>pub/sub</keyword>
+    <keyword>Key-Value</keyword>
+  </keywords>
+
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+
+  <content_rating type="oars-1.1"/>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>The subject tree with the history, the value chart and the payload of a subject</caption>
+      <image>https://raw.githubusercontent.com/blanpa/nats-explorer/main/docs/screenshots/subjects-dark.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>A stream with its limits, configuration and placement</caption>
+      <image>https://raw.githubusercontent.com/blanpa/nats-explorer/main/docs/screenshots/jetstream-light.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>A Key-Value bucket with a key, its value and its revisions</caption>
+      <image>https://raw.githubusercontent.com/blanpa/nats-explorer/main/docs/screenshots/kv-dark.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>A repeated request with latency percentiles and the histogram of the replies</caption>
+      <image>https://raw.githubusercontent.com/blanpa/nats-explorer/main/docs/screenshots/requests-dark.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Server monitoring with the throughput history</caption>
+      <image>https://raw.githubusercontent.com/blanpa/nats-explorer/main/docs/screenshots/monitoring-dark.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Alerts: what is firing, the rules behind it and the log</caption>
+      <image>https://raw.githubusercontent.com/blanpa/nats-explorer/main/docs/screenshots/alerts-dark.png</image>
+    </screenshot>
+  </screenshots>
+
+  <releases>
+    <release version="0.7.0" date="2026-10-21">
+      <url type="details">https://github.com/blanpa/nats-explorer/releases/tag/v0.7.0</url>
+    </release>
+    <release version="0.6.1" date="2026-10-17">
+      <url type="details">https://github.com/blanpa/nats-explorer/releases/tag/v0.6.1</url>
+    </release>
+    <release version="0.6.0" date="2026-10-13">
+      <url type="details">https://github.com/blanpa/nats-explorer/releases/tag/v0.6.0</url>
+    </release>
+    <release version="0.5.0" date="2026-09-12">
+      <url type="details">https://github.com/blanpa/nats-explorer/releases/tag/v0.5.0</url>
+    </release>
+    <release version="0.4.0" date="2026-09-10">
+      <url type="details">https://github.com/blanpa/nats-explorer/releases/tag/v0.4.0</url>
+    </release>
+    <release version="0.3.0" date="2026-09-08">
+      <url type="details">https://github.com/blanpa/nats-explorer/releases/tag/v0.3.0</url>
+    </release>
+    <release version="0.2.0" date="2026-09-06">
+      <url type="details">https://github.com/blanpa/nats-explorer/releases/tag/v0.2.0</url>
+    </release>
+  </releases>
+</component>

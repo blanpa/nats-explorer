@@ -1,0 +1,75 @@
+# Flatpak manifest of the desktop app, as Flathub builds it: from source,
+# without network access. Everything the build downloads is listed as a
+# source with a checksum; scripts/flatpak.sh writes those lists
+# (go-sources.json, node-sources.json, package-lock.json) next to a copy of
+# this file and fills in the app's own source:
+#
+#   scripts/flatpak.sh build            local test build (Docker), source: the working tree
+#   scripts/flatpak.sh flathub v1.2.3   the files for the Flathub repository, source: the tag
+id: io.github.blanpa.nats-explorer
+runtime: org.gnome.Platform
+runtime-version: '51'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.golang
+  - org.freedesktop.Sdk.Extension.node24
+command: nats-explorer
+finish-args:
+  # NATS servers, the monitoring endpoints and the window's own API on 127.0.0.1
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # Passwords, tokens and keys go to the Secret Service (GNOME Keyring, KWallet)
+  - --talk-name=org.freedesktop.secrets
+  # Exported messages and Object Store downloads land in the download folder
+  - --filesystem=xdg-download
+modules:
+  - name: nats-explorer
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/golang/bin:/usr/lib/sdk/node24/bin
+      env:
+        GOTOOLCHAIN: local
+        # go.sum still verifies every module; the checksum database would
+        # need the network.
+        GOSUMDB: 'off'
+        CGO_ENABLED: '1'
+    build-commands:
+      # The version and commit the UI shows; the commit only when the source is a git checkout.
+      - |
+        sed -n 's/^  "version": "\(.*\)",$/\1/p' client/package.json > .version
+      - git rev-parse --short HEAD > .commit 2>/dev/null || echo "" > .commit
+      # The UI. npm instead of Bun because Flathub's tooling can list npm's
+      # lockfile as offline sources; package-lock.json and the matching
+      # root manifest come from scripts/flatpak.sh.
+      - sed -i 's/"workspace:\*"/"*"/' client/package.json
+      - npm ci --offline --ignore-scripts --no-audit --no-fund --cache "$FLATPAK_BUILDER_BUILDDIR/flatpak-node/npm-cache"
+      - npm run --workspace shared build
+      - npm run --workspace client build
+      - rm -rf go-server/frontend/dist && mkdir -p go-server/frontend && cp -r client/dist go-server/frontend/dist
+      # The Go binary, its modules served from the directory go-sources.json fills.
+      - >-
+        cd go-server &&
+        GOPROXY="file://$FLATPAK_BUILDER_BUILDDIR/goproxy"
+        GOPATH="$FLATPAK_BUILDER_BUILDDIR/gopath"
+        GOCACHE="$FLATPAK_BUILDER_BUILDDIR/gocache"
+        go build -trimpath -tags desktop,production,webkit2_41
+        -ldflags "-s -w -X main.version=$(cat ../.version) -X main.commit=$(cat ../.commit)"
+        -o "$FLATPAK_DEST/bin/nats-explorer" .
+      - install -Dm644 go-server/build/linux/nats-explorer.desktop "$FLATPAK_DEST/share/applications/$FLATPAK_ID.desktop"
+      - desktop-file-edit --set-icon="$FLATPAK_ID" "$FLATPAK_DEST/share/applications/$FLATPAK_ID.desktop"
+      - install -Dm644 go-server/build/logo.svg "$FLATPAK_DEST/share/icons/hicolor/scalable/apps/$FLATPAK_ID.svg"
+      - install -Dm644 go-server/build/linux/icon-512.png "$FLATPAK_DEST/share/icons/hicolor/512x512/apps/$FLATPAK_ID.png"
+      - install -Dm644 "go-server/build/linux/$FLATPAK_ID.metainfo.xml" "$FLATPAK_DEST/share/metainfo/$FLATPAK_ID.metainfo.xml"
+    sources:
+      # @APP_SOURCE@ is replaced by scripts/flatpak.sh
+      - '@APP_SOURCE@'
+      - type: file
+        path: package-lock.json
+      - type: file
+        path: npm-package.json
+        dest-filename: package.json
+      - node-sources.json
+      - go-sources.json

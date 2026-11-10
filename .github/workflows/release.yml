@@ -105,6 +105,23 @@ jobs:
         with:
           name: desktop-windows
           path: dist/desktop/*
+      # The Microsoft Store package. Not part of the GitHub release: it is
+      # unsigned until the Store signs it, so it is uploaded in Partner Center.
+      - name: Build the Store package (MSIX)
+        shell: pwsh
+        env:
+          MSIX_IDENTITY_NAME: ${{ vars.MSIX_IDENTITY_NAME }}
+          MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
+          MSIX_PUBLISHER_DISPLAY_NAME: ${{ vars.MSIX_PUBLISHER_DISPLAY_NAME }}
+        run: scripts/build-msix.ps1 -Version '${{ github.ref_name }}'
+      # Windows PowerShell: the Appx cmdlets do not load in pwsh everywhere.
+      - name: Smoke test the MSIX (install, launch, remove)
+        shell: powershell
+        run: scripts/smoke-msix.ps1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: store-msix
+          path: dist/store/*.msix
 
   desktop-macos:
     needs: frontend
@@ -130,6 +147,24 @@ jobs:
         with:
           name: desktop-macos
           path: dist/desktop/*
+
+  # The Flatpak the way Flathub builds it (from source, offline), then the
+  # desktop smoke test inside the sandbox. Publishing happens in the Flathub
+  # repository, see the flathub job.
+  flatpak:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - name: Build and test the Flatpak
+        run: scripts/flatpak.sh build
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: flatpak
+          path: dist/flatpak/nats-explorer.flatpak
 
   # Headless server (UI served from the same binary's folder) for people who run it on a box.
   server:
@@ -177,7 +212,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [desktop-linux, desktop-windows, desktop-macos, server]
+    needs: [desktop-linux, desktop-windows, desktop-macos, flatpak, server]
     runs-on: ubuntu-latest
     # The signing key is a secret of this environment, not of the repository,
     # and the environment waits for a maintainer to approve the run: a pushed
@@ -299,3 +334,58 @@ jobs:
           body_path: ${{ runner.temp }}/notes.md
           generate_release_notes: true
           files: out/*
+
+  # winget: a pull request to microsoft/winget-pkgs with the new installer.
+  # Needs a first version of blanpa.NATSExplorer there, a fork of winget-pkgs
+  # under the same account, the repository variable WINGET_ENABLED=true and a
+  # classic token with public_repo and workflow scopes as secret WINGET_TOKEN.
+  winget:
+    if: startsWith(github.ref, 'refs/tags/') && vars.WINGET_ENABLED == 'true'
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54 # v2
+        with:
+          identifier: blanpa.NATSExplorer
+          release-tag: ${{ github.ref_name }}
+          installers-regex: 'nats-explorer-desktop-[0-9][^/]*-windows-x64-setup\.exe$'
+          token: ${{ secrets.WINGET_TOKEN }}
+
+  # Flathub: a pull request to flathub/io.github.blanpa.nats-explorer with the
+  # manifest and source lists for the tag; merging it publishes the update.
+  # Needs the app accepted on Flathub, the repository variable
+  # FLATHUB_ENABLED=true and a token that can push branches there as secret
+  # FLATHUB_TOKEN.
+  flathub:
+    if: startsWith(github.ref, 'refs/tags/') && vars.FLATHUB_ENABLED == 'true'
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: flathub/io.github.blanpa.nats-explorer
+          token: ${{ secrets.FLATHUB_TOKEN }}
+          path: flathub
+      - name: Open the update pull request
+        env:
+          GH_TOKEN: ${{ secrets.FLATHUB_TOKEN }}
+        run: |
+          branch="update-${GITHUB_REF_NAME}"
+          cd flathub
+          git checkout -b "$branch"
+          ../scripts/flatpak.sh flathub "$GITHUB_REF_NAME" .
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Update to ${GITHUB_REF_NAME#v}"
+          git push origin "$branch"
+          gh pr create --repo flathub/io.github.blanpa.nats-explorer --head "$branch" \
+            --title "Update to ${GITHUB_REF_NAME#v}" \
+            --body "Release notes: https://github.com/blanpa/nats-explorer/releases/tag/${GITHUB_REF_NAME}"

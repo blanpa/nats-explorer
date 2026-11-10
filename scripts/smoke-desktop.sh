@@ -2,7 +2,8 @@
 # Launches a desktop build, waits until its embedded API answers, checks the UI
 # is served and the websocket upgrades, then stops it. On Linux it runs under
 # Xvfb when no display is available and takes a screenshot if ImageMagick's
-# `import` exists. Usage: scripts/smoke-desktop.sh <path-to-binary> [screenshot.png]
+# `import` exists. EXPECT_DISTRIBUTION=flatpak also checks that the app knows
+# it was installed as one. Usage: scripts/smoke-desktop.sh <path-to-binary> [screenshot.png]
 set -euo pipefail
 BIN="$1"
 SHOT="${2:-}"
@@ -33,6 +34,15 @@ curl -fsS "http://127.0.0.1:$PORT/" | grep -qi '<div id="root"' || { echo "UI no
 code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "http://127.0.0.1:$PORT/ws")
 [ "$code" = 101 ] || { echo "websocket upgrade returned $code" >&2; exit 1; }
 echo "API, UI and websocket OK"
+# A packaged build has to know it is one (it leaves updates to the store).
+if [ -n "${EXPECT_DISTRIBUTION:-}" ]; then
+  curl -fsS "http://127.0.0.1:$PORT/api/app" | grep -q "\"distribution\":\"$EXPECT_DISTRIBUTION\"" \
+    || { echo "not reported as $EXPECT_DISTRIBUTION: $(curl -fsS "http://127.0.0.1:$PORT/api/app")" >&2; exit 1; }
+  # ...and leaves the updates to the store instead of replacing itself.
+  curl -fsS "http://127.0.0.1:$PORT/api/update" | grep -q '"supported":false' \
+    || { echo "offers to update itself: $(curl -fsS "http://127.0.0.1:$PORT/api/update")" >&2; exit 1; }
+  echo "reports itself as $EXPECT_DISTRIBUTION, no self-update"
+fi
 # Every built asset has to come back as itself, not as the index the server
 # falls back to: go:embed without "all:" silently left out files starting with "_".
 if [ -d client/dist/assets ]; then

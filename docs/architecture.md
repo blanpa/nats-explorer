@@ -385,7 +385,7 @@ Allowed endpoints: `varz`, `connz`, `routez`, `subsz`, `jsz`, `healthz`, `accoun
 
 ## Desktop app
 
-`go-server/desktop.go` (build tag `desktop`) embeds `go-server/frontend/dist`, starts the same HTTP/WebSocket server on `127.0.0.1:<random port>` and opens a Wails window whose loader page redirects to it, so the UI code is identical to the browser build. Packaging lives in `scripts/build-desktop.sh` (per platform), `scripts/desktop-builder.Dockerfile` (Linux/Windows build environment) and `go-server/build/` (icon, Linux desktop entry, macOS Info.plist, Windows manifest and NSIS script). Releases are cut by `.github/workflows/release.yml` on `v*` tags.
+`go-server/desktop.go` (build tag `desktop`) embeds `go-server/frontend/dist`, starts the same HTTP/WebSocket server on `127.0.0.1:<random port>` and opens a Wails window whose loader page redirects to it, so the UI code is identical to the browser build. Packaging lives in `scripts/build-desktop.sh` (per platform), `scripts/desktop-builder.Dockerfile` (Linux/Windows build environment) and `go-server/build/` (icon, Linux desktop entry and AppStream metadata, macOS Info.plist, Windows manifest, NSIS script and the MSIX manifest with its logos); `packaging/flatpak/` holds the Flatpak manifest. Releases are cut by `.github/workflows/release.yml` on `v*` tags.
 
 ### Where UI state lives
 

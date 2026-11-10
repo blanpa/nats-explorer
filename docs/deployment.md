@@ -228,12 +228,14 @@ was built from. See [License]({{ site.baseurl }}{% link license.md %}).
 Pushing a `v*` tag runs `.github/workflows/release.yml`:
 
 1. **frontend** -- builds and tests the UI once
-2. **desktop-linux / desktop-windows / desktop-macos** -- build the installers on their native runners and smoke-test them (Linux and macOS: launch under a display and check API, UI and websocket; Windows: silent install, launch, check, uninstall)
-3. **server** -- headless binaries for five OS/arch pairs
-4. **docker** -- image on GHCR tagged with the version
-5. **release** -- GitHub release with every file and `SHA256SUMS.txt`
+2. **desktop-linux / desktop-windows / desktop-macos** -- build the installers on their native runners and smoke-test them (Linux and macOS: launch under a display and check API, UI and websocket; Windows: silent install, launch, check, uninstall). The Windows job also packs the Microsoft Store package (MSIX), installs it with a throwaway signature, starts it and removes it again
+3. **flatpak** -- the Flatpak the way Flathub builds it, from source and offline, then the same smoke test inside the sandbox
+4. **server** -- headless binaries for five OS/arch pairs
+5. **docker** -- image on GHCR tagged with the version
+6. **release** -- GitHub release with every file and `SHA256SUMS.txt`
+7. **winget / flathub** -- pull requests to `microsoft/winget-pkgs` and to the app's Flathub repository, once those channels are set up (repository variables `WINGET_ENABLED` and `FLATHUB_ENABLED`); `packaging/README.md` has the steps
 
-A manual `workflow_dispatch` run produces the artifacts without publishing.
+A manual `workflow_dispatch` run produces the artifacts without publishing. The MSIX is an artifact of the run, not a release file: the Microsoft Store signs it, and it is uploaded in Partner Center.
 
 | File | Platform |
 |:-- |:-- |
