@@ -9,19 +9,26 @@ import ConnectionSwitcher from '../connection/ConnectionSwitcher';
 import { currentLink } from '../../lib/urlSync';
 
 /**
- * A subject tree: a root and the branches under it. The letter it used to
- * be said nothing about the tool -- this is the thing the application
- * shows, and it still reads at 16px in a browser tab.
+ * A message leaving its publisher and spreading out through ">", the
+ * wildcard for everything below a subject and the chevron that opens a
+ * branch of the tree. The drawing of go-server/build/logo.svg without the
+ * fold, which nobody sees at this size. The tile is the ultramarine of the icon
+ * in both themes; the accent is its hue, adjusted until text in it reads.
  */
 function Logo() {
   return (
     <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden>
-      <rect width="32" height="32" rx="7" className="fill-raised" />
-      <g stroke="rgb(var(--accent))" fill="rgb(var(--accent))">
-        <path d="M8 9.25V22.75M8 12.75H15.4M8 22.75H20.4" strokeWidth="2.6" fill="none" strokeLinecap="round" />
-        <circle cx="8" cy="9.25" r="3" strokeWidth="0" />
-        <circle cx="19" cy="12.75" r="3" strokeWidth="0" />
-        <circle cx="24" cy="22.75" r="3" strokeWidth="0" />
+      <defs>
+        <linearGradient id="logo-tile" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#6577ff" />
+          <stop offset="1" stopColor="#2a2ecf" />
+        </linearGradient>
+      </defs>
+      <rect width="32" height="32" rx="7" fill="url(#logo-tile)" />
+      <g fill="none" stroke="#fff" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="7.1" cy="16" r="2.6" fill="#fff" stroke="none" />
+        <path d="M12 11.8 16.2 16 12 20.2" strokeWidth="3" strokeOpacity=".68" />
+        <path d="M17.9 8.2 25.7 16 17.9 23.8" strokeWidth="3.7" />
       </g>
     </svg>
   );

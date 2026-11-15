@@ -44,6 +44,7 @@ Connect to `nats://localhost:4230` in the connection dialog.
 | `scripts/flatpak.sh build` | Flatpak of the working tree, built offline in Flathub's builder image (Docker) and smoke-tested in the sandbox; `scripts/flatpak.sh flathub <tag>` writes the files for the Flathub repository |
 | `scripts/build-msix.ps1` / `scripts/smoke-msix.ps1` | Microsoft Store package from the Windows build, and its install-and-launch test (Windows, elevated) |
 | `bun run --filter e2e screenshots` | Retakes the screenshots of the README and this site from a known dataset, against an explorer of its own (`NE_URL`, `NATS_URL`, `PW_CHROME`) |
+| `bun run --filter e2e icons` | Renders the application icons, the Store logos and the logo of this site from `go-server/build/logo.svg` (`PW_CHROME`) |
 
 ---
 

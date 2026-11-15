@@ -3,7 +3,8 @@
 # with stale AppStream data: the newest released version in CHANGELOG.md has
 # to be listed in the metainfo with the same date. Also validates the
 # metainfo, the desktop entry and the MSIX manifest with the tools that are
-# installed (appstreamcli, desktop-file-validate). Usage: scripts/check-packaging.sh
+# installed (appstreamcli, desktop-file-validate), and checks that the MSIX
+# manifest and the icon are well-formed XML. Usage: scripts/check-packaging.sh
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 METAINFO="$ROOT/go-server/build/linux/io.github.blanpa.nats-explorer.metainfo.xml"
@@ -26,10 +27,13 @@ else:
     elif releases[version] != date:
         errors.append(f'metainfo: release {version} dated {releases[version]}, the changelog says {date}')
 
-try:
-    ET.parse(f'{root}/go-server/build/windows/msix/AppxManifest.xml')
-except ET.ParseError as e:
-    errors.append(f'AppxManifest.xml: {e}')
+# logo.svg is the scalable icon of the Flatpak. librsvg refuses a file that is
+# not well-formed, which a browser still draws: "--" in a comment did that twice.
+for name in ('go-server/build/windows/msix/AppxManifest.xml', 'go-server/build/logo.svg'):
+    try:
+        ET.parse(f'{root}/{name}')
+    except ET.ParseError as e:
+        errors.append(f'{name}: {e}')
 
 for tool, args in (('appstreamcli', ['validate', '--no-net', metainfo]),
                    ('desktop-file-validate', [f'{root}/go-server/build/linux/nats-explorer.desktop'])):

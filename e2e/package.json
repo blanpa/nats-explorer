@@ -7,7 +7,8 @@
   "scripts": {
     "test": "playwright test",
     "test:headed": "playwright test --headed",
-    "screenshots": "node screenshots.mjs"
+    "screenshots": "node screenshots.mjs",
+    "icons": "node icons.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
