@@ -4,6 +4,15 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-11-15
+
+A new face. The logo is a message spreading out through `>` on an
+ultramarine tile, the accent of the interface is that ultramarine in both
+themes, and the rail sorts its twelve modules into four groups. 0.7.1 was
+cut but never published, so this is also the first release to carry what
+is listed under it: the packages for Flathub and the Microsoft Store, and
+store installations that leave their updates to the store.
+
 ### Changed
 - **A new logo.** A message leaving its publisher and spreading out through `>` -- the wildcard for everything below a subject, and the chevron that opens a branch of the tree -- in white on an ultramarine tile. It replaces the subject tree in the header, the favicon, the desktop app icons, the Store logos and on the documentation site. The old one was a dark tile that filled its canvas; the icons for Linux and macOS now leave the margin their icon grids ask for, and the tile holds its own on a dark panel as on a light one. `bun run --filter e2e icons` renders every icon from `go-server/build/logo.svg`, which used to be done by hand.
 - **The accent is the ultramarine of the logo.** Links, primary buttons, selections and chart lines follow it in both themes: `#8a97ff` on the dark surfaces (6.9:1 on a panel) and `#3543de` on the light ones (7.0:1 on white, where the blue it replaces had 4.6:1). Booleans in payloads moved from violet to orchid, so they are as far from the accent as before, and the two connection colours that were taken from the theme moved with it. The screenshots in the README and the documentation are retaken.
@@ -334,6 +343,7 @@ The first release that ships as an installable desktop application. Everything b
 
 Initial web UI: subject tree, message detail, JetStream, Key-Value, Object Store, services, monitoring, multi-connection, Docker and cross-compiled server binaries.
 
+[0.7.2]: https://github.com/blanpa/nats-explorer/releases/tag/v0.7.2
 [0.7.1]: https://github.com/blanpa/nats-explorer/releases/tag/v0.7.1
 [0.7.0]: https://github.com/blanpa/nats-explorer/releases/tag/v0.7.0
 [0.6.1]: https://github.com/blanpa/nats-explorer/releases/tag/v0.6.1
