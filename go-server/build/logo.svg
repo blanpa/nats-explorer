@@ -1,22 +1,25 @@
-<!-- The source every icon is rendered from (e2e/icons.mjs): the application
-     icons, the Windows and Store logos and the one on the documentation
-     site. The header mark and the favicon are the same drawing without the
-     fold, which no one sees at their size.
-
-     A message leaving its publisher and spreading out through ">", the
-     wildcard for everything below a subject: what the application subscribes
-     to, and the chevron that opens a branch of its tree. The tile is
-     ultramarine, and the accent of the interface is its hue, lightened or
-     darkened until text in it reads (client/src/index.css).
-
-     Drawn on a 32 unit grid with the tile from 0.5 to 31.5. The viewBox adds
-     the margin the Linux and macOS icon grids ask for; an icon that fills its
-     canvas (Windows, the documentation site) is this drawing with
-     viewBox="0 0 32 32".
-
-     No two hyphens in a row in here: that is not XML, and librsvg, which
-     draws the icon of the Flatpak, refuses the file a browser still shows. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="-3.5 -3.5 39 39">
+  <!-- The source every icon is rendered from (e2e/icons.mjs): the application
+       icons, the Windows and Store logos and the one on the documentation
+       site. The header mark and the favicon are the same drawing without the
+       fold, which no one sees at their size.
+
+       A message leaving its publisher and spreading out through ">", the
+       wildcard for everything below a subject: what the application subscribes
+       to, and the chevron that opens a branch of its tree. The tile is
+       ultramarine, and the accent of the interface is its hue, lightened or
+       darkened until text in it reads (client/src/index.css).
+
+       Drawn on a 32 unit grid with the tile from 0.5 to 31.5. The viewBox adds
+       the margin the Linux and macOS icon grids ask for; an icon that fills its
+       canvas (Windows, the documentation site) is this drawing with
+       viewBox="0 0 32 32".
+
+       No two hyphens in a row in here, and nothing in front of the root element:
+       the first is not XML, and with the second a reader that tells the file type
+       from its first kilobyte (gdk-pixbuf, and appstream composing the Flatpak
+       with it) no longer finds the tag. Either way a browser still shows the file
+       and the Flatpak has no icon. -->
   <defs>
     <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#6577ff"/>

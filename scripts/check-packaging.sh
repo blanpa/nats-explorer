@@ -27,13 +27,19 @@ else:
     elif releases[version] != date:
         errors.append(f'metainfo: release {version} dated {releases[version]}, the changelog says {date}')
 
-# logo.svg is the scalable icon of the Flatpak. librsvg refuses a file that is
-# not well-formed, which a browser still draws: "--" in a comment did that twice.
+# logo.svg is the scalable icon of the Flatpak, and two things a browser
+# forgives leave the Flatpak without it. librsvg refuses a file that is not
+# well-formed ("--" in a comment did that twice), and appstream tells the file
+# type from its first kilobyte: a long comment in front of the root element
+# pushed the tag out of it, and the build failed with "Unrecognized image file
+# format".
 for name in ('go-server/build/windows/msix/AppxManifest.xml', 'go-server/build/logo.svg'):
     try:
         ET.parse(f'{root}/{name}')
     except ET.ParseError as e:
         errors.append(f'{name}: {e}')
+if b'<svg' not in open(f'{root}/go-server/build/logo.svg', 'rb').read(256):
+    errors.append('logo.svg: the file has to begin with the <svg> tag, put comments inside it')
 
 for tool, args in (('appstreamcli', ['validate', '--no-net', metainfo]),
                    ('desktop-file-validate', [f'{root}/go-server/build/linux/nats-explorer.desktop'])):
