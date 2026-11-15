@@ -4,21 +4,7 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
-## [0.7.2] - 2026-11-15
-
-A new face. The logo is a message spreading out through `>` on an
-ultramarine tile, the accent of the interface is that ultramarine in both
-themes, and the rail sorts its twelve modules into four groups. 0.7.1 was
-cut but never published, so this is also the first release to carry what
-is listed under it: the packages for Flathub and the Microsoft Store, and
-store installations that leave their updates to the store.
-
-### Changed
-- **A new logo.** A message leaving its publisher and spreading out through `>` -- the wildcard for everything below a subject, and the chevron that opens a branch of the tree -- in white on an ultramarine tile. It replaces the subject tree in the header, the favicon, the desktop app icons, the Store logos and on the documentation site. The old one was a dark tile that filled its canvas; the icons for Linux and macOS now leave the margin their icon grids ask for, and the tile holds its own on a dark panel as on a light one. `bun run --filter e2e icons` renders every icon from `go-server/build/logo.svg`, which used to be done by hand.
-- **The accent is the ultramarine of the logo.** Links, primary buttons, selections and chart lines follow it in both themes: `#8a97ff` on the dark surfaces (6.9:1 on a panel) and `#3543de` on the light ones (7.0:1 on white, where the blue it replaces had 4.6:1). Booleans in payloads moved from violet to orchid, so they are as far from the accent as before, and the two connection colours that were taken from the theme moved with it. The screenshots in the README and the documentation are retaken.
-- **The rail is in four groups.** Twelve icons in one column had to be learned by position. They are now grouped by what one is looking for, with a line between the groups: the messages (Subjects, State, Requests, Services), what JetStream keeps (JetStream, Key-Value, Object Store), the servers (Monitoring, Cluster, Events), and Alerts with the Audit log. The command palette lists the modules in the same order. Events carry a megaphone instead of a siren, which said the same as the bell of the alerts beside it.
-
-## [0.7.1] - 2026-11-10
+## [0.7.1] - 2026-11-15
 
 A release for the stores. The desktop app is now packaged for Flathub and
 the Microsoft Store as part of every release -- the Flatpak built from
@@ -26,12 +12,19 @@ source the way Flathub builds it, the MSIX installed and started on
 Windows -- and an installation from a store leaves its updates to the
 store instead of replacing itself. A privacy page says what the app
 connects to and what it keeps.
+The app also has a new face: the logo is a message spreading out through
+`>` on an ultramarine tile, the accent of the interface is that
+ultramarine in both themes, and the rail sorts its twelve modules into
+four groups.
 
 ### Added
 - **Flathub and Microsoft Store packages.** The release builds a Flatpak the way Flathub does -- from source, without network access, on the GNOME 51 runtime -- and smoke-tests it in the sandbox, and it packs an MSIX for the Microsoft Store, which it installs, starts and removes again on the Windows runner. Once the channels are set up, every tag also opens the update pull requests on Flathub and winget; `packaging/README.md` has the one-time steps. The AppStream metadata (`io.github.blanpa.nats-explorer.metainfo.xml`) describes the app for software centres, and a [privacy page](https://blanpa.github.io/nats-explorer/privacy.html) says what the app connects to and keeps.
 - **macOS asks with a reason before the app reaches the local network.** macOS 15 and later ask before an app talks to hosts on the LAN; the prompt now says that NATS Explorer connects to the servers you add.
 
 ### Changed
+- **A new logo.** A message leaving its publisher and spreading out through `>` -- the wildcard for everything below a subject, and the chevron that opens a branch of the tree -- in white on an ultramarine tile. It replaces the subject tree in the header, the favicon, the desktop app icons, the Store logos and on the documentation site. The old one was a dark tile that filled its canvas; the icons for Linux and macOS now leave the margin their icon grids ask for, and the tile holds its own on a dark panel as on a light one. `bun run --filter e2e icons` renders every icon from `go-server/build/logo.svg`, which used to be done by hand.
+- **The accent is the ultramarine of the logo.** Links, primary buttons, selections and chart lines follow it in both themes: `#8a97ff` on the dark surfaces (6.9:1 on a panel) and `#3543de` on the light ones (7.0:1 on white, where the blue it replaces had 4.6:1). Booleans in payloads moved from violet to orchid, so they are as far from the accent as before, and the two connection colours that were taken from the theme moved with it. The screenshots in the README and the documentation are retaken.
+- **The rail is in four groups.** Twelve icons in one column had to be learned by position. They are now grouped by what one is looking for, with a line between the groups: the messages (Subjects, State, Requests, Services), what JetStream keeps (JetStream, Key-Value, Object Store), the servers (Monitoring, Cluster, Events), and Alerts with the Audit log. The command palette lists the modules in the same order. Events carry a megaphone instead of a siren, which said the same as the bell of the alerts beside it.
 - **Store installations leave updates to the store.** The desktop app from Flathub or the Microsoft Store neither looks for new releases on GitHub nor offers to replace itself; the settings say where its updates come from instead. The Linux window carries the class `nats-explorer`, so docks match it to its desktop entry whatever the entry is called.
 
 ## [0.7.0] - 2026-10-21
@@ -343,7 +336,6 @@ The first release that ships as an installable desktop application. Everything b
 
 Initial web UI: subject tree, message detail, JetStream, Key-Value, Object Store, services, monitoring, multi-connection, Docker and cross-compiled server binaries.
 
-[0.7.2]: https://github.com/blanpa/nats-explorer/releases/tag/v0.7.2
 [0.7.1]: https://github.com/blanpa/nats-explorer/releases/tag/v0.7.1
 [0.7.0]: https://github.com/blanpa/nats-explorer/releases/tag/v0.7.0
 [0.6.1]: https://github.com/blanpa/nats-explorer/releases/tag/v0.6.1

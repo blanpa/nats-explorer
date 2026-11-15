@@ -60,13 +60,13 @@ Open `http://localhost:3002` and add your server in the connection dialog. In th
 |:-- |:-- |
 | `latest` | The newest release |
 | `0.7` | The newest release of 0.7.x: fixes, nothing that changes behaviour on purpose |
-| `0.7.2` | Exactly this release |
+| `0.7.1` | Exactly this release |
 | `main` | The last merge to `main`, unreleased; it shows as `dev` |
 
 From the first release after 0.6.1 on, the image of a release is built and pushed only after a maintainer approved the release, and signed. Checking the signature:
 
 ```bash
-cosign verify ghcr.io/blanpa/nats-explorer:0.7.2 \
+cosign verify ghcr.io/blanpa/nats-explorer:0.7.1 \
   --certificate-identity-regexp '^https://github.com/blanpa/nats-explorer/\.github/workflows/release\.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -83,7 +83,7 @@ docker compose pull && docker compose up -d
 docker pull ghcr.io/blanpa/nats-explorer:latest
 
 # Helm
-helm upgrade explorer deploy/helm/nats-explorer -n messaging --reuse-values --set image.tag=0.7.2
+helm upgrade explorer deploy/helm/nats-explorer -n messaging --reuse-values --set image.tag=0.7.1
 ```
 
 What lives in the volume stays: the persistent history (`HISTORY_DB`) and, with `STORAGE_DIR`, connections, templates and preferences -- keep `STORAGE_DIR` on the volume (e.g. `/data/settings`), or they go with the old container. Without it they live in each browser and are not touched. In Kubernetes the same holds for `persistence.enabled`. Connections flagged "Connect when the server starts" open again by themselves after the update. Tools such as Renovate keep a pinned tag up to date through pull requests; giving the explorer access to the Docker socket to replace itself is not offered, since that is root on the host.
