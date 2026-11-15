@@ -14,19 +14,35 @@ export type SplitModule = 'jetstream' | 'kv' | 'objects';
 
 export type Module = 'subjects' | 'state' | 'jetstream' | 'kv' | 'objects' | 'services' | 'requests' | 'events' | 'monitor' | 'cluster' | 'alerts' | 'audit';
 
-export const MODULES: { id: Module; label: string; hasExplorer: boolean }[] = [
-  { id: 'subjects', label: 'Subjects', hasExplorer: true },
-  { id: 'state', label: 'State', hasExplorer: false },
-  { id: 'jetstream', label: 'JetStream', hasExplorer: true },
-  { id: 'kv', label: 'Key-Value', hasExplorer: true },
-  { id: 'objects', label: 'Object Store', hasExplorer: true },
-  { id: 'services', label: 'Services', hasExplorer: true },
-  { id: 'requests', label: 'Requests', hasExplorer: true },
-  { id: 'events', label: 'Events', hasExplorer: false },
-  { id: 'monitor', label: 'Monitoring', hasExplorer: false },
-  { id: 'cluster', label: 'Cluster', hasExplorer: false },
-  { id: 'alerts', label: 'Alerts', hasExplorer: false },
-  { id: 'audit', label: 'Audit log', hasExplorer: false },
+/**
+ * What the modules are about, in the order the rail shows them: the messages
+ * passing through, what JetStream keeps, the servers themselves, and what
+ * watches over both. Twelve icons in one column were a list to be learned by
+ * position; four groups are found by what one is looking for.
+ */
+export type ModuleGroup = 'messages' | 'storage' | 'server' | 'oversight';
+
+export const MODULE_GROUPS: { id: ModuleGroup; label: string }[] = [
+  { id: 'messages', label: 'Messages' },
+  { id: 'storage', label: 'JetStream storage' },
+  { id: 'server', label: 'Servers' },
+  { id: 'oversight', label: 'Alerts and audit' },
+];
+
+/** In rail order; the command palette lists them the same way. */
+export const MODULES: { id: Module; label: string; hasExplorer: boolean; group: ModuleGroup }[] = [
+  { id: 'subjects', label: 'Subjects', hasExplorer: true, group: 'messages' },
+  { id: 'state', label: 'State', hasExplorer: false, group: 'messages' },
+  { id: 'requests', label: 'Requests', hasExplorer: true, group: 'messages' },
+  { id: 'services', label: 'Services', hasExplorer: true, group: 'messages' },
+  { id: 'jetstream', label: 'JetStream', hasExplorer: true, group: 'storage' },
+  { id: 'kv', label: 'Key-Value', hasExplorer: true, group: 'storage' },
+  { id: 'objects', label: 'Object Store', hasExplorer: true, group: 'storage' },
+  { id: 'monitor', label: 'Monitoring', hasExplorer: false, group: 'server' },
+  { id: 'cluster', label: 'Cluster', hasExplorer: false, group: 'server' },
+  { id: 'events', label: 'Events', hasExplorer: false, group: 'server' },
+  { id: 'alerts', label: 'Alerts', hasExplorer: false, group: 'oversight' },
+  { id: 'audit', label: 'Audit log', hasExplorer: false, group: 'oversight' },
 ];
 
 /** How many messages of the selected subject the browser keeps (history + live). */

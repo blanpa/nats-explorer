@@ -105,7 +105,7 @@ any explorer and read like a live connection -- analysis without server access.
 
 | Pane | |
 |:--|:--|
-| **Rail** | the modules: Subjects, State, JetStream, Key-Value, Object Store, Services, Requests, Events, Monitoring, Cluster, Alerts, Audit log |
+| **Rail** | the modules in four groups: the messages (Subjects, State, Requests, Services), what JetStream keeps (JetStream, Key-Value, Object Store), the servers (Monitoring, Cluster, Events), and what watches over them (Alerts, Audit log) |
 | **Explorer** | the tree or list of the current module |
 | **Detail** | messages with JSON, raw and hex views, history, diff and charts; the stream, bucket, store and request editors; the dashboards |
 

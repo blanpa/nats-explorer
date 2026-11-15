@@ -4,6 +4,7 @@ import {
   Bell,
   KeyRound,
   Layers,
+  Megaphone,
   Moon,
   Network,
   Radio,
@@ -12,12 +13,11 @@ import {
   Search,
   Server,
   Settings,
-  Siren,
   Sun,
   Table2,
   type LucideIcon,
 } from 'lucide-react';
-import { MODULES, useStore, type Module } from '../../store';
+import { MODULE_GROUPS, MODULES, useStore, type Module } from '../../store';
 import { unattended, useAlerts, worstSeverity } from '../../store/alerts';
 import { Tooltip } from '../ui/misc';
 import { cn } from '../../lib/utils';
@@ -30,7 +30,9 @@ const ICONS: Record<Module, LucideIcon> = {
   objects: Archive,
   services: Radio,
   requests: Send,
-  events: Siren,
+  // What the servers announce. It was a siren, which sat next to the bell of
+  // the alerts and said the same thing.
+  events: Megaphone,
   monitor: Activity,
   cluster: Server,
   alerts: Bell,
@@ -50,37 +52,47 @@ export default function Rail() {
 
   return (
     <nav className="w-12 shrink-0 flex flex-col items-center py-2 gap-1 bg-canvas border-r border-line overflow-y-auto" aria-label="Modules">
-      {MODULES.map(m => {
-        const Icon = ICONS[m.id];
-        const isActive = module === m.id;
-        return (
-          <Tooltip key={m.id} content={m.label}>
-            <button
-              type="button"
-              onClick={() => setModule(m.id)}
-              aria-label={m.label}
-              aria-current={isActive ? 'page' : undefined}
-              className={cn(
-                'relative w-9 h-9 rounded flex items-center justify-center transition-colors',
-                isActive ? 'bg-accent/15 text-accent' : 'text-muted hover:text-fg hover:bg-field',
-              )}
-            >
-              {isActive && <span className="absolute -left-[6px] top-2 bottom-2 w-0.5 rounded-full bg-accent" />}
-              <Icon size={17} strokeWidth={isActive ? 2.2 : 1.9} />
-              {m.id === 'alerts' && active.length > 0 && (
-                <span
+      {MODULE_GROUPS.map((g, i) => (
+        <div
+          key={g.id}
+          role="group"
+          aria-label={g.label}
+          // The line belongs to the group below it, so the first has none.
+          className={cn('flex flex-col items-center gap-1', i > 0 && 'mt-1 pt-2 border-t border-line')}
+        >
+          {MODULES.filter(m => m.group === g.id).map(m => {
+            const Icon = ICONS[m.id];
+            const isActive = module === m.id;
+            return (
+              <Tooltip key={m.id} content={m.label}>
+                <button
+                  type="button"
+                  onClick={() => setModule(m.id)}
+                  aria-label={m.label}
+                  aria-current={isActive ? 'page' : undefined}
                   className={cn(
-                    'absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full text-2xs font-semibold tabular-nums flex items-center justify-center text-white',
-                    worstSeverity(active) === 'critical' ? 'bg-danger' : 'bg-warn',
+                    'relative w-9 h-9 rounded flex items-center justify-center transition-colors',
+                    isActive ? 'bg-accent/15 text-accent' : 'text-muted hover:text-fg hover:bg-field',
                   )}
                 >
-                  {active.length > 99 ? '99+' : active.length}
-                </span>
-              )}
-            </button>
-          </Tooltip>
-        );
-      })}
+                  {isActive && <span className="absolute -left-[6px] top-2 bottom-2 w-0.5 rounded-full bg-accent" />}
+                  <Icon size={17} strokeWidth={isActive ? 2.2 : 1.9} />
+                  {m.id === 'alerts' && active.length > 0 && (
+                    <span
+                      className={cn(
+                        'absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full text-2xs font-semibold tabular-nums flex items-center justify-center text-white',
+                        worstSeverity(active) === 'critical' ? 'bg-danger' : 'bg-warn',
+                      )}
+                    >
+                      {active.length > 99 ? '99+' : active.length}
+                    </span>
+                  )}
+                </button>
+              </Tooltip>
+            );
+          })}
+        </div>
+      ))}
 
       <div className="flex-1" />
 
