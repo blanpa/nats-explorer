@@ -6,6 +6,7 @@ All notable changes to NATS Explorer. The format follows [Keep a Changelog](http
 
 ### Changed
 - **A new logo.** A message leaving its publisher and spreading out through `>` -- the wildcard for everything below a subject, and the chevron that opens a branch of the tree -- in white on an ultramarine tile. It replaces the subject tree in the header, the favicon, the desktop app icons, the Store logos and on the documentation site. The old one was a dark tile that filled its canvas; the icons for Linux and macOS now leave the margin their icon grids ask for, and the tile holds its own on a dark panel as on a light one. `bun run --filter e2e icons` renders every icon from `go-server/build/logo.svg`, which used to be done by hand.
+- **The accent is the ultramarine of the logo.** Links, primary buttons, selections and chart lines follow it in both themes: `#8a97ff` on the dark surfaces (6.9:1 on a panel) and `#3543de` on the light ones (7.0:1 on white, where the blue it replaces had 4.6:1). Booleans in payloads moved from violet to orchid, so they are as far from the accent as before, and the two connection colours that were taken from the theme moved with it. The screenshots in the README and the documentation are retaken.
 
 ## [0.7.1] - 2026-11-10
 

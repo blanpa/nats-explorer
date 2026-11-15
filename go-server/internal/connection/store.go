@@ -12,7 +12,10 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-var colors = []string{"#2ec4a5", "#5aa9ff", "#e8a06b", "#a7d68b", "#c99cff", "#f5b53f", "#7fd3e6", "#f28fb1"}
+// The colours a connection is told apart by, handed out in turn. The second
+// and the fifth are the accent and syn-bool of the dark theme
+// (client/src/index.css) and move with them.
+var colors = []string{"#2ec4a5", "#8a97ff", "#e8a06b", "#a7d68b", "#eb99ff", "#f5b53f", "#7fd3e6", "#f28fb1"}
 
 type Config struct {
 	ID         string   `json:"id"`

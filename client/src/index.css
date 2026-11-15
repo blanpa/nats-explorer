@@ -49,7 +49,7 @@
   --color-ok: rgb(var(--ok));
   --color-warn: rgb(var(--warn));
   --color-danger: rgb(var(--danger));
-  /* JSON keys are the interface blue, and a null is simply muted text:
+  /* JSON keys are the accent of the interface, and a null is simply muted text:
      two aliases rather than two more colours to keep in step. */
   --color-syn-key: rgb(var(--accent));
   --color-syn-str: rgb(var(--syn-str));
@@ -102,7 +102,7 @@
 
   /* Neutral grey, not blue-grey. The surfaces used to carry a cast that
      grew with lightness -- 36 points between red and blue at fg-faint --
-     which put the interface in competition with its own blue accent. The
+     which put the interface in competition with its own accent. The
      luminance of every step is unchanged, so the contrast ratios are too. */
   --bg-0: 15 15 15;        /* app canvas, rail            */
   --bg-1: 22 22 22;        /* panels                      */
@@ -115,18 +115,21 @@
   --fg-muted: 150 150 150;
   --fg-faint: 128 128 128;   /* 4.6:1 on --bg-1; it is the most used ink */
 
-  /* The interface has one blue, and it is the accent: an "info" badge and a
-     primary button meaning the same colour is a simplification, not a clash.
-     56 degrees from syn-bool, its nearest neighbour. */
-  --accent: 90 169 255;
-  --accent-fg: 6 18 32;
+  /* The interface has one accent, the ultramarine of the logo
+     (go-server/build/logo.svg): an "info" badge and a primary button meaning
+     the same colour is a simplification, not a clash. The tile of the logo
+     itself is too dark for text on these surfaces (4.9:1 on --bg-1), so this
+     is the same hue lightened to 6.9:1. 55 degrees from syn-bool, its nearest
+     neighbour, which moved from violet to orchid to keep that distance. */
+  --accent: 138 151 255;
+  --accent-fg: 9 12 38;
   --ok: 63 207 124;
   --warn: 245 181 63;
   --danger: 242 96 122;
 
   --syn-str: 232 160 107;
   --syn-num: 167 214 139;
-  --syn-bool: 201 156 255;
+  --syn-bool: 235 153 255;
 
   --selection: rgb(var(--accent) / 0.28);
   --scroll-thumb: rgb(255 255 255 / 0.12);
@@ -148,7 +151,9 @@
   --fg-muted: 92 105 121;
   --fg-faint: 102 117 137;
 
-  --accent: 37 118 205;
+  /* 7.0:1 on white and 6.0:1 on --bg-3, where the blue it replaces had 4.6
+     and 4.0. syn-bool is 57 degrees away, as in the dark theme. */
+  --accent: 53 67 222;
   --accent-fg: 255 255 255;
   --ok: 28 133 74;
   --warn: 157 107 14;
@@ -156,7 +161,7 @@
 
   --syn-str: 180 80 29;
   --syn-num: 47 125 50;
-  --syn-bool: 91 63 214;
+  --syn-bool: 162 32 182;
 
   --selection: rgb(var(--accent) / 0.22);
   --scroll-thumb: rgb(0 0 0 / 0.16);
